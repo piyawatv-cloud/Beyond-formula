@@ -123,7 +123,8 @@ begin
       'capabilities',caps,'inputs','{}'::jsonb,'lines','[]'::jsonb,'catalog','[]'::jsonb);
   end if;
   result := jsonb_build_object('contract','cost-v1','projectId',p_project_id,'scenarioId',p_scenario_id,'revision',p_revision,
-    'view',row_data.safe_view,'capabilities',caps,'inputs',row_data.inputs,
+    'view',row_data.safe_view,'capabilities',caps,
+    'inputs',case when r in ('admin','rd','purchasing') then row_data.inputs else '{}'::jsonb end,
     'lines',case when r in ('admin','rd','purchasing') then coalesce(row_data.raw_rm->'lines','[]'::jsonb) else '[]'::jsonb end,
     'catalog','[]'::jsonb);
   if r in ('admin','rd','purchasing') then result := result || jsonb_build_object('rawRM',row_data.raw_rm); end if;

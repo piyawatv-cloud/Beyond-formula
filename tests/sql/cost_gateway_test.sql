@@ -46,6 +46,7 @@ begin
   end if;
   if body->'view'->'rm'->>'adjustedTotal' <> '125' then raise exception 'safe adjusted RM amount missing'; end if;
   if (body->'capabilities'->>'editRM')::boolean then raise exception 'Sales received RM edit capability'; end if;
+  if body->'inputs' <> '{}'::jsonb then raise exception 'Sales received scenario inputs'; end if;
 end $$;
 do $$
 begin
