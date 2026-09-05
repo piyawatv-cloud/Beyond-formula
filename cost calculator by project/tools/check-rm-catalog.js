@@ -132,7 +132,9 @@ function main(){
   const {costParseCatalogRows}=loadParser();
   const parsed=costParseCatalogRows(rows);
 
-  const required=['id','materialId','tierId','vendorId','status','currency','price','priceUnit','moq','moqUnit','increment','incrementUnit','leadTimeDays','validUntil','evidenceRef','specApproved'];
+  // ตัวตนต้องมีเสมอ ส่วนที่เหลือคือข้อมูลเชิงพาณิชย์ที่ขาดได้แต่จะคิดต้นทุนไม่ได้
+  const identity=['id','materialId','tierId','vendorId'];
+  const required=identity.concat(['status','currency','price','priceUnit','moq','moqUnit','increment','incrementUnit','leadTimeDays','validUntil','evidenceRef','specApproved']);
   const lower=header.map(h=>h.toLowerCase());
   const missingColumns=required.filter(name=>!lower.includes(name.toLowerCase()));
   const reasons={};

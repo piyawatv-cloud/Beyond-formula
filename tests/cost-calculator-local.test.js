@@ -377,3 +377,20 @@ test('Sales ไม่เห็นทั้งกลุ่มแคตตาล�
  assert.deepEqual(Array.from(body.catalogGroups),[]);
  assert.deepEqual(Array.from(body.lines),[]);
  assert.ok(!JSON.stringify(body).includes('SYNTHETIC VENDOR'));});
+test('สารที่ข้อมูลไม่ครบยังปรากฏในรายการ แต่เลือกไม่ได้และบอกว่าขาดอะไร',async()=>{const c=fixture();
+ const partial={...tierOffer('O9','M9','สารที่ข้อมูลไม่ครบ',900,5,7)};
+ delete partial.leadTimeDays;delete partial.validUntil;
+ c.loadCostStore().catalog.push(tierOffer('O1','M1','สารครบถ้วน',1850,5,14),partial);
+ await c.costLocalRequest('open',{projectId:'A00001'});
+ const body=await c.costLocalRequest('open',{projectId:'A00001'});
+ const all=body.catalogGroups.flatMap(g=>g.offers);
+ assert.equal(all.length,2,'ต้องยังเห็นทั้งสองตัว ไม่ใช่ซ่อนตัวที่ไม่ครบ');
+ const bad=all.find(o=>o.offerRef==='O9');
+ assert.equal(bad.eligible,false,'ข้อมูลไม่ครบต้องเลือกไม่ได้');
+ assert.ok(bad.missing.includes('Lead Time'));
+ assert.ok(bad.missing.includes('วันหมดอายุราคา'));
+ assert.equal(all.find(o=>o.offerRef==='O1').eligible,true);
+ await assert.rejects(c.costLocalRequest('selectRM',{projectId:'A00001',scenarioId:'S1',expectedRevision:1,offerRef:'O9'})
+   .then(b=>{const line=c.loadCostStore().scenarios.at(-1).scenario.rmLines.at(-1);
+     if(line&&line.offer&&line.offer.id==='O9'&&b.view.rm.baseTotal!==null)throw Error('ไม่ควรคิดต้นทุนได้');
+     throw Error('EXPECTED_NO_COST');}),/EXPECTED_NO_COST/);});
