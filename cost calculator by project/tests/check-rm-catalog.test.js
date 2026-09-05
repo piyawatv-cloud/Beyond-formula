@@ -51,3 +51,40 @@ test('a per-pack price is converted, not read as a per-kilogram price',()=>{
   assert.match(out,/1400 ต่อ 25 kg/);
   assert.match(out,/56 บาท\/กก\./);
 });
+
+// ── xlsx cell reader ──────────────────────────────────────────────────────
+// Excel writes a filled-down formula as a self-closing <f t="shared" si="n"/>.
+// A reader that stops at the first "/>" drops the cached <v> and reports a
+// populated cell as empty, which turns a correct file into a wall of bogus
+// "ขาดข้อมูล" rejections. Regression for that.
+const {readSheet,gridToObjects}=require('../tools/check-rm-catalog.js');
+const sheet=cells=>Buffer.from('<worksheet><sheetData><row r="1">'+cells+'</row></sheetData></worksheet>');
+
+test('a shared-formula cell keeps its cached value',()=>{
+  const rows=readSheet(sheet('<c r="A1" s="1"><f t="shared" si="0"/><v>5.2E-4</v></c>'),[]);
+  assert.equal(rows[0][0],5.2e-4);
+});
+test('a normal formula cell keeps its cached value',()=>{
+  const rows=readSheet(sheet('<c r="A1"><f>130/1000</f><v>0.13</v></c>'),[]);
+  assert.equal(rows[0][0],0.13);
+});
+test('an empty self-closing cell does not swallow the cells after it',()=>{
+  const rows=readSheet(sheet('<c r="A1" s="2"/><c r="B1"><v>7</v></c>'),[]);
+  assert.equal(rows[0][0],undefined);
+  assert.equal(rows[0][1],7);
+});
+test('shared strings, inline strings and column letters resolve correctly',()=>{
+  const rows=readSheet(sheet('<c r="A1" t="s"><v>1</v></c><c r="C1" t="inlineStr"><is><t>สด</t></is></c><c r="AA1"><v>9</v></c>'),['ก','ข']);
+  assert.equal(rows[0][0],'ข');
+  assert.equal(rows[0][2],'สด');
+  assert.equal(rows[0][26],9);
+});
+test('a row of shared-formula cells still maps onto its header',()=>{
+  const xml=Buffer.from('<worksheet><sheetData>'
+    +'<row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c></row>'
+    +'<row r="2"><c r="A2"><v>4</v></c><c r="B2"><f t="shared" si="0"/><v>0.5</v></c></row>'
+    +'</sheetData></worksheet>');
+  const {header,rows}=gridToObjects(readSheet(xml,['price','cost']));
+  assert.deepEqual(header,['price','cost']);
+  assert.equal(rows[0].cost,0.5,'the computed column must not read as blank');
+});

@@ -51,7 +51,7 @@ function readSheet(xml,strings){
   const rows=[];
   for(const rowXml of xml.toString('utf8').match(/<row[ >][\s\S]*?<\/row>/g)||[]){
     const cells=[];
-    for(const cellXml of rowXml.match(/<c[ >][\s\S]*?(?:\/>|<\/c>)/g)||[]){
+    for(const cellXml of rowXml.match(/<c\s[^>]*\/>|<c\s[^>]*>[\s\S]*?<\/c>/g)||[]){
       const ref=(cellXml.match(/r="([A-Z]+\d+)"/)||[])[1]; if(!ref)continue;
       const type=(cellXml.match(/t="([^"]+)"/)||[])[1];
       const inline=cellXml.match(/<is>[\s\S]*?<\/is>/);
@@ -183,4 +183,7 @@ function main(){
     : 'สรุป: ยังไม่ผ่านทั้งหมด แก้ตามสาเหตุด้านบนแล้วรันซ้ำได้');
   console.log('เครื่องมือนี้ไม่ได้ยืนยันว่าราคาถูกต้องตามจริง ตรวจเฉพาะรูปแบบและความครบถ้วน\n');
 }
-try{main();}catch(error){console.error('\nอ่านไฟล์ไม่สำเร็จ: '+error.message+'\n');process.exit(1);}
+module.exports={unzip,sharedStrings,readSheet,readCsv,gridToObjects,loadParser};
+if(require.main===module){
+  try{main();}catch(error){console.error('\nอ่านไฟล์ไม่สำเร็จ: '+error.message+'\n');process.exit(1);}
+}
