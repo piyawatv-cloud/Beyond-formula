@@ -4,7 +4,7 @@
 
 [27-task plan](docs/IMPLEMENTATION_PLAN.md) and [execution evidence](docs/IMPLEMENTATION_EXECUTION.md) are current. User cancelled Notion and authorized local implementation. This worktree contains actual app core/UI and synthetic integration modules; previous handoff/planning entries below are historical.
 
-- Local checks: 97 module tests, 8 calculator browser cases, 37 parent browser cases and required SQL checks passed.
+- Local checks: 97 module tests, 8 calculator browser cases, 37 parent browser cases and required SQL checks passed. SQL now includes the additive cost-gateway migration twice plus projection/patch/outbox checks.
 - Full integration is not complete. Trusted data access/persistence, real RM/PK mapping and confirmation, live policy inputs, human UAT/review and operator deployment remain open.
 - P27 repository-native tracking is complete locally. Other tasks retain evidence-scoped status; no 27/27 delivery claim.
 - Branch: `codex/cost-calculator-implementation`; no Issue/PR/public push or real messages. Git/GitHub remains engineering source of truth; Notion is no longer a dependency.
@@ -116,7 +116,7 @@ Final local verification after changes:
 - Actual-module Node tests: **97 passed / 0 failed** (core 28, UI 23, RM 18, PK 16, workflow 12).
 - Actual calculator browser fixture: **8 passed / 0 failed**, synthetic configuration/identity/network only; desktop layout screenshot inspected.
 - Required parent browser suite `node harness.js`: **37 passed / 0 failed**.
-- Required local SQL suite: **PASS SQL authorization and rollback contract**, exit 0; expected denied-access assertions included. SQL source unchanged.
+- Required local SQL suite: **PASS SQL authorization and rollback contract** plus **PASS cost gateway projection, revision, patch and outbox contract**, exit 0; migration idempotency and expected denied-access assertions included. Production SQL/schema unchanged; migration is committed but not deployed.
 - `git diff --check`: PASS. Plan: 27 unique IDs, relative evidence links resolve, no confidential source reference IDs in 24 inspected project files.
 - Internal independent review: original identified defects closed with focused regression evidence; latest touched review **51/51 PASS**, no new blocking finding within its scope. This is not human final review or live security approval.
 

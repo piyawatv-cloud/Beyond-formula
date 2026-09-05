@@ -16,9 +16,11 @@ Status: LOCAL_IMPLEMENTATION / INTEGRATION_BLOCKED. This is not completion of al
 
 ## What was implemented
 
-The actual single-file app now contains a deterministic cost engine and project calculator page. It compares governed RM offers, maintains draft revisions, accepts an explicit PK snapshot, prepares safe category projections and separates consumption, pre-stock purchase cash and residual exposure. The page preserves unsaved input across search/failure, prevents stale session/project/scenario responses, and separates pending receipts from sent results.
+The actual single-file app now contains a deterministic cost engine and project calculator page. It compares governed RM offers, maintains draft revisions, accepts an explicit PK snapshot, prepares safe category projections and separates consumption, pre-stock purchase cash and residual exposure. The page preserves unsaved input across search/failure, prevents stale session/project/scenario responses, and separates pending receipts from sent results. A deep link requires an authenticated server-issued historical-view capability.
 
 GAS-compatible modules implement RM normalization/confirmation/history/refresh contracts, a synthetic PK adapter, and a synthetic transactional summary/CEO-approval workflow. They depend on trusted adapters deliberately not supplied as fake production services. The new calculator gateway defaults to disabled; raw costs are not inserted into legacy shared Formula records or browser storage.
+
+The approved backend contract is now a local additive migration at `supabase/migrations/20260905140000_cost_gateway_contract.sql`. It stores scenario drafts/outbox/approval shapes in the unexposed `private` schema, exposes role-filtered `fs_cost_open`, patch-only `fs_cost_save`, pending-only `fs_cost_send_summary`, and fail-closed `fs_cost_approve` RPCs. It does not revoke legacy raw-table grants yet because the client/cache transition and real capability model are not complete. The migration has a dedicated synthetic SQL test and is applied twice in the local runner to verify idempotent DDL.
 
 The source review of PU-PK confirmed three relevant files and exact function semantics through the existing editor. No Run, Save, deployment or send command was invoked. Source identifiers remain local-only. See [PK source mapping](PK_SOURCE_MAPPING.md).
 
@@ -45,8 +47,8 @@ The source review of PU-PK confirmed three relevant files and exact function sem
 | P17 | Source field/status mapping with explicit non-mappings | Project/spec/version bridge, validity, commercial confirmation and consumed PK basis |
 | P18 | Synthetic coherent/multi-component PK adapter, immutable candidates | Protected transport, live-source mapping and persistent store in sandbox |
 | P19 | Explicit/idempotent adoption; mismatch/withdrawal checks; RM-only reuse | Trusted currentness/withdrawal notifications and persistent adopted snapshot |
-| P20 | Actual legacy disclosure problem proven; new response allowlists | Coordinated read/patch RPCs, raw-access restriction, old-client/cache transition, role-negative backend tests |
-| P21 | Actual UI + synthetic durable summary/receipt/idempotency protocol | Protected Formula chat endpoint and receipt storage; authorized sandbox recipients |
+| P20 | Additive private cost store, role-filtered RPC projection and patch-only draft write; legacy raw disclosure documented | Coordinated read/patch RPC rollout, revoke raw-access grants after client/cache transition, role-negative backend tests with real capabilities |
+| P21 | Actual UI + synthetic durable summary/receipt/idempotency protocol; SQL outbox contract | Protected Formula chat endpoint/worker and receipt storage; authorized sandbox recipients |
 | P22 | Synthetic server-adapter authority/current-version/immutable approval protocol | Real CEO capability, transactional persistence and current source validity proof |
 | P23 | Focused actual-module/browser tests and internal defect review | Close A01–A10 against integrated system and independent full security review |
 | P24 | [UAT worksheet](UAT_COST_CALCULATOR.md) | Business users execute and accept; not simulated by Codex |
@@ -66,7 +68,7 @@ The source review of PU-PK confirmed three relevant files and exact function sem
 
 Internal independent read-only review found and prompted regression fixes for price denominators, RM scope/withdrawal, PK withdrawal, future confirmation chronology, lost draft input, scenario mismatch, structural line-buffer corruption and repeated approval reference aliasing. These reviews improve local code evidence; they do not replace CODEOWNER approval or live security testing.
 
-Final local results: 97/97 actual-module tests, 8/8 calculator browser cases and 37/37 required parent browser cases passed; required SQL suite passed with exit 0. `git diff --check`, 27-ID tracking and relative-link/source-reference checks passed. See TASK for the exact breakdown. Reproducible commands from worktree root:
+Final local results: 97/97 actual-module tests, 8/8 calculator browser cases and 37/37 required parent browser cases passed; required SQL suite passed with exit 0, including the new gateway migration/projection/patch/outbox checks and idempotent second migration run. `git diff --check`, 27-ID tracking and relative-link/source-reference checks passed. See TASK for the exact breakdown. Reproducible commands from worktree root:
 
 ```sh
 node --test tests/cost-calculator-core.test.js tests/cost-calculator-ui.test.js 'cost calculator by project/tests/rm-data.test.js' 'cost calculator by project/tests/pk-adapter.test.js' 'cost calculator by project/tests/cost-workflow.test.js'
@@ -82,14 +84,14 @@ The browser runner scrubs original configuration, forbids fetch, uses synthetic 
 
 files_changed: `index.html`; four root tests/runner; project `apps_script/{RmData,PkAdapter,CostWorkflow}.gs`; their tests; DESIGN, AGENTS, TASK, implementation plan and linked evidence docs. Earlier requirement documents are preserved in this isolated worktree as planning baseline.
 
-security_impact: new client fail-closed boundary and test-only projections; existing backend confidentiality defect remains open. No secret or production access added.
+security_impact: new client fail-closed boundary plus private-schema role-filtered RPC/projection contract; legacy raw-table access remains open until coordinated transition. No secret or production access added.
 
-database_impact: no SQL schema, migration, production data or locked-key/type change applied. The trusted storage/access migration is proposed, not implemented.
+database_impact: additive SQL migration and synthetic tests only; no production schema/data changed and locked Formula keys/types remain unchanged. The trusted source/real capability migration is not deployed.
 
-permission_impact: no production grant/role/IAM change. Existing `can/requirePerm` gates reused; new business capabilities must be enforced by a real backend before enablement.
+permission_impact: no production grant/role/IAM change. New RPC grants are local migration contract only; existing `can/requirePerm` gates are UI controls and real backend capabilities must be configured before enablement.
 
 dependency_impact: none. Application remains single-file vanilla JavaScript; Node/Chrome/Postgres are existing test tools.
 
 rollback: remove/revert this feature's local changes or revert its eventual feature commit; original checkout is untouched. No production rollback is necessary. Future rollout must retain immutable evidence and never restore broad raw access as a compatibility shortcut.
 
-open_risks: missing trusted persistence/auth/projections; current RM mapper/freshness; PK spec/terms/version bridge and consumption semantics; pending real STD/loss/policy values; unresolved integration audit; real UAT, final review and deployment. This packet must not be labelled 27/27 done or production-ready.
+open_risks: legacy raw-table grant/client transition; missing trusted source/auth/capability adapter; current RM mapper/freshness; PK spec/terms/version bridge and consumption semantics; pending real STD/loss/policy values; unresolved integration audit; real UAT, final review and deployment. This packet must not be labelled 27/27 done or production-ready.

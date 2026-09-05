@@ -22,4 +22,7 @@ PSQL="psql -X -v ON_ERROR_STOP=1 -h $FS_SQL_TMP -p $FS_SQL_PORT -d formula_studi
 $PSQL -f "$FS_SQL_ROOT/tests/sql/bootstrap.sql"
 $PSQL -f "$FS_SQL_ROOT/supabase/schema.sql"
 $PSQL -f "$FS_SQL_ROOT/supabase/schema.sql"
+$PSQL -f "$FS_SQL_ROOT/supabase/migrations/20260905140000_cost_gateway_contract.sql"
+$PSQL -f "$FS_SQL_ROOT/supabase/migrations/20260905140000_cost_gateway_contract.sql"
+$PSQL -f "$FS_SQL_ROOT/tests/sql/cost_gateway_test.sql"
 $PSQL -f "$FS_SQL_ROOT/tests/sql/auth_rls_test.sql"
