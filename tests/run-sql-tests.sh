@@ -1,6 +1,12 @@
 #!/bin/sh
 set -eu
 
+# initdb/postmaster abort with "postmaster became multithreaded during startup"
+# on macOS when the calling shell leaves the locale unset. Pin it so the
+# documented command works from any shell.
+LC_ALL=${LC_ALL:-C}
+export LC_ALL
+
 FS_SQL_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 FS_SQL_TMP=$(mktemp -d "${TMPDIR:-/tmp}/beyond-formula-sql.XXXXXX")
 FS_SQL_PORT=$((50000 + ($$ % 10000)))

@@ -162,4 +162,227 @@ begin; set local role anon; select public.fs_cost_open('A00001','S1',1);
 rollback;
 \set ON_ERROR_STOP on
 
+
+-- ---------------------------------------------------------------------------
+-- Negative contract tests: role/category boundaries, stale revisions, changed
+-- summary content and approval immutability. Synthetic rows only.
+-- ---------------------------------------------------------------------------
+
+insert into auth.users(id,email) values
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','purchasing@example.test'),
+  ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','mkt@example.test')
+on conflict do nothing;
+insert into public.fs_memberships(user_id,name,role,active) values
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','Synthetic Purchasing','purchasing',true),
+  ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','Synthetic Marketing','mkt',true)
+on conflict (user_id) do update set name=excluded.name,role=excluded.role,active=excluded.active;
+
+-- RD may read raw RM but must never receive raw PK or raw Operation, and no
+-- mapped role may claim the historical-view capability the client requires.
+begin;
+set local role authenticated;
+select set_config('request.jwt.claim.sub','99999999-9999-9999-9999-999999999999',true);
+do $$
+declare body jsonb;
+begin
+  body := public.fs_cost_open('A00001','S1',1);
+  if body ? 'rawPK' or body::text like '%PK_SECRET%' then raise exception 'RD received raw PK data'; end if;
+  if body ? 'rawOperation' or body::text like '%FINANCE_SECRET%' then raise exception 'RD received raw Operation data'; end if;
+  if (body->'capabilities'->>'viewRevision')::boolean then raise exception 'RD was granted an unreviewed historical-view capability'; end if;
+  if (body->'capabilities'->>'approveCEO')::boolean then raise exception 'RD was granted CEO approval'; end if;
+end $$;
+commit;
+\echo 'PASS RD denied raw PK and raw Operation'
+
+-- The generic legacy purchasing role cannot express Procurement RM versus
+-- PU-PK separation, so it must receive no raw category at all.
+begin;
+set local role authenticated;
+select set_config('request.jwt.claim.sub','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',true);
+do $$
+declare body jsonb;
+begin
+  body := public.fs_cost_open('A00001','S1',1);
+  if body ? 'rawRM' or body ? 'rawPK' or body ? 'rawOperation' then raise exception 'purchasing received a raw category'; end if;
+  if body::text like '%SUPPLIER_SECRET%' or body::text like '%PK_SECRET%' or body::text like '%FINANCE_SECRET%' then
+    raise exception 'purchasing projection leaked raw source data';
+  end if;
+  if body->'inputs' <> '{}'::jsonb or body->'lines' <> '[]'::jsonb then raise exception 'purchasing received scenario inputs or lines'; end if;
+  if (body->'capabilities'->>'editRM')::boolean or (body->'capabilities'->>'adoptPK')::boolean
+     or (body->'capabilities'->>'sendSummary')::boolean or (body->'capabilities'->>'viewRevision')::boolean then
+    raise exception 'purchasing received an unmapped capability';
+  end if;
+end $$;
+commit;
+\echo 'PASS purchasing denied every raw category'
+
+-- Roles with no reviewed cost mapping fail closed rather than defaulting open.
+begin;
+set local role authenticated;
+select set_config('request.jwt.claim.sub','bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',true);
+do $$
+begin
+  perform public.fs_cost_open('A00001','S1',1);
+  raise exception 'unmapped role opened the cost gateway';
+exception when others then
+  if SQLERRM <> 'COST_PROJECT_ACCESS_DENIED' then raise; end if;
+end $$;
+commit;
+\echo 'PASS unmapped role denied'
+
+-- Sales must not receive the safe projection of a project it does not own, and
+-- must never be handed a historical-view capability.
+begin;
+set local role authenticated;
+select set_config('request.jwt.claim.sub','22222222-2222-2222-2222-222222222222',true);
+do $$
+declare body jsonb;
+begin
+  body := public.fs_cost_open('A00001','S1',1);
+  if (body->'capabilities'->>'viewRevision')::boolean then raise exception 'Sales was granted a historical-view capability'; end if;
+  if body->'view' ? 'baseTotal' or body->'view'->'rm' ? 'baseTotal' then raise exception 'Sales projection carried a base cost field'; end if;
+end $$;
+commit;
+\echo 'PASS Sales denied historical-view capability and base cost'
+
+-- A non-admin cannot remove the gateway flag to reach the default-deny branch
+-- from the other direction either.
+begin;
+set local role authenticated;
+select set_config('request.jwt.claim.sub','99999999-9999-9999-9999-999999999999',true);
+-- The delete policy filters the row out before the guard trigger can fire, so
+-- assert the surviving state rather than a specific error.
+do $$
+begin
+  delete from public.fs_meta where key='cost_gateway_enabled';
+  if not exists (select 1 from public.fs_meta where key='cost_gateway_enabled' and value->>'enabled'='true') then
+    raise exception 'non-admin removed the gateway flag';
+  end if;
+end $$;
+commit;
+\echo 'PASS non-admin cannot remove gateway flag'
+
+-- Editing an outdated revision must be refused explicitly, not collide on the
+-- primary key and reach the client as a generic retryable failure.
+-- Build the newer revision in its own committed transaction. The earlier block
+-- deliberately raises inside its transaction, so its revisions are rolled back
+-- and cannot be relied on here.
+begin;
+set local role authenticated;
+select set_config('request.jwt.claim.sub','99999999-9999-9999-9999-999999999999',true);
+select public.fs_cost_save('A00001','S1',1,'{"sellingUnits":3000}'::jsonb);
+commit;
+
+begin;
+set local role authenticated;
+select set_config('request.jwt.claim.sub','99999999-9999-9999-9999-999999999999',true);
+do $$
+begin
+  perform public.fs_cost_save('A00001','S1',1,'{"sellingUnits":4242}'::jsonb);
+  raise exception 'stale revision edit was accepted';
+exception when others then
+  if SQLERRM <> 'COST_STALE_REVISION' then raise; end if;
+end $$;
+do $$
+begin
+  perform public.fs_cost_save('A00001','S1',99,'{"sellingUnits":4242}'::jsonb);
+  raise exception 'edit against a missing revision was accepted';
+exception when others then
+  if SQLERRM <> 'COST_STALE_REVISION' then raise; end if;
+end $$;
+do $$
+declare body jsonb;
+begin
+  body := public.fs_cost_open('A00001','S1',2);
+  if body->'inputs'->>'sellingUnits' <> '3000' then raise exception 'refused stale edit still changed the current revision'; end if;
+end $$;
+-- The private scenario store itself stays unreadable to the authenticated role;
+-- only the projection RPCs may reach it.
+do $$
+begin
+  perform 1 from private.fs_cost_scenarios;
+  raise exception 'authenticated role read the private scenario store directly';
+exception when insufficient_privilege then
+  null;
+end $$;
+commit;
+-- Fork check runs as the owner, because authenticated cannot read the store.
+do $$
+begin
+  if exists (select 1 from private.fs_cost_scenarios where project_id='A00001' and scenario_id='S1' and revision>2) then
+    raise exception 'refused stale edit still forked a new revision';
+  end if;
+end $$;
+\echo 'PASS stale revision edit rejected without forking history'
+\echo 'PASS private cost store unreadable to authenticated role'
+
+-- Reusing one idempotency key for different content must conflict instead of
+-- silently returning the earlier receipt for the newer revision.
+begin;
+set local role authenticated;
+select set_config('request.jwt.claim.sub','99999999-9999-9999-9999-999999999999',true);
+do $$
+begin
+  perform public.fs_cost_send_summary('A00001','S1',2,'A00001:S1:1:summary');
+  raise exception 'changed summary content reused an existing idempotency key';
+exception when others then
+  if SQLERRM <> 'COST_SUMMARY_IDEMPOTENCY_CONFLICT' then raise; end if;
+end $$;
+do $$
+declare body jsonb;
+begin
+  body := public.fs_cost_send_summary('A00001','S1',2,'A00001:S1:2:summary');
+  if body->>'status' <> 'pending' or body->>'receiptId' is not null then raise exception 'a queued summary was reported as delivered'; end if;
+end $$;
+commit;
+\echo 'PASS summary idempotency conflict and pending receipt contract'
+
+-- CEO approval stays fail-closed for every currently mapped role.
+begin;
+set local role authenticated;
+select set_config('request.jwt.claim.sub','99999999-9999-9999-9999-999999999999',true);
+do $$
+begin
+  perform public.fs_cost_approve('A00001','S1',1);
+  raise exception 'CEO approval endpoint was reachable';
+exception when others then
+  if SQLERRM <> 'CEO_AUTHORITY_NOT_CONFIGURED' then raise; end if;
+end $$;
+commit;
+\echo 'PASS CEO approval fail-closed'
+
+-- An approved snapshot must survive both a later revision and a change to the
+-- underlying source row. Seeded as owner because no public path can approve.
+insert into private.fs_cost_approvals(project_id,scenario_id,revision,source_digest,snapshot,approved_by)
+values ('A00001','S1',1,'synthetic-digest',
+  '{"projectId":"A00001","scenarioId":"S1","revision":1,"rm":{"adjustedTotal":125},"finalPerSellingUnit":null}'::jsonb,
+  '99999999-9999-9999-9999-999999999999')
+on conflict (project_id,scenario_id,revision) do nothing;
+
+begin;
+set local role authenticated;
+select set_config('request.jwt.claim.sub','99999999-9999-9999-9999-999999999999',true);
+select public.fs_cost_save('A00001','S1',2,'{"sellingUnits":5000}'::jsonb);
+commit;
+
+-- Simulate the upstream source being renegotiated after approval.
+update private.fs_cost_scenarios
+set raw_rm='{"lines":[{"id":"L1","alias":"เงื่อนไขใหม่","amount":1,"unit":"g","supplier":"SUPPLIER_SECRET_V2","supplierPrice":1234}]}'::jsonb,
+    raw_pk='{"supplier":"PK_SECRET_V2","supplierPrice":4321}'::jsonb,
+    source_digest='synthetic-digest-v2'
+where project_id='A00001' and scenario_id='S1' and revision=1;
+
+do $$
+declare approved private.fs_cost_approvals%rowtype;
+begin
+  select * into approved from private.fs_cost_approvals where project_id='A00001' and scenario_id='S1' and revision=1;
+  if approved.source_digest <> 'synthetic-digest' then raise exception 'approved snapshot digest followed the changed source'; end if;
+  if approved.snapshot->'rm'->>'adjustedTotal' <> '125' then raise exception 'approved snapshot numbers were rewritten'; end if;
+  if approved.snapshot->>'revision' <> '1' then raise exception 'approved snapshot was repointed to another revision'; end if;
+  if not exists (select 1 from private.fs_cost_scenarios where project_id='A00001' and scenario_id='S1' and revision=3) then
+    raise exception 'new revision after approval was not recorded';
+  end if;
+end $$;
+\echo 'PASS approved snapshot immutable across new revision and changed source'
+
 \echo 'PASS cost gateway projection, revision, patch and outbox contract'

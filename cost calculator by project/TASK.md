@@ -121,3 +121,27 @@ Final local verification after changes:
 - Internal independent review: original identified defects closed with focused regression evidence; latest touched review **51/51 PASS**, no new blocking finding within its scope. This is not human final review or live security approval.
 
 Status: LOCAL_VERIFIED_COMPONENTS / INTEGRATION_BLOCKED, not 27/27 delivery complete. P27 repository tracking done. P20 trusted access contract plus PK confirmation/context mapping and supplied operating policies remain required before confidential-data UAT. P24 business UAT, P25 independent release approval and P26 operator deployment remain unperformed. Full fields/impacts/rollback in execution report.
+
+## Client/gateway contract reconciliation — 2026-09-05
+
+Continuation of the same task label `cost-calculator-implementation-2026-09-05`; no Issue/PR assigned, no Notion. Scope: reconcile the browser `cost-v1` client against the local additive gateway migration, build the capability matrix, plan the client/cache transition, and add server-layer negative tests. The gateway was **not** enabled outside the synthetic SQL test database; no production runtime, schema, grant, secret or message was touched.
+
+New evidence document: [gateway contract](docs/COST_GATEWAY_CONTRACT.md).
+
+- [x] Rerun the full suite before editing: 97 module, 8 calculator browser, 37 parent browser, SQL exit 0
+- [x] Reconcile client actions/fields against the RPCs; record gaps instead of inventing endpoints
+- [x] Capability matrix for RD / Procurement RM / PU-PK / Production / Finance / CEO / Sales-OPC against the real role check
+- [x] Ordered client/cache transition plan that never writes a redacted projection over an authoritative record
+- [x] Ten added server-layer negative tests (role boundaries, stale revision, idempotency conflict, approval immutability, private-store access)
+- [x] Verify the safe projection hides supplier name/price, full material name, nested raw JSON and source document
+- [x] Verify an approved snapshot stays byte-stable across a new revision and a changed source
+- [x] Update implementation/UAT/security docs to match the source
+- [ ] Blocked: Procurement RM vs PU-PK split, Production/Finance/CEO role values, CEO approval authority, `viewRevision` assignment, project scoping beyond Sales, the `/v1/cost/*` service layer, legacy raw-grant revocation
+
+Code changes: `supabase/migrations/20260905140000_cost_gateway_contract.sql` (explicit `viewRevision` deny; raw-Operation role trapdoor removed; explicit `COST_STALE_REVISION`), `tests/sql/cost_gateway_test.sql` (+10 checks), `tests/run-sql-tests.sh` (pin `LC_ALL`). `index.html` unchanged, so no build stamp bump was required.
+
+Verification: module 97/97, calculator browser 8/8, parent browser 37/37, SQL 32 named checks exit 0 (22 before), `git diff --check` clean. Security impact: strictly narrowing — one dead raw-disclosure branch removed, one capability made an explicit deny, one error contract corrected; no grant widened. Database impact: the additive migration is unchanged in shape and still not deployed; locked Formula keys/types untouched. Permission impact: no production grant/role/IAM change; no new role value invented. Dependency impact: none.
+
+Rollback: revert this round's commit; the gateway stays default-deny either way and no production rollback is needed.
+
+Status: LOCAL_VERIFIED / INTEGRATION_BLOCKED. Not 27/27, not production-ready. P24 UAT, P25 independent review and P26 operator deployment remain unperformed.

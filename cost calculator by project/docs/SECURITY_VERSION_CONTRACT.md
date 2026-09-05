@@ -96,6 +96,10 @@ P02/P03 have a reviewable logical proposal, not approved architecture. P04 sourc
 
 Review checks: repository source searches and targeted reads only; no application/security runtime tests executed by this review. Security/database/permission/dependency runtime impact: none. Rollback for this contribution: remove this new document. Residual risk: deployed state unverified, existing read paths conflict with requested segregation, PU-PK source unavailable. PR reference: none.
 
+## Contract reconciliation addendum — 2026-09-05
+
+The client/gateway reconciliation, the capability matrix against the actual `fs_memberships` role check, the ordered client/cache transition steps, and the confidentiality and immutability verification results are recorded in [gateway contract](COST_GATEWAY_CONTRACT.md). Three items in this document are now narrowed by that round: raw Operation disclosure is restricted to the reviewed `admin` path, `viewRevision` is emitted as an explicit deny for every mapped role, and stale-revision edits fail with an explicit error. Acceptance items 1–8 above remain open.
+
 ## Source-access addendum — later in the same implementation session
 
 The user subsequently supplied the PU-PK Apps Script editor link. The root agent opened it read-only and inspected pricing, quote-service and webapp source. The earlier source-absence statement above is historical. See PK_SOURCE_MAPPING.md and IMPLEMENTATION_EXECUTION.md for verified status and cost semantics. Trusted integration and final security approval remain open.

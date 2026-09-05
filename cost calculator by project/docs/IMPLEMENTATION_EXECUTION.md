@@ -16,11 +16,11 @@ Status: LOCAL_IMPLEMENTATION / INTEGRATION_BLOCKED. This is not completion of al
 
 ## What was implemented
 
-The actual single-file app now contains a deterministic cost engine and project calculator page. It compares governed RM offers, maintains draft revisions, accepts an explicit PK snapshot, prepares safe category projections and separates consumption, pre-stock purchase cash and residual exposure. The page preserves unsaved input across search/failure, prevents stale session/project/scenario responses, and separates pending receipts from sent results. A deep link requires an authenticated server-issued historical-view capability.
+The actual single-file app now contains a deterministic cost engine and project calculator page. It compares governed RM offers, maintains draft revisions, accepts an explicit PK snapshot, prepares safe category projections and separates consumption, pre-stock purchase cash and residual exposure. The page preserves unsaved input across search/failure, prevents stale session/project/scenario responses, and separates pending receipts from sent results. A deep link requires an authenticated server-issued historical-view capability; against the current gateway no role is granted that capability, so deep-link open is inert by design — see [gateway contract](COST_GATEWAY_CONTRACT.md).
 
 GAS-compatible modules implement RM normalization/confirmation/history/refresh contracts, a synthetic PK adapter, and a synthetic transactional summary/CEO-approval workflow. They depend on trusted adapters deliberately not supplied as fake production services. The new calculator gateway defaults to disabled; raw costs are not inserted into legacy shared Formula records or browser storage.
 
-The approved backend contract is now a local additive migration at `supabase/migrations/20260905140000_cost_gateway_contract.sql`. It stores scenario drafts/outbox/approval shapes in the unexposed `private` schema, exposes role-filtered `fs_cost_open`, patch-only `fs_cost_save`, pending-only `fs_cost_send_summary`, and fail-closed `fs_cost_approve` RPCs. The gateway is default-deny until an owner-controlled `fs_meta.cost_gateway_enabled` flag is enabled; generic `purchasing` remains safe-only until RM versus PU-PK capabilities are mapped. A server-side allowlist projection strips arbitrary nested raw data before open/outbox responses, and draft line edits are overlaid into the new revision's returned line projection. It does not revoke legacy raw-table grants yet because the client/cache transition and real capability model are not complete. The migration has a dedicated synthetic SQL test and is applied twice in the local runner to verify idempotent DDL.
+The approved backend contract is now a local additive migration at `supabase/migrations/20260905140000_cost_gateway_contract.sql`. It stores scenario drafts/outbox/approval shapes in the unexposed `private` schema, exposes role-filtered `fs_cost_open`, patch-only `fs_cost_save`, pending-only `fs_cost_send_summary`, and fail-closed `fs_cost_approve` RPCs. The gateway is default-deny until an owner-controlled `fs_meta.cost_gateway_enabled` flag is enabled; generic `purchasing` remains safe-only until RM versus PU-PK capabilities are mapped. A server-side allowlist projection strips arbitrary nested raw data before open/outbox responses, and draft line edits are overlaid into the new revision's returned line projection. It does not revoke legacy raw-table grants yet because the client/cache transition and real capability model are not complete; the ordered transition steps are now written down in [gateway contract](COST_GATEWAY_CONTRACT.md) §4. Raw Operation disclosure was narrowed to the reviewed admin path after review found a dead `production`/`finance`/`ceo` branch that would have shipped raw Operation JSON as a side effect of the later capability mapping. The migration has a dedicated synthetic SQL test and is applied twice in the local runner to verify idempotent DDL.
 
 The source review of PU-PK confirmed three relevant files and exact function semantics through the existing editor. No Run, Save, deployment or send command was invoked. Source identifiers remain local-only. See [PK source mapping](PK_SOURCE_MAPPING.md).
 
@@ -47,7 +47,7 @@ The source review of PU-PK confirmed three relevant files and exact function sem
 | P17 | Source field/status mapping with explicit non-mappings | Project/spec/version bridge, validity, commercial confirmation and consumed PK basis |
 | P18 | Synthetic coherent/multi-component PK adapter, immutable candidates | Protected transport, live-source mapping and persistent store in sandbox |
 | P19 | Explicit/idempotent adoption; mismatch/withdrawal checks; RM-only reuse | Trusted currentness/withdrawal notifications and persistent adopted snapshot |
-| P20 | Additive private cost store, role-filtered RPC projection and patch-only draft write; legacy raw disclosure documented | Coordinated read/patch RPC rollout, revoke raw-access grants after client/cache transition, role-negative backend tests with real capabilities |
+| P20 | Additive private cost store, role-filtered RPC projection and patch-only draft write; legacy raw disclosure documented; role-negative backend tests and an ordered cache-transition plan added | Coordinated read/patch RPC rollout, revoke raw-access grants after client/cache transition, real Procurement RM / PU-PK / Production / Finance / CEO capabilities |
 | P21 | Actual UI + synthetic durable summary/receipt/idempotency protocol; SQL outbox contract | Protected Formula chat endpoint/worker and receipt storage; authorized sandbox recipients |
 | P22 | Synthetic server-adapter authority/current-version/immutable approval protocol | Real CEO capability, transactional persistence and current source validity proof |
 | P23 | Focused actual-module/browser tests and internal defect review | Close A01–A10 against integrated system and independent full security review |
@@ -68,7 +68,7 @@ The source review of PU-PK confirmed three relevant files and exact function sem
 
 Internal independent read-only review found and prompted regression fixes for price denominators, RM scope/withdrawal, PK withdrawal, future confirmation chronology, lost draft input, scenario mismatch, structural line-buffer corruption and repeated approval reference aliasing. These reviews improve local code evidence; they do not replace CODEOWNER approval or live security testing.
 
-Final local results: 97/97 actual-module tests, 8/8 calculator browser cases and 37/37 required parent browser cases passed; required SQL suite passed with exit 0, including the new gateway migration/projection/patch/outbox checks and idempotent second migration run. `git diff --check`, 27-ID tracking and relative-link/source-reference checks passed. See TASK for the exact breakdown. Reproducible commands from worktree root:
+Final local results: 97/97 actual-module tests, 8/8 calculator browser cases and 37/37 required parent browser cases passed; required SQL suite passed with exit 0 across 32 named checks (22 before this round), including the new gateway migration/projection/patch/outbox checks, the ten added role/revision/immutability negatives and the idempotent second migration run. `git diff --check`, 27-ID tracking and relative-link/source-reference checks passed. See TASK for the exact breakdown. Reproducible commands from worktree root:
 
 ```sh
 node --test tests/cost-calculator-core.test.js tests/cost-calculator-ui.test.js 'cost calculator by project/tests/rm-data.test.js' 'cost calculator by project/tests/pk-adapter.test.js' 'cost calculator by project/tests/cost-workflow.test.js'
@@ -79,6 +79,17 @@ git diff --check
 ```
 
 The browser runner scrubs original configuration, forbids fetch, uses synthetic identity/data and a disposable Chrome profile. Generated reports and screenshot live under ignored `.runtime/`. Actual calculator HTML/CSS was visually inspected. No screenshot contains real supplier/formula data. Historical audit remains FAIL at integration level; unknown is not passed.
+
+## Contract reconciliation round — 2026-09-05
+
+A follow-up round reconciled the browser `cost-v1` client against the local gateway migration without enabling the gateway. Findings and the resulting contract are in [gateway contract](COST_GATEWAY_CONTRACT.md). Summary of what changed in code:
+
+1. `viewRevision` is now emitted explicitly as `false` for every mapped role. The client requires it to be `true` for a deep-linked exact revision, so every deep link stays fail-closed until the historical-view authority is owner-approved. The client check was deliberately **not** weakened to match the server.
+2. The unreachable `production`/`finance`/`ceo` raw-Operation branch was removed. Those role names are absent from the `fs_memberships` role check, so the branch was dead — but adding any of them during the pending capability mapping would have disclosed raw Operation JSON with no separate review.
+3. Editing an outdated revision now raises `COST_STALE_REVISION` explicitly instead of colliding on the primary key, which previously surfaced to the user as a generic retryable error on a permanently failing action.
+4. `tests/run-sql-tests.sh` pins `LC_ALL`, because `initdb`/postmaster abort on macOS when the calling shell leaves the locale unset, making the documented verification command unrunnable from some shells.
+
+Contract gaps recorded rather than guessed at: fresh `open` has no server counterpart (project → scenario → latest-revision resolution belongs to the unbuilt `/v1/cost/*` service); `selectRM`, `removeRM`, `requestMaterial` and `adoptPK` have no RPC; `catalog` is hard-coded empty so RM search cannot function; project-level authorization exists for `sales` only; four of the seven business roles have no schema role value. No new role value was invented.
 
 ## Impacts and rollback
 

@@ -94,30 +94,30 @@ as $$
 declare r text := private.fs_current_role();
 begin
   if auth.uid() is null or not private.fs_is_active_member() then
-    return jsonb_build_object('open',false,'editRM',false,'adoptPK',false,'sendSummary',false,'approveCEO',false);
+    return jsonb_build_object('open',false,'editRM',false,'adoptPK',false,'sendSummary',false,'approveCEO',false,'viewRevision',false);
   end if;
   if not private.fs_cost_gateway_enabled() then
-    return jsonb_build_object('open',false,'editRM',false,'adoptPK',false,'sendSummary',false,'approveCEO',false);
+    return jsonb_build_object('open',false,'editRM',false,'adoptPK',false,'sendSummary',false,'approveCEO',false,'viewRevision',false);
   end if;
   if not exists (select 1 from public.fs_records where id=p_project_id) then
-    return jsonb_build_object('open',false,'editRM',false,'adoptPK',false,'sendSummary',false,'approveCEO',false);
+    return jsonb_build_object('open',false,'editRM',false,'adoptPK',false,'sendSummary',false,'approveCEO',false,'viewRevision',false);
   end if;
   if r='sales' and not exists (
     select 1 from public.fs_records f
     where f.id=p_project_id and (f.data->>'createdBy'=private.fs_current_name() or f.data->>'salesOwner'=private.fs_current_name())
   ) then
-    return jsonb_build_object('open',false,'editRM',false,'adoptPK',false,'sendSummary',false,'approveCEO',false);
+    return jsonb_build_object('open',false,'editRM',false,'adoptPK',false,'sendSummary',false,'approveCEO',false,'viewRevision',false);
   end if;
   return case
-    when r in ('admin','rd') then jsonb_build_object('open',true,'editRM',true,'adoptPK',true,'sendSummary',true,'approveCEO',false)
+    when r in ('admin','rd') then jsonb_build_object('open',true,'editRM',true,'adoptPK',true,'sendSummary',true,'approveCEO',false,'viewRevision',false)
     -- The legacy purchasing role is deliberately not granted raw RM or PK:
     -- it cannot express the required RM-vs-PU-PK separation. Add a reviewed
     -- capability/role mapping before exposing either source category.
-    when r='purchasing' then jsonb_build_object('open',true,'editRM',false,'adoptPK',false,'sendSummary',false,'approveCEO',false)
-    when r in ('sales','opc') then jsonb_build_object('open',true,'editRM',false,'adoptPK',false,'sendSummary',false,'approveCEO',false)
+    when r='purchasing' then jsonb_build_object('open',true,'editRM',false,'adoptPK',false,'sendSummary',false,'approveCEO',false,'viewRevision',false)
+    when r in ('sales','opc') then jsonb_build_object('open',true,'editRM',false,'adoptPK',false,'sendSummary',false,'approveCEO',false,'viewRevision',false)
     -- Future role values are intentionally not added to the locked legacy
     -- role check here. Owner must define and review them before enablement.
-    else jsonb_build_object('open',false,'editRM',false,'adoptPK',false,'sendSummary',false,'approveCEO',false)
+    else jsonb_build_object('open',false,'editRM',false,'adoptPK',false,'sendSummary',false,'approveCEO',false,'viewRevision',false)
   end;
 end $$;
 
@@ -218,7 +218,11 @@ begin
     'catalog','[]'::jsonb);
   if r in ('admin','rd') then result := result || jsonb_build_object('rawRM',row_data.raw_rm); end if;
   if r='admin' then result := result || jsonb_build_object('rawPK',row_data.raw_pk); end if;
-  if r in ('admin','production','finance','ceo') then result := result || jsonb_build_object('rawOperation',row_data.raw_operation); end if;
+  -- Raw Operation stays on the reviewed admin path only. Do not re-add
+  -- 'production'/'finance'/'ceo' here: those role names do not exist in the
+  -- fs_memberships role check yet, and listing them in advance would ship raw
+  -- Operation JSON as a side effect of the later capability-mapping change.
+  if r='admin' then result := result || jsonb_build_object('rawOperation',row_data.raw_operation); end if;
   return result;
 end $$;
 
@@ -257,6 +261,13 @@ begin
       values (p_project_id,p_scenario_id,next_revision,merged_inputs,new_view,auth.uid());
   else
     if not found then raise exception 'COST_STALE_REVISION' using errcode='40001'; end if;
+    -- A newer revision already exists, so this caller edited an outdated view.
+    -- Without this check the insert below only fails on the primary key, which
+    -- reaches the client as a generic retryable error instead of a stale one.
+    if exists (select 1 from private.fs_cost_scenarios
+               where project_id=p_project_id and scenario_id=p_scenario_id and revision>p_expected_revision) then
+      raise exception 'COST_STALE_REVISION' using errcode='40001';
+    end if;
     next_revision := p_expected_revision + 1;
     merged_inputs := current_row.inputs || p_patch;
     new_view := private.fs_cost_pending_view(p_project_id,p_scenario_id,next_revision,'รอ trusted calculator คำนวณ revision นี้');
