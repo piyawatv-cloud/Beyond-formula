@@ -193,12 +193,12 @@ async function readyScenario(c){
  return 3;
 }
 const RULE={allowancePercent:10,factor:2.2,decimals:6,owner:'เจ้าของอัตรา',validUntil:'2999-01-01',
-  pkMode:'notApplicable',formatId:'CAP-GEL'};
+  pkMode:'notApplicable',formatId:'CAP-GEL-0'};
 // ตารางอัตรากลางแก้ได้เฉพาะผู้ดูแลระบบ จึงต้องตั้งค่าผ่านบริบท admin ก่อน
 function seedRates(c,amounts=[0.15,0.15],validUntil='2999-01-01'){
   const admin=fixture('admin','Synthetic Admin');
   admin.backing.fs_cost=c.backing.fs_cost;
-  admin.costRecordOperationFormat({id:'CAP-GEL',label:'แคปซูลเจลาติน',owner:'ฝ่ายผลิต',validUntil,
+  admin.costRecordOperationFormat({id:'CAP-GEL-0',label:'แคปซูลเจลาติน',owner:'ฝ่ายผลิต',validUntil,
     charges:[{label:'ค่าอัดแคป',amount:amounts[0]},{label:'ค่าแคป',amount:amounts[1]}]});
   c.backing.fs_cost=admin.backing.fs_cost;c.run('costStore=null');
   return admin;
@@ -268,7 +268,7 @@ test('บทบาทที่ไม่มีอำนาจด้านรา�
   const u=fixture(role,name);u.backing.fs_cost=c.backing.fs_cost;
   assert.equal(u.costCapabilities().setPricing,false,role);
   assert.throws(()=>u.costRecordPricingRule('A00001','S1',RULE),/อำนาจด้านราคา/,role);
-  assert.throws(()=>u.costRecordOperationFormat({id:'CAP-GEL',label:'x',owner:'o',validUntil:'2999-01-01',
+  assert.throws(()=>u.costRecordOperationFormat({id:'CAP-GEL-0',label:'x',owner:'o',validUntil:'2999-01-01',
     charges:[{label:'ค่าอัดแคป',amount:0.15}]}),/อำนาจด้านราคา/,role);
  }});
 test('Sales เห็นราคาต่อหน่วยหลังกำหนดกฎ แต่ยังไม่เห็นต้นทุนหรืออัตรา',async()=>{const c=fixture();
@@ -292,31 +292,31 @@ test('ค่าตั้งต้นที่แสดงบนฟอร์ม�
 // ── ตารางอัตรามาตรฐานกลาง ──────────────────────────────────────────────────
 test('ตารางกลางมาพร้อมโครงรูปแบบสินค้า แต่ไม่มีตัวเลขค่าใช้จ่ายติดมากับโปรแกรม',()=>{const c=fixture();
  const list=c.costFormatList();
- assert.ok(list.length>=6);
+ assert.equal(list.length,12);
  assert.ok(list.every(f=>f.ready===false),'ทุกรูปแบบต้องยังใช้ไม่ได้จนกว่าจะกรอกอัตรา');
  assert.ok(list.every(f=>f.charges.every(ch=>ch.amount===null)),'ห้ามมีอัตราตั้งต้นติดมา');
- assert.ok(list.some(f=>f.id==='CAP-GEL')&&list.some(f=>f.id==='SACHET'));});
+ assert.ok(list.some(f=>f.id==='CAP-GEL-0')&&list.some(f=>f.id==='SACHET'));});
 test('แก้อัตรากลางได้เฉพาะผู้มีอำนาจด้านราคา',()=>{
  for(const role of ['rd','purchasing','sales','opc']){
   const c=fixture(role,'ผู้ใช้ '+role);
-  assert.throws(()=>c.costRecordOperationFormat({id:'CAP-GEL',label:'x',owner:'o',validUntil:'2999-01-01',
+  assert.throws(()=>c.costRecordOperationFormat({id:'CAP-GEL-0',label:'x',owner:'o',validUntil:'2999-01-01',
     charges:[{label:'ค่าอัดแคป',amount:0.15}]}),/อำนาจด้านราคา/,role);
  }});
 test('อัตรากลางที่กรอกไม่ครบถูกปฏิเสธ',()=>{const c=fixture('admin','Synthetic Admin');
- const ok={id:'CAP-GEL',label:'แคปซูลเจลาติน',owner:'ฝ่ายผลิต',validUntil:'2999-01-01',charges:[{label:'ค่าอัดแคป',amount:0.15}]};
+ const ok={id:'CAP-GEL-0',label:'แคปซูลเจลาติน',owner:'ฝ่ายผลิต',validUntil:'2999-01-01',charges:[{label:'ค่าอัดแคป',amount:0.15}]};
  for(const [patch,re] of [[{owner:'  '},/ผู้รับผิดชอบ/],[{label:''},/ชื่อรูปแบบ/],[{id:'bad id'},/รหัสรูปแบบ/],
    [{validUntil:'2030-02-30'},/YYYY-MM-DD/],[{charges:[]},/อย่างน้อยหนึ่งรายการ/],
    [{charges:[{label:'',amount:1}]},/ทั้งชื่อและจำนวนเงิน/],[{charges:[{label:'ค่าอัดแคป',amount:-1}]},/ทั้งชื่อและจำนวนเงิน/]]){
   assert.throws(()=>c.costRecordOperationFormat({...ok,...patch}),re,JSON.stringify(patch));
  }
- assert.equal(c.costFormatCurrent('CAP-GEL').version,0,'การปฏิเสธต้องไม่สร้างเวอร์ชัน');});
+ assert.equal(c.costFormatCurrent('CAP-GEL-0').version,0,'การปฏิเสธต้องไม่สร้างเวอร์ชัน');});
 test('แก้อัตรากลางภายหลังไม่เปลี่ยนราคาที่บันทึกไปแล้ว',async()=>{const c=fixture();
  await readyScenario(c);seedRates(c,[0.15,0.15]);
  setRule(c,RULE);
  const first=(await c.costLocalRequest('open',{projectId:'A00001'})).view.finalPerSellingUnit;
  const pinned=c.loadCostStore().scenarios.at(-1).revision;
  seedRates(c,[0.50,0.50]); // ฝ่ายผลิตปรับอัตราขึ้น
- assert.equal(c.costFormatCurrent('CAP-GEL').version,2);
+ assert.equal(c.costFormatCurrent('CAP-GEL-0').version,2);
  const old=await c.costLocalRequest('open',{projectId:'A00001',scenarioId:'S1',expectedRevision:pinned});
  assert.equal(old.view.finalPerSellingUnit,first,'revision เดิมต้องคงราคาเดิม');
  assert.equal(old.pricingRule.format.version,1,'และคงเวอร์ชันอัตราที่ใช้ตอนนั้น');
@@ -424,3 +424,68 @@ test('ผู้ถือ capability ด้านราคาโดยตรง�
  c.backing.fs_cost=f.backing.fs_cost;c.run('costStore=null');
  const body=await c.costLocalRequest('open',{projectId:'A00001'});
  assert.ok(Math.abs(body.view.finalPerSellingUnit-5.4425)<1e-6,'อัตราที่ตั้งโดยผู้มีอำนาจต้องมีผลจริง');});
+
+// ── ช่องรวมปริมาณ · เกิน/ขาด · ข้อความสรุปที่คัดลอกได้ ───────────────────────
+async function formulaFixture(fill){
+ const c=fixture();
+ c.loadCostStore().catalog.push(tierOffer('O1','M1','สาร ก.',1000,1,7),tierOffer('O2','M2','สาร ข.',500,1,7));
+ await c.costLocalRequest('open',{projectId:'A00001'});
+ await c.costLocalRequest('selectRM',{projectId:'A00001',scenarioId:'S1',expectedRevision:1,offerRef:'O1'});
+ await c.costLocalRequest('selectRM',{projectId:'A00001',scenarioId:'S1',expectedRevision:2,offerRef:'O2'});
+ const ls=c.loadCostStore().scenarios[2].scenario.rmLines;
+ await c.costLocalRequest('save',{projectId:'A00001',scenarioId:'S1',expectedRevision:3,
+   patch:{sellingUnits:1000,unitsPerPack:1,fillAmount:fill,fillUnit:'g',pkSpecVersion:null,
+     lines:[{id:ls[0].id,alias:'ก',amount:0.4,lossPercent:0},{id:ls[1].id,alias:'ข',amount:0.2,lossPercent:0}]}});
+ return c;
+}
+test('บอกผลรวมในสูตรและเป้าหมายต่อหน่วยเป็นตัวเลข',async()=>{const c=await formulaFixture(0.6);
+ const b=await c.costLocalRequest('open',{projectId:'A00001'});
+ assert.ok(Math.abs(b.formula.sumKg-0.0006)<1e-12,'0.4 + 0.2 กรัม');
+ assert.ok(Math.abs(b.formula.targetKg-0.0006)<1e-12);
+ assert.ok(Math.abs(b.formula.differenceKg)<1e-12,'ตรงพอดีต้องเป็นศูนย์');
+ assert.equal(b.view.complete!==undefined,true);});
+test('บอกว่าเกินเท่าไรเมื่อสูตรมากกว่าปริมาณต่อหน่วย',async()=>{const c=await formulaFixture(0.5);
+ const b=await c.costLocalRequest('open',{projectId:'A00001'});
+ assert.ok(b.formula.differenceKg>0,'ต้องเป็นบวกเมื่อเกิน');
+ assert.ok(Math.abs(b.formula.differenceKg-0.0001)<1e-12,'เกิน 0.1 กรัม');});
+test('บอกว่าขาดเท่าไรเมื่อสูตรน้อยกว่าปริมาณต่อหน่วย',async()=>{const c=await formulaFixture(1);
+ const b=await c.costLocalRequest('open',{projectId:'A00001'});
+ assert.ok(b.formula.differenceKg<0,'ต้องเป็นลบเมื่อขาด');
+ assert.ok(Math.abs(b.formula.differenceKg+0.0004)<1e-12,'ขาด 0.4 กรัม');});
+test('สูตรที่ปริมาณไม่ตรงถูกทำเครื่องหมายว่ายังไม่สมบูรณ์ และหน้าจอไม่แสดงราคา',async()=>{
+ const c=await formulaFixture(0.5);seedRates(c);setRule(c);
+ const b=await c.costLocalRequest('open',{projectId:'A00001'});
+ assert.equal(b.view.complete,false,'ปริมาณไม่ตรงต้องไม่ถือว่าสมบูรณ์');
+ assert.ok(b.view.pending.some(m=>m.includes('ปริมาณ')),'ต้องบอกเหตุผลว่าปริมาณไม่ตรง');
+ assert.ok(b.formula.differenceKg>0,'และบอกด้วยว่าเกินเท่าไร');
+ // ตัวเรนเดอร์เป็นด่านที่ปิดการแสดงราคาเมื่อยังไม่สมบูรณ์ ไม่ใช่ให้ engine คืน null
+ const ui=grab('UI');
+ assert.match(ui,/!view\.complete\|\|view\.finalPerSellingUnit==null\?'รอกำหนดราคา'/,
+   'renderCostCalculator ต้องซ่อนราคาเมื่อ complete เป็น false');});
+test('เมื่อปริมาณตรงพอดีจึงจะสมบูรณ์และให้ราคาได้',async()=>{
+ const c=await formulaFixture(0.6);seedRates(c);setRule(c);
+ const b=await c.costLocalRequest('open',{projectId:'A00001'});
+ assert.equal(b.view.complete,true);
+ assert.ok(b.view.finalPerSellingUnit>0);
+ assert.ok(Math.abs(b.formula.differenceKg)<1e-12);});
+test('ข้อความสรุปคัดลอกได้ และมีแต่ยอดหลังบวก',async()=>{const c=await formulaFixture(0.6);
+ seedRates(c);setRule(c);
+ const b=await c.costLocalRequest('open',{projectId:'A00001'});
+ assert.ok(b.summaryText.includes('ยอดหลังบวกเท่านั้น'));
+ assert.ok(b.summaryText.includes('revision'));
+ for(const secret of ['SYNTHETIC VENDOR','สาร ก.','1000','500'])
+   assert.ok(!b.summaryText.includes(secret),secret+' ต้องไม่อยู่ในข้อความสรุป');});
+test('Sales ก็ได้ข้อความสรุปเดียวกัน แต่ไม่ได้ตัวเลขปริมาณในสูตร',async()=>{const c=await formulaFixture(0.6);
+ seedRates(c);setRule(c);
+ const s=fixture('sales','Synthetic Sales');s.backing.fs_cost=c.backing.fs_cost;
+ const b=await s.costLocalRequest('open',{projectId:'A00001'});
+ assert.ok(b.summaryText.includes('ยอดหลังบวกเท่านั้น'));
+ assert.equal(b.formula,null,'Sales ต้องไม่เห็นตัวเลขปริมาณในสูตร');});
+test('รูปแบบสินค้ามี 12 แบบ และพกปริมาณต่อหน่วยตั้งต้นมาด้วย',()=>{const c=fixture();
+ const list=c.costFormatList();
+ assert.equal(list.length,12);
+ const cap=list.find(f=>f.id==='CAP-GEL-0');
+ assert.equal(cap.fillAmount,0.6,'แคปซูล #0 ตั้งต้น 0.6 g ต่อเม็ด');
+ assert.equal(cap.fillUnit,'g');
+ assert.ok(list.every(f=>f.ready===false),'ยังต้องกรอกอัตราก่อนใช้');
+ assert.ok(list.some(f=>f.fillAmount===null),'รูปแบบที่ยังไม่รู้ปริมาณต้องเป็น null ไม่ใช่เดา');});
