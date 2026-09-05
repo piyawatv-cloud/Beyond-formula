@@ -61,3 +61,22 @@ Result: 18/18 passing synthetic tests. Initial 10 tests failed with missing core
 Security/permission impact: explicit authorization and protected-store contracts added in local code; no live IAM changes. Database impact: no schema/migration. Dependency impact: none. Rollback: remove these new local files or revert their eventual commit; no production state was modified. Open risks: real source mapping, persistent confirmation/history, live account permissions, currentness/freshness rules, and integration/UAT are still required.
 
 Independent-review regression: future-dated Procurement confirmation and later RD spec acceptance now fail current eligibility/confirmation. Reproduced failing before correction; timestamp comparisons use parsed UTC instants.
+
+## ทดสอบซ้ำด้วยเคสจริงจาก audit — 2026-09-05
+
+เดิมเทสต์ของโมดูลนี้เป็นข้อมูลสังเคราะห์ล้วน จึงยังไม่พิสูจน์ว่าปิดข้อค้นพบจริงได้ รอบนี้อ่านรายงาน `RD Data Center — Logic Audit` ในคลัง local-only แล้วนำ **รูปแบบข้อความที่ audit ระบุว่าทำให้ pilot parser อ่านผิด** มาเขียนเป็น regression ที่ `tests/rm-audit-regressions.test.js`
+
+| เคสจาก audit | pilot เดิมได้ | `RmData` ได้ |
+|---|---|---|
+| `MOQ 1 kg: 1700/kg` | 1 → **170** ต่ำกว่าจริง 90% | 1 → 1700 |
+| `<100 kg. : 175.-` | MOQ 100 → 175 | ปฏิเสธ ไม่ให้ MOQ |
+| qty `25 kg / BAD / 1 kg` กับ price `1100 / 1400 / BAD` | จับคู่ข้ามตำแหน่งเป็น 25→1100, 1→1400 และรายงานสำเร็จ | ทุกตำแหน่งอยู่ครบ ตำแหน่งที่ไม่สมบูรณ์เป็น invalid ทั้งแถวไม่ผ่าน |
+| ราคา `-1400` | 1400 | ปฏิเสธ |
+| `MOQ (1Kg.): 1700/Kg.` + `MOQ (25Kg.): 1400/Kg` | ปฏิเสธทั้งก้อนว่ากำกวม | อ่านได้ทั้งสอง Tier |
+| สอง Tier ในบรรทัดเดียว | เก็บมาอันเดียวแล้วรายงานสำเร็จ | เข้า DQ ไม่เก็บบางส่วน |
+
+เพิ่มอีกสองเคสที่ audit ชี้เป็นความเสี่ยง: ราคาที่มีตัวหารหน่วยถ้าส่งเป็นสตริงเดียวใน list ต้องถูกปฏิเสธแทนที่จะจับคู่ผิด และ `1400/25kg` ต้องเก็บตัวหาร 25 ไว้ ไม่ยุบเป็นราคาต่อกิโล
+
+**ข้อจำกัดที่ยังอยู่** เทสต์นี้ครอบเฉพาะตัวแยกวิเคราะห์ ไม่ได้ปิด A03 (READY ไม่เท่ากับอนุมัติ), A04 (identity ผูกกับแถว), A07 (ระบบเก่า/ใหม่คนละเส้นทาง), A08 (sync ล้มกลางทาง) หรือ A09 (สิทธิ์ผู้อนุมัติ) ซึ่งอยู่ที่ตัว pilot script และการติดตั้งจริง ไม่ใช่ที่โมดูลนี้ และยังไม่ได้แตะ Apps Script ตัวจริง
+
+A05 ครอบได้เพียงบางส่วน: `normalize` เข้า DQ เมื่อ mapper แจ้ง `unresolvedEvidence` แต่การอ่านคอลัมน์สถานะให้ครบทุกช่อง เช่นข้อความ "ยกเลิกการผลิต" ที่อยู่นอกช่วงที่ pilot อ่าน เป็นหน้าที่ของ physical mapper ที่ยังไม่ได้เขียน
