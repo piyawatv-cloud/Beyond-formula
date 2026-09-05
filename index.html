@@ -664,7 +664,7 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
   <div class="logo"><svg viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-1.73-3L9 11.35V4H8a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2h-1v7.35L19.73 19A2 2 0 0 1 18 22H6Zm5-10.11L8.31 16.5h7.38L13 11.89V4h-2v7.89Z"/></svg></div>
   <div>
     <div class="hdr-title">Formula Studio</div>
-    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-05.7-pricing-rule</div>
+    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-05.8-pricing-form</div>
   </div>
   <div class="sync-chip" id="syncChip" onclick="sbManualSync()" title="สถานะการซิงก์ข้อมูลกับเซิร์ฟเวอร์กลาง"></div>
 </div>
@@ -1419,7 +1419,7 @@ async function costAction(action,extra){
 }
 function costNumber(value){return typeof value==='number' && Number.isFinite(value)?value.toLocaleString('th-TH',{maximumFractionDigits:4}):'รอข้อมูล';}
 function costDraftValue(id,fallback){return Object.hasOwn(costState.edits,id)?costState.edits[id]:fallback;}
-function costDraftDefaults(){const data=costState.response;if(!data)return {};const draft=data.inputs||{},defaults={costSellingUnits:draft.sellingUnits,costUnitsPerPack:draft.unitsPerPack,costFillAmount:draft.fillAmount,costFillUnit:draft.fillUnit,costPkSpecVersion:draft.pkSpecVersion};data.lines.forEach((line,i)=>{defaults["costAlias"+i]=line.alias||"";defaults["costAmount"+i]=line.amount;defaults["costLoss"+i]=line.lossPercent;});return defaults;}
+function costDraftDefaults(){const data=costState.response;if(!data)return {};const draft=data.inputs||{},rule=data.pricingRule||{},defaults={costSellingUnits:draft.sellingUnits,costUnitsPerPack:draft.unitsPerPack,costFillAmount:draft.fillAmount,costFillUnit:draft.fillUnit,costPkSpecVersion:draft.pkSpecVersion,costAllowance:rule.allowancePercent,costFactor:rule.factor,costRuleOwner:rule.owner,costRuleUntil:rule.validUntil,costRuleDecimals:rule.decimals??2,costPkMode:rule.pkMode||''};[0,1,2].forEach(i=>{const row=(rule.charges||[])[i]||{};defaults['costChargeLabel'+i]=row.label||'';defaults['costChargeAmount'+i]=row.amount;});data.lines.forEach((line,i)=>{defaults["costAlias"+i]=line.alias||"";defaults["costAmount"+i]=line.amount;defaults["costLoss"+i]=line.lossPercent;});return defaults;}
 function costCaptureDraft(){for(const id of [...Object.keys(costDraftDefaults()),"costRequestBrief"]){const el=document.getElementById(id);if(el)costState.edits[id]=el.value;}}
 function costDraftDirty(){return Object.entries(costDraftDefaults()).some(([id,value])=>Object.hasOwn(costState.edits,id)&&String(costState.edits[id])!==String(value??""));}
 function costTextField(label,id,value,hint){value=costDraftValue(id,value);return `<label class="fgrp"><span class="flbl">${esc(label)}</span><input id="${id}" class="fi" value="${value==null?'':esc(value)}" ${costState.busy?'disabled':''}><span class="hint">${esc(hint)}</span></label>`;}
@@ -1453,6 +1453,13 @@ function renderCostCalculator(){
     ${data.capabilities&&data.capabilities.adoptPK?`<p class="hint">กรอกยอดที่ PU-PK ยืนยันแล้วเท่านั้น ระบบบันทึกผู้กรอกและเวลาเป็นหลักฐาน และไม่แก้ย้อนหลัง</p>
     <div class="fg4">${costField('ยอด PK หลังบวก (บาท/ล็อต)','costPkAdjusted',null,'เว้นว่างได้ถ้ายังไม่มีนโยบายราคา')}${costField('ยอด PK ต้นทุนใช้จริง (บาท/ล็อต)','costPkBase',null,'เว้นว่างได้ถ้ายังไม่ทราบ')}${costTextField('ราคามีผลถึง','costPkValidUntil',null,'YYYY-MM-DD')}${costTextField('เลขอ้างอิงหลักฐาน','costPkEvidence',null,'เช่น เลข Req-PK')}</div>
     <button class="btn btn-s" ${disabled} onclick="costSavePk()">บันทึกผล PK ที่ยืนยันแล้ว</button>`:''}
+    ${!canEdit?'':`<h3>กฎการบวกราคา</h3>${data.pricingRule?`<p class="hint">ใช้อยู่: เวอร์ชัน ${esc(data.pricingRule.version)} · ค่าเผื่อขั้นต้น ${esc(data.pricingRule.allowancePercent)}% · ตัวคูณ ${esc(data.pricingRule.factor)} · ผู้รับผิดชอบ ${esc(data.pricingRule.owner)} · ใช้ได้ถึง ${esc(data.pricingRule.validUntil)}</p>`:'<p class="cost-warning">ยังไม่ได้กำหนดกฎการบวกราคา จึงยังไม่มีราคาต่อหน่วย</p>'}
+    <div class="fg4">${costField('ค่าเผื่อขั้นต้น','costAllowance',data.pricingRule&&data.pricingRule.allowancePercent,'% ของต้นทุนขั้นต้น — คนละตัวกับ Loss รายบรรทัด')}${costField('ตัวคูณราคา','costFactor',data.pricingRule&&data.pricingRule.factor,'ใส่ตามที่ใช้จริง เช่น 2.2')}${costTextField('ผู้รับผิดชอบอัตรา','costRuleOwner',data.pricingRule&&data.pricingRule.owner,'ชื่อผู้กำหนดอัตรานี้')}${costTextField('ใช้ได้ถึง','costRuleUntil',data.pricingRule&&data.pricingRule.validUntil,'YYYY-MM-DD')}${costField('ทศนิยมที่ปัด','costRuleDecimals',data.pricingRule?data.pricingRule.decimals:2,'0–6 ตำแหน่ง')}
+    <label class="fgrp"><span class="flbl">หมวด PK</span><select id="costPkMode" class="fi" ${disabled}><option value="">— เลือก —</option><option value="separate"${costDraftValue('costPkMode',data.pricingRule&&data.pricingRule.pkMode)==='separate'?' selected':''}>มีหมวด PK แยก (รอผลจาก PU-PK)</option><option value="notApplicable"${costDraftValue('costPkMode',data.pricingRule&&data.pricingRule.pkMode)==='notApplicable'?' selected':''}>ไม่มีหมวด PK แยก — คิดรวมเป็นค่าต่อหน่วย</option></select><span class="hint">เลือกให้ตรงกับรูปแบบสินค้า</span></label></div>
+    <h4>ค่าดำเนินการต่อหน่วย (ที่ต้นทุน ไม่บวกกำไรซ้ำ)</h4>
+    <div class="rec-wrap"><table class="rec-tbl"><thead><tr><th>รายการ</th><th>บาท / หน่วยขาย</th></tr></thead><tbody>${[0,1,2].map(i=>{const row=(data.pricingRule&&data.pricingRule.charges[i])||{};return `<tr><td><input class="fi" id="costChargeLabel${i}" value="${esc(costDraftValue('costChargeLabel'+i,row.label||''))}" placeholder="เช่น ค่าอัดแคป / ค่าซอง" ${disabled}></td><td><input class="fi" id="costChargeAmount${i}" type="number" min="0" step="any" value="${esc(costDraftValue('costChargeAmount'+i,row.amount??''))}" ${disabled}></td></tr>`;}).join('')}</tbody></table></div>
+    <p class="hint">ทุกครั้งที่บันทึกจะสร้างกฎเวอร์ชันใหม่ ผูกผู้รับผิดชอบและวันที่ไว้ ของเดิมไม่ถูกแก้</p>
+    <button class="btn btn-p" ${disabled} onclick="costSavePricingRule()">บันทึกกฎการบวกราคา</button>`}
     <h3>สรุปเข้าแชทโครงการ</h3><p>ส่งเฉพาะยอดหลังบวกที่ผู้รับเห็นได้ พร้อม revision และรายการค้าง</p><button class="btn btn-p" ${disabled||!data.capabilities||!data.capabilities.sendSummary?'disabled':''} onclick="costSendSummary()">ส่งสรุป revision นี้เข้า Formula chat</button><p role="status">${esc(data.sendState==='sent'?'ส่งสำเร็จ':data.sendState==='pending'?'รอส่ง':data.sendState==='failed'?'ส่งไม่สำเร็จ':'ยังไม่ได้ส่ง')}</p>`}
   </div>`;
 }
@@ -1478,6 +1485,19 @@ async function costImportCatalogFile(file){
       :`นำเข้า ${applied.added} รายการ · รวมในเครื่อง ${applied.total} รายการ`;
   }catch(error){costState.error='อ่านไฟล์ไม่สำเร็จ: '+String(error.message);}
   const input=document.getElementById('costCatalogFile');if(input)input.value='';
+  return costAction('open',{});
+}
+function costSavePricingRule(){
+  const data=costState.response;if(!data||!data.capabilities.editRM)return;
+  const text=id=>{const el=document.getElementById(id);return el?el.value.trim():'';};
+  try{
+    costRecordPricingRule(costState.projectId,data.scenarioId,{
+      allowancePercent:costInputNumber('costAllowance'),factor:costInputNumber('costFactor'),
+      decimals:costInputNumber('costRuleDecimals'),owner:text('costRuleOwner'),validUntil:text('costRuleUntil'),
+      pkMode:text('costPkMode'),
+      charges:[0,1,2].map(i=>({label:text('costChargeLabel'+i),amount:costInputNumber('costChargeAmount'+i)}))
+        .filter(row=>row.label||row.amount!=null)});
+  }catch(error){costState.error=error.message;renderCostCalculator();return;}
   return costAction('open',{});
 }
 function costSavePk(){
@@ -1554,7 +1574,13 @@ function costEnvelope(entry,sendState){
   const outbox=store.outbox.filter(row=>row.projectId===entry.projectId&&row.scenarioId===entry.scenarioId&&row.revision===entry.revision);
   return {contract:'cost-v1',projectId:entry.projectId,scenarioId:entry.scenarioId,revision:entry.revision,
     view:CostCalculator.project(result,role),capabilities:caps,
-    inputs:detail?{sellingUnits:scenario.sellingUnits,unitsPerPack:scenario.unitsPerPack,fillAmount:scenario.fillAmount,fillUnit:scenario.fillUnit}:{},
+    inputs:detail?{sellingUnits:scenario.sellingUnits,unitsPerPack:scenario.unitsPerPack,fillAmount:scenario.fillAmount,fillUnit:scenario.fillUnit,pkSpecVersion:scenario.pkSpecVersion}:{},
+    pricingRule:detail&&scenario.policies&&scenario.policies.RM?{
+      allowancePercent:(scenario.policies.RM.allowanceRate||0)*100,factor:scenario.policies.RM.rate,
+      owner:scenario.policies.RM.owner,validFrom:scenario.policies.RM.validFrom,validUntil:scenario.policies.RM.validUntil,
+      version:scenario.policies.RM.version,decimals:scenario.policies.RM.rounding&&scenario.policies.RM.rounding.decimals,
+      pkMode:scenario.pkNotApplicable===true?'notApplicable':'separate',
+      charges:(scenario.extraCosts||[]).map(fee=>({label:fee.label||fee.id,amount:fee.amount}))}:null,
     lines:detail?scenario.rmLines.map((line,index)=>({...result.rm.lines[index],id:line.id,alias:line.alias,amount:line.amount,unit:line.unit,lossPercent:line.lossPercent})):[],
     catalog:detail?store.catalog.map(offer=>({offerRef:offer.id,group:offer.group||'',name:offer.name||'',spec:offer.spec||'',vendor:offer.vendor||'',tierLabel:offer.tierId||'',price:offer.price,priceUnit:offer.priceUnit||'',moq:offer.moq,moqUnit:offer.moqUnit||'',leadTimeDays:offer.leadTimeDays,eligible:offer.status==='confirmed'&&offer.specApproved===true})):[],
     pkCandidate:(()=>{const candidate=costPkCandidate(entry.projectId,entry.scenarioId);
@@ -1777,6 +1803,49 @@ function costExcelDate(value){
 function costDateOK(value){
   return typeof value==='string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
     && Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0,10)===value;
+}
+// --- กฎการบวกราคา (ค่าเผื่อขั้นต้น + ตัวคูณ) และอัตรามาตรฐาน Operation ---
+// เปลี่ยนตามสูตร ไม่ใช่ค่าคงที่ของระบบ จึงเก็บเป็น policy ราย scenario ที่มีเจ้าของ
+// เวอร์ชัน และวันหมดอายุ ค่าเผื่อขั้นต้นเป็นคนละตัวกับ loss รายบรรทัด — เจ้าของระบบ
+// ยืนยันแล้ว — ทั้งสองจึงคูณทับกันโดยตั้งใจ
+function costPolicyVersion(entry){
+  const policy=entry.scenario.policies&&entry.scenario.policies.RM;
+  return policy&&Number.isInteger(policy.version)?policy.version+1:1;
+}
+function costRecordPricingRule(projectId,scenarioId,input){
+  const caps=costCapabilities();
+  if(!caps.editRM)throw Error('กำหนดกฎการบวกราคาได้เฉพาะผู้ที่แก้สูตรได้');
+  const entry=costLatestEntry(projectId,scenarioId);
+  if(!entry)throw Error('ยังไม่มีข้อมูลต้นทุนของโครงการนี้');
+  const allowance=Number(input.allowancePercent),factor=Number(input.factor),decimals=Number(input.decimals);
+  if(!Number.isFinite(allowance)||allowance<0||allowance>100)throw Error('ค่าเผื่อขั้นต้นต้องเป็น 0–100 เปอร์เซ็นต์');
+  if(!Number.isFinite(factor)||factor<=0)throw Error('ตัวคูณต้องมากกว่า 0 — ใส่ตามที่ใช้จริง เช่น 2.2');
+  if(!Number.isInteger(decimals)||decimals<0||decimals>6)throw Error('ทศนิยมที่ปัดต้องเป็นจำนวนเต็ม 0–6');
+  const owner=String(input.owner||'').trim();
+  if(!owner)throw Error('ระบุผู้รับผิดชอบอัตรานี้');
+  if(!costDateOK(String(input.validUntil||'')))throw Error('ระบุวันสิ้นสุดที่ใช้ได้แบบ YYYY-MM-DD ที่มีอยู่จริง');
+  const charges=(Array.isArray(input.charges)?input.charges:[]).map((row,index)=>({
+    label:String(row.label||'').trim(),amount:Number(row.amount)})).filter(row=>row.label||Number.isFinite(row.amount));
+  if(charges.some(row=>!row.label||!Number.isFinite(row.amount)||row.amount<0))
+    throw Error('ค่าดำเนินการต่อหน่วยต้องมีทั้งชื่อรายการและจำนวนเงินที่ไม่ติดลบ');
+  const version=costPolicyVersion(entry),validFrom=costToday();
+  const governed=basis=>({version,owner,status:'confirmed',currency:'THB',validFrom,
+    validUntil:String(input.validUntil).trim(),rounding:{decimals,mode:'halfUp',basis}});
+  const policies={
+    RM:{id:'POL-RM-'+projectId+'-'+scenarioId,...governed('categoryTotal'),mode:'factor',rate:factor,allowanceRate:allowance/100},
+    // ค่าดำเนินการติดป้าย (ต้นทุน) ในฟอร์ม จึงไม่ถูกบวกกำไรซ้ำ
+    Operation:{id:'POL-OP-'+projectId+'-'+scenarioId,...governed('categoryTotal'),mode:'passthrough'},
+    Final:{id:'POL-FIN-'+projectId+'-'+scenarioId,...governed('sellingUnit'),mode:'passthrough'}};
+  // บรรจุภัณฑ์ของบางรูปแบบสินค้าถูกคิดเป็นค่าต่อหน่วยในหมวด Operation จึงไม่มีหมวด PK
+  // แยก ต้องประกาศให้ชัด ระบบไม่เดาให้ และ PK ที่ลืมใส่ยังบล็อกราคาเหมือนเดิม
+  if(!['separate','notApplicable'].includes(input.pkMode))throw Error('ระบุว่าโครงการนี้มีหมวด PK แยกหรือไม่');
+  if(input.pkMode==='notApplicable'&&entry.scenario.pk)throw Error('รับผล PK มาแล้ว จะประกาศว่าไม่มีหมวด PK ไม่ได้');
+  const scenario=CostCalculator.revise(entry.scenario,{policies,
+    pkNotApplicable:input.pkMode==='notApplicable',
+    operation:{mode:'standardRateOnly'},extrasReviewed:true,
+    extraCosts:charges.map((row,index)=>({id:'FEE-'+(index+1),label:row.label,category:'Operation',
+      basis:'perUnit',amount:row.amount,collection:'included',currency:'THB',status:'confirmed'}))});
+  return costEnvelope(costAppendEntry(projectId,scenarioId,scenario));
 }
 function costPkCandidate(projectId,scenarioId){
   const rows=loadCostStore().pk.filter(row=>row.projectId===projectId&&row.scenarioId===scenarioId);
