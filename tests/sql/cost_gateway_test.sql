@@ -60,6 +60,16 @@ begin
 exception when others then
   if SQLERRM <> 'COST_GATEWAY_FLAG_ADMIN_ONLY' then raise; end if;
 end $$;
+do $$
+begin
+  insert into public.fs_meta(key,value) values('temporary_gateway_key','{"enabled":false}'::jsonb)
+  on conflict (key) do update set value=excluded.value;
+  update public.fs_meta set key='cost_gateway_enabled', value='{"enabled":true}'::jsonb
+  where key='temporary_gateway_key';
+  raise exception 'non-admin renamed a key into gateway flag';
+exception when others then
+  if SQLERRM <> 'COST_GATEWAY_FLAG_ADMIN_ONLY' then raise; end if;
+end $$;
 rollback;
 
 begin;

@@ -71,9 +71,10 @@ language plpgsql security definer
 set search_path = ''
 as $$
 begin
-  if coalesce(old.key,new.key) = 'cost_gateway_enabled'
+  if ((TG_OP <> 'DELETE' and new.key = 'cost_gateway_enabled')
+      or (TG_OP <> 'INSERT' and old.key = 'cost_gateway_enabled'))
      and auth.uid() is not null
-     and private.fs_current_role() <> 'admin' then
+     and private.fs_current_role() is distinct from 'admin' then
     raise exception 'COST_GATEWAY_FLAG_ADMIN_ONLY' using errcode='42501';
   end if;
   if TG_OP = 'DELETE' then return old; end if;
