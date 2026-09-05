@@ -221,3 +221,29 @@ Verification: module 134/134, calculator browser 8/8, parent browser 37/37, SQL 
 Security/database/permission/dependency impact: ไม่มี เครื่องมือเป็น read-only ใช้ node built-in ล้วน มี test ยืนยันว่าไม่สร้าง ไม่ลบ และไม่แก้ไฟล์ input
 
 Status: LOCAL_VERIFIED / INTEGRATION_BLOCKED — RD Center ยังไม่ผ่าน audit และยังไม่มีการต่อจริง
+
+## สถานะรายการค้าง — ปรับให้ตรงกับการตัดสินใจถึง 2026-09-05
+
+รายการค้างในหัวข้อเก่าด้านบนหลายข้อถูกแทนที่ด้วยการตัดสินใจของเจ้าของระบบไปแล้ว บันทึกไว้ที่นี่เพื่อไม่ให้คนอ่านทีหลังไปทำงานที่ยกเลิกแล้ว
+
+**ปิดแล้วด้วยการตัดสินใจ ไม่ต้องทำต่อ**
+
+- สิทธิ์ Procurement RM แยกจาก PU-PK · Production/Finance/CEO · `viewRevision` · project scoping · `/v1/cost/*` · การถอน raw grant — **ยกเลิกทั้งชุด** เพราะเลือกสถาปัตยกรรม local-first ตาม [ADR 0002](docs/adr/0002-local-first-cost-calculator-without-server-enforcement.md) migration และ SQL test เก็บไว้เป็นทางเลือก server-enforced ที่ผ่านการตรวจแล้ว
+- สรุปที่ค้างใน outbox จะส่งเข้า `fs_chats` หรือไม่ — **ตัดสินแล้ว** เขียนเข้าโดยส่งเฉพาะยอดหลังบวก
+- แหล่ง RM catalog และ PK ในเครื่อง — **ตัดสินแล้ว** นำเข้า Excel/CSV และกรอกผล PK ที่ยืนยันแล้ว
+- ผู้มีอำนาจตั้งอัตราขาย — **ตัดสินแล้ว** เป็น capability `setPricing` แยก ค่าเริ่มต้น Finance และ CEO
+- MOQ ตัวเลขเปล่า · การตีความจุลภาค · การเลือก Tier — **ตัดสินแล้ว** ดู [ประเมิน RD Data Center](docs/RD_DATA_CENTER_ASSESSMENT.md)
+
+**ยังค้างจริง — ผมทำต่อได้เอง**
+
+- [ ] ต่อผลของ `RmCatalogBuild` เข้ากับปุ่มนำเข้าในแอปโดยตรง แทนการส่งไฟล์ให้กรอกมือ (รอให้ต้นทางมีสามคอลัมน์ก่อนจึงจะมีประโยชน์)
+
+**ยังค้างจริง — ต้องให้เจ้าของระบบหรือกระบวนการ**
+
+- [ ] เพิ่มสามคอลัมน์ที่ต้นทาง: ขนาดสั่งเพิ่ม · วันหมดอายุราคา · การรับรอง spec — **ตัวนี้บล็อกทุกอย่าง** ไม่มีรายการใดคิดต้นทุนได้จนกว่าจะมี
+- [ ] Lead Time ของ 19 รายการที่จับคู่ไม่ได้ — ตารางที่มี Lead Time เป็นคนละชุดกับสารที่มีราคา
+- [ ] รัน `previewSourceFix()` แล้ว `applySourceFix()` ตาม [runbook](docs/RM_SOURCE_FIX_RUNBOOK.md)
+- [ ] กรอกอัตรามาตรฐาน Operation 6 รูปแบบในแอป
+- [ ] ตัดสิน 24 แถวที่ตีความไม่ได้
+- [ ] แก้ A03 · A04 · A07 · A08 · A09 ที่ pilot script และการติดตั้ง — Critical Change
+- [ ] UAT · independent review จาก CODEOWNER · deployment โดย Runtime Operator
