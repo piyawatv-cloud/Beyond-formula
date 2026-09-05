@@ -11,7 +11,7 @@
 //            แท็บที่มี RD-Code + Ingredient Name คือแคตตาล็อกสาร
 //            แท็บที่มี Offered Ingredient + Lead Time คือแหล่ง Lead Time
 const fs=require('fs'),path=require('path'),vm=require('vm');
-const {unzip,sharedStrings,readSheet,readCsv,gridToObjects}=require('./check-rm-catalog.js');
+const {unzip,sharedStrings,readSheet,readCsv}=require('./check-rm-catalog.js');
 
 function loadDomain(){
   const ctx={};vm.createContext(ctx);
@@ -30,19 +30,8 @@ function sheetsOf(file){
     .sort((a,b)=>a.length-b.length||a.localeCompare(b))
     .map((n,i)=>({name:names[i]||n,grid:readSheet(files[n],strings)}));
 }
-// หัวตารางอาจไม่ได้อยู่แถวแรก จึงเลื่อนหาแถวที่มีคอลัมน์ที่ต้องการครบ
-function findTable(sheets,required){
-  for(const sheet of sheets){
-    for(let r=0;r<Math.min(sheet.grid.length,30);r++){
-      const head=(sheet.grid[r]||[]).map(c=>String(c===undefined?'':c).trim());
-      if(required.every(name=>head.includes(name))){
-        const {header,rows}=gridToObjects([head,...sheet.grid.slice(r+1)]);
-        return {sheet:sheet.name,header,rows};
-      }
-    }
-  }
-  return null;
-}
+// Keep the helper export compatible; discovery belongs to the shared domain.
+function findTable(sheets,required){return loadDomain().RmCatalogBuild.findTable(sheets,required);}
 function csv(rows,cols){
   const q=v=>{const s=v===null||v===undefined?'':String(v);return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;};
   return '﻿'+[cols.join(','),...rows.map(r=>cols.map(c=>q(r[c])).join(','))].join('\n');
@@ -59,21 +48,17 @@ function main(){
     process.exit(2);
   }
   const sheets=sheetsOf(file);
-  const priceMap=findTable(sheets,['RD-Code','Price Tiers (Raw)']);
-  const catalog=findTable(sheets,['RD-Code','Ingredient Name']);
-  const offered=findTable(sheets,['Offered Ingredient','Lead Time']);
-  if(!priceMap){console.error('\nไม่พบตารางจับคู่ราคา (ต้องมีคอลัมน์ RD-Code และ Price Tiers (Raw))\n');process.exit(1);}
   const {RmCatalogBuild}=loadDomain();
-  const built=RmCatalogBuild.build({catalog:catalog?catalog.rows:[],priceMap:priceMap.rows,
-    offered:offered?offered.rows:[]});
+  const built=RmCatalogBuild.fromSheets(sheets);
+  const {priceMap,catalog,offered}=built.tables;
   const cols=['id','materialId','tierId','vendorId','name','group','spec','vendor','status','specApproved',
     'currency','price','priceUnit','priceBasisQuantity','moq','moqUnit','increment','incrementUnit',
     'leadTimeDays','validUntil','evidenceRef'];
   const line='─'.repeat(64);
   console.log(`\nประกอบแคตตาล็อกจาก RD Data Center — อ่านอย่างเดียว ไม่เขียนกลับต้นทาง\n${line}`);
-  console.log(`ตารางจับคู่ราคา : ${priceMap.sheet} (${priceMap.rows.length} แถว)`);
-  console.log(`แคตตาล็อกสาร   : ${catalog?catalog.sheet+' ('+catalog.rows.length+' แถว)':'ไม่พบ — ชื่อสารจะมาจากตารางจับคู่ราคาแทน'}`);
-  console.log(`แหล่ง Lead Time : ${offered?offered.sheet+' ('+offered.rows.length+' แถว)':'ไม่พบ — Lead Time จะว่างทุกแถว'}`);
+  console.log(`ตารางจับคู่ราคา : ${priceMap.sheet} (${priceMap.rowCount} แถว)`);
+  console.log(`แคตตาล็อกสาร   : ${catalog?catalog.sheet+' ('+catalog.rowCount+' แถว)':'ไม่พบ — ชื่อสารจะมาจากตารางจับคู่ราคาแทน'}`);
+  console.log(`แหล่ง Lead Time : ${offered?offered.sheet+' ('+offered.rowCount+' แถว)':'ไม่พบ — Lead Time จะว่างทุกแถว'}`);
   console.log(`${line}`);
   console.log(`สารทั้งหมด            : ${built.summary.materials}`);
   console.log(`ข้อเสนอที่ประกอบได้   : ${built.summary.offers}`);

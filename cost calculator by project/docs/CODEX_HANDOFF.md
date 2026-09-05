@@ -1,5 +1,40 @@
 # Prompt สำหรับ Codex — Cost Calculator
 
+## Current verified handoff — 2026-09-06
+
+Status: **LOCAL_VERIFIED / INTEGRATION_BLOCKED**. This section supersedes historical implementation counts and server-gateway descriptions below. The accepted architecture remains ADR 0002: local-first calculator and display-level role projections. This is not confidential server-side isolation and is not a 27/27 production completion claim.
+
+- **A1 complete locally:** sourcing request acknowledgement/list and duplicate prevention; separate success notices; readable pending/field errors; kg/g/mg selectors; live partial formula sum; PK-not-applicable wording; historical revisions visibly read-only with a latest-revision action; unchanged saves do not create revisions. Failed catalog, revision, request and actual chat persistence cannot report success.
+- **A2 complete locally:** five mutation regressions prove future validFrom, invalid priceBasisQuantity, malformed comma numbers, 9.9% formula mismatch and direct non-RD sendSummary authorization are detected. Each baseline passes and its corresponding in-memory mutation fails.
+- **Source import complete locally:** the browser and CLI share canonical RmSourceMap/RmCatalogBuild code. Direct Data Center workbook import consumes the three added columns, validates dates, exclusions, LT units and duplicate identities, preserves incomplete records for review, and retires previous tiers for represented materials before applying a new source snapshot. Historical scenario snapshots stay unchanged. Duplicate material codes are blocked rather than guessed.
+- **C preparation complete locally:** RmConfirmationAdapter provides preview, actor/terms binding, authorization, locking, verified backup, append/readback and idempotent confirmation with fail-closed eligibility. Its real binding is deliberately null. These tests do not prove that A03/A04 are installed or working in the live pilot.
+- **A3 blocked by source input:** no corrected, authorized Data Center export was supplied in this worktree. Synthetic successful calculations do not establish a real usable-record count.
+- **B decisions pending:** whether RD may enter a PU-PK-backed result and whether independent machine catalogs are acceptable. Preserve current accepted behavior; do not invent answers. LT for 19 records, 24 ambiguous rows and the six STD inputs still need accountable owners; blank is not zero.
+- **D remains human/integration work:** actual source/binding validation, A07/A08/A09 installation changes, user UAT, CODEOWNER review and operator deployment. No live Sheet/script writes, messages, production data access, push or deployment occurred.
+
+Verification: **292/292 module tests, 14/14 calculator browser cases, 37/37 parent browser cases and the required SQL suite passed**, with zero skipped module tests. Five mutation checks are included in the module count. Independent bounded agent review found persistence and stale-tier defects; both were fixed with regressions. This does not substitute for CODEOWNER final approval.
+
+Parent browser harness now waits for the existing fixture's completion marker using bounded real-time CDP polling; virtual-time execution could stall on recurring app timers. Test assertions remain intact, network/configuration is scrubbed and browser profiles plus SQL temporary files stay inside this worktree's ignored .runtime directory.
+
+### Traceability and impact
+
+- task_id: cost-calculator-implementation-2026-09-05
+- issue_id: none assigned
+- branch: codex/cost-calculator-implementation; starting revision this session: bf6a3bb
+- files_changed: index.html; harness.js; tests/cost-calculator-{core,local}.test.js; tests/cost-calculator-browser.fixture.js; tests/run-sql-tests.sh; project apps_script/RmCatalogBuild.gs and RmConfirmationAdapter.gs; tools/build-rm-catalog.js and sync-rm-browser-domain.js; focused project tests; TASK and handoff/execution/runbook documentation.
+- tests_run/test_result: commands in CODEX_HANDOFF; results above, synthetic local data only.
+- security_impact: stricter import eligibility and persistence failure handling; local-first confidentiality limitation unchanged. Critical review required for approval/integration-related changes.
+- database_impact: no schema or production-data changes.
+- permission_impact: no role grants changed; historical-edit and existing import/send capabilities enforced. Group B authority decision remains open.
+- dependency_impact: no new package dependency; browser harness uses the available Node fetch/WebSocket APIs.
+- rollback: revert this session's commit(s) after review; no data migration. Existing local catalogs/revisions are not automatically rewritten or deleted by a code rollback.
+- open_risks: local browser data is readable by a person with local access; no live source readiness evidence; no real adapter binding; outstanding owner inputs and human gates above.
+- pr_reference: none; no push, merge, release or final approval.
+
+
+## Historical evidence and original work list
+
+
 คัดลอกตั้งแต่เส้นด้านล่างจนจบไฟล์ไปวางเป็น prompt ได้เลย เนื้อหาเขียนถึง Codex โดยตรง
 
 ---
@@ -76,8 +111,8 @@ HEAD ล่าสุด: 8559adc  (26 commits จาก baseline 3a9c32d)
 **A3. หลังเจ้าของเติมข้อมูลต้นทางแล้ว ตรวจว่าคิดต้นทุนได้จริง**
 
 ```sh
-node "cost calculator by project/tools/build-rm-catalog.js" <DataCenter export> -o /tmp/catalog.csv
-node "cost calculator by project/tools/check-rm-catalog.js" /tmp/catalog.csv --show-values
+node "cost calculator by project/tools/build-rm-catalog.js" <DataCenter export> -o .runtime/catalog.csv
+node "cost calculator by project/tools/check-rm-catalog.js" .runtime/catalog.csv --show-values
 ```
 
 รายงานจำนวน **พร้อมคิดต้นทุนทันที** ถ้ายัง 0 ให้บอกว่าติดอะไร **ห้ามเติมค่าให้เอง** ค่าว่างแปลว่ายังไม่มีข้อมูล

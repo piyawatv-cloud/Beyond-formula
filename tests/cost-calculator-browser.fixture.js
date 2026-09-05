@@ -23,6 +23,21 @@
  userList=[{name:currentUser,role:'sales'}];renderUserUI();await openCostCalculator('A00001');
  check('Sales response and DOM omit raw catalog',!JSON.stringify(costState.response).includes('SYNTHETIC VENDOR')&&!document.getElementById('costSearch'));
  check('new costs never enter legacy stores',!JSON.stringify(localStorage).includes('SYNTHETIC VENDOR'));
+ // Exercise shipped local transport and actual DOM events, not just the fixture gateway.
+ delete window.__costTestRequest;userList=[{name:currentUser,role:'rd'}];costStore=null;localStorage.removeItem('fs_cost');
+ await openCostCalculator('A00001');
+ document.getElementById('costRequestBrief').value='Synthetic sourcing request';await costRequestMaterial();
+ check('local request is acknowledged and visible without an external send',document.getElementById('costView').textContent.includes('บันทึกคำขอจัดหาแล้ว')&&document.getElementById('costView').textContent.includes('Synthetic sourcing request')&&loadCostStore().requests.length===1);
+ check('weight unit is a dropdown',document.getElementById('costFillUnit').tagName==='SELECT');
+ await costLocalRequest('save',{projectId:'A00001',expectedRevision:1,patch:{sellingUnits:100,unitsPerPack:60,fillAmount:1,fillUnit:'g',lines:[]}});
+ loadCostStore().catalog=[offers[0]];await costLocalRequest('selectRM',{projectId:'A00001',expectedRevision:2,offerRef:'O1'});
+ await openCostCalculator('A00001');const amount=document.getElementById('costAmount0');amount.value='0.4';amount.dispatchEvent(new Event('input',{bubbles:true}));
+ check('typing updates cumulative mass before save',document.getElementById('costFormulaPreview').textContent.includes('0.4')&&document.getElementById('costFormulaPreview').textContent.includes('ยังขาด 0.6'));
+ await costSave();const revision=costState.response.revision;await costSave();
+ check('unchanged real form save retains revision',costState.response.revision===revision&&document.getElementById('costView').textContent.includes('ไม่มีข้อมูลเปลี่ยนแปลง'));
+ authSession={user:{id:'SYNTHETIC'}};authMembership={role:'rd'};await openCostCalculator('A00001','S1',2);
+ check('historical form disabled with explicit latest navigation',document.getElementById('costFillAmount').disabled&&document.getElementById('costView').textContent.includes('กำลังดู revision เก่า'));
+ await costOpenLatest();check('latest navigation escapes old revision',costState.response.revision===revision&&!document.getElementById('costFillAmount').disabled);
  userList=[{name:currentUser,role:'rd'}];renderUserUI();await openCostCalculator('A00001');
  document.querySelector('.main').style.display='block';
  const banner=document.createElement('p');banner.textContent='ข้อมูลจำลองสำหรับตรวจ UI — ไม่ใช่ระบบเชื่อมจริง';banner.className='cost-warning';document.getElementById('costView').prepend(banner);

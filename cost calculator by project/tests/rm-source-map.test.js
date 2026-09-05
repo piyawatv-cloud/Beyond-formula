@@ -91,3 +91,9 @@ test('ไม่เลือก Tier ให้เอง — ทุก Tier ต้
   assert.equal(parsed.positions.length,3);
   assert.equal(parsed.positions.map(p=>p.price).join('|'),'1200|900|800','ห้ามคัดเหลือ max หรือ min');
 });
+
+test('A2 two digits after an unspaced comma stay separate tiers',()=>{
+  const thousands=M.normalisePair('1 kg','1,200');assert.equal(thousands.usable,true);assert.equal(join(thousands.price),'1200');
+  const two=M.normalisePair('1,20','90,80');assert.equal(two.usable,true);assert.equal(join(two.moq),'1 kg|20 kg');assert.equal(join(two.price),'90|80');
+  const parsed=R.parsePaired(two.moq,two.price);assert.equal(parsed.ok,true);assert.equal(parsed.positions.map(p=>p.moq+':'+p.price).join('|'),'1:90|20:80');
+});

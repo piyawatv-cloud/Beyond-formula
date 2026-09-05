@@ -544,3 +544,21 @@ test('ค่าดำเนินการคิดต่อหน่วยท�
  const calc=c.CostCalculator.calculate(sc,new Date().toISOString().slice(0,10));
  assert.equal(calc.productionUnits,6000);
  assert.equal(calc.operation.baseTotal,0.6*6000,'ต้องคิด 0.60 x 6,000 แคปซูล ไม่ใช่ x 100 ขวด');});
+
+test('A2 catalog denominator validity rejects invalid explicit price bases',()=>{
+  const c=fixture();
+  for(const value of [1,25]){const parsed=c.costParseCatalogRows([catalogRow({priceBasisQuantity:value})]);assert.equal(parsed.offers.length,1);assert.equal(parsed.offers[0].priceBasisQuantity,value);assert.equal(parsed.rejected.length,0);}
+  for(const value of [0,-1,'','not-a-number','Infinity',null]){const parsed=c.costParseCatalogRows([catalogRow({priceBasisQuantity:value})]);assert.equal(parsed.offers.length,0,'invalid denominator '+String(value));assert.equal(parsed.rejected.length,1);assert.match(parsed.rejected[0].reason,/priceBasisQuantity/);}
+});
+test('A2 non-RD direct summary command is denied before any write',async()=>{
+  const c=fixture();await c.costLocalRequest('open',{projectId:'A00001'});
+  assert.equal(c.costCapabilities().sendSummary,true,'RD control can send');
+  const base={projectId:'A00001',scenarioId:'S1',expectedRevision:1};
+  const sent=await c.costLocalRequest('sendSummary',{...base,idempotencyKey:'A00001:S1:1:rd-control'});assert.equal(sent.sendState,'sent');
+  for(const role of ['sales','opc']){
+    c.currentRole=()=>role;c.userList[0].role=role;
+    const before=JSON.stringify({backing:c.backing,chats:c.chats,store:c.loadCostStore()});
+    await assert.rejects(c.costLocalRequest('sendSummary',{...base,idempotencyKey:'A00001:S1:1:'+role}),/ไม่มีสิทธิ์ส่งสรุป/);
+    assert.equal(JSON.stringify({backing:c.backing,chats:c.chats,store:c.loadCostStore()}),before,'denial must not touch chat, outbox or storage');
+  }
+});

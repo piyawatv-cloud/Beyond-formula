@@ -111,3 +111,19 @@ test('ฐานค่าธรรมเนียมที่ไม่รู้�
     assert.equal(C.calculate(x,date).complete,false,'basis = '+JSON.stringify(basis));
   }
 });
+
+// A2: controls are fully eligible before varying the effective-from boundary.
+test('A2 effective-from dates gate each otherwise-ready cost category',()=>{
+  assert.equal(C.calculate(readyInput(),date).complete,true);
+  for(const target of ['rm','pk','operation','policy']){
+    const set=(x,value)=>{const terms=target==='rm'?x.rmLines[0].offer:target==='pk'?x.pk:target==='operation'?x.operation:x.policies.RM;terms.validFrom=value;};
+    const eligibility=r=>target==='policy'?r.rm.adjustedTotal!==null:r[target].ready;
+    for(const valid of ['2028-12-31',date]){const x=readyInput();set(x,valid);assert.equal(eligibility(C.calculate(x,date)),true,target+' active control');}
+    for(const invalid of ['2029-01-02','2029-02-31','not-a-date']){const x=readyInput();set(x,invalid);const result=C.calculate(x,date);assert.equal(eligibility(result),false,target+' '+invalid);assert.equal(result.complete,false);}
+  }
+});
+test('A2 formula tolerance rejects 9.9 percent underfill and overfill',()=>{
+  assert.equal(C.calculate(readyInput(),date).complete,true);
+  for(const amount of [901,1099]){const x=readyInput();x.rmLines[0].amount=amount;const r=C.calculate(x,date);assert.ok(r.rm.baseTotal>0,'draft still has the known consumed cost');assert.equal(r.formulaComplete,false,amount+' mg against 1000 mg target');assert.equal(r.complete,false);}
+  const x=readyInput();x.rmLines[0].amount=1000*(1+1e-12);assert.equal(C.calculate(x,date).formulaComplete,true,'representation-level arithmetic noise remains tolerated');
+});

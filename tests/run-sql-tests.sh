@@ -8,7 +8,8 @@ LC_ALL=${LC_ALL:-C}
 export LC_ALL
 
 FS_SQL_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-FS_SQL_TMP=$(mktemp -d "${TMPDIR:-/tmp}/beyond-formula-sql.XXXXXX")
+mkdir -p "$FS_SQL_ROOT/.runtime"
+FS_SQL_TMP=$(mktemp -d "$FS_SQL_ROOT/.runtime/sql.XXXXXX")
 FS_SQL_PORT=$((50000 + ($$ % 10000)))
 FS_SQL_LOG="$FS_SQL_TMP/postgres.log"
 

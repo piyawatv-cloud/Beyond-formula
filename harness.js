@@ -3,7 +3,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
+const { spawn } = require('node:child_process');
 
 const root = __dirname;
 const sourcePath = path.join(root, 'index.html');
@@ -15,7 +15,9 @@ const originalUrl = (html.match(/let SB_URL = '([^']*)';/) || [,''])[1];
 const originalKey = (html.match(/let SB_KEY = '([^']*)';/) || [,''])[1];
 html = html
   .replace(/let SB_URL = '[^']*';/, "let SB_URL = 'https://test-project.supabase.co';")
-  .replace(/let SB_KEY = '[^']*';/, "let SB_KEY = 'sb_publishable_test_only';");
+  .replace(/let SB_KEY = '[^']*';/, "let SB_KEY = 'sb_publishable_test_only';")
+  .replace(/<script[^>]+src=[^>]+><\/script>/g,'')
+  .replace(/<link[^>]+href="https:[^>]+>/g,'');
 
 const mockPrelude = `<script>
 window.__FS_TEST__ = true;
@@ -47,25 +49,64 @@ if((originalUrl && html.includes(originalUrl)) || (originalKey && html.includes(
 
 fs.writeFileSync(testPath, html);
 
-const result = spawnSync(browser, [
-  '--headless=new',
-  '--disable-gpu',
-  '--no-sandbox',
-  '--disable-background-networking',
-  '--virtual-time-budget=7000',
-  '--dump-dom',
-  'file://' + testPath
-], {encoding:'utf8', maxBuffer:32 * 1024 * 1024});
+fs.mkdirSync(path.join(root,'.runtime'),{recursive:true});
+const profile=fs.mkdtempSync(path.join(root,'.runtime','chrome-parent-'));
 
-if(result.error) throw result.error;
-const output = result.stdout || '';
-const match = output.match(/<pre id="fs-test-results">([\s\S]*?)<\/pre>/);
-const report = match ? match[1]
-  .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
-  .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&') : '';
-
-if(report) process.stdout.write(report + '\n');
-if(result.status !== 0 || !/<html[^>]*data-test-status="passed"/.test(output)){
-  if(!report) process.stderr.write((result.stderr || 'Browser test did not produce a report') + '\n');
-  process.exit(1);
-}
+// Poll the test's completion marker in real time: virtual time can stall on
+// the application's recurring sync timers. Assertions remain in the fixture.
+const child=spawn(browser,[
+  '--user-data-dir='+profile,'--no-first-run','--no-default-browser-check',
+  '--headless=new','--disable-gpu','--no-sandbox',
+  '--disable-background-networking','--remote-debugging-port=0','about:blank'
+],{stdio:'ignore'});
+const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+(async()=>{
+ let ws;
+ const deadline=Date.now()+30000;
+ try{
+  const portFile=path.join(profile,'DevToolsActivePort');
+  while(!fs.existsSync(portFile)&&Date.now()<deadline)await sleep(100);
+  if(!fs.existsSync(portFile))throw Error('Browser did not start within timeout');
+  const port=fs.readFileSync(portFile,'utf8').split('\n')[0];
+  const target=await(await fetch('http://127.0.0.1:'+port+'/json/new?'+encodeURIComponent('file://'+testPath),{method:'PUT',signal:AbortSignal.timeout(5000)})).json();
+  ws=new WebSocket(target.webSocketDebuggerUrl);
+  await new Promise((resolve,reject)=>{
+   const timer=setTimeout(()=>reject(Error('Browser connection timed out')),5000);
+   ws.addEventListener('open',()=>{clearTimeout(timer);resolve();},{once:true});
+   ws.addEventListener('error',()=>{clearTimeout(timer);reject(Error('Browser connection failed'));},{once:true});
+  });
+  let id=0;
+  const pending=new Map();
+  ws.addEventListener('message',event=>{
+   const response=JSON.parse(event.data);
+   if(response.id)pending.get(response.id)?.(response);
+  });
+  const evaluate=()=>new Promise((resolve,reject)=>{
+   const key=++id,timer=setTimeout(()=>{pending.delete(key);reject(Error('Browser evaluation timed out'));},5000);
+   pending.set(key,response=>{clearTimeout(timer);pending.delete(key);resolve(response);});
+   ws.send(JSON.stringify({id:key,method:'Runtime.evaluate',params:{
+    expression:'JSON.stringify({status:document.documentElement.dataset.testStatus,report:document.getElementById("fs-test-results")?.textContent})',returnByValue:true
+   }}));
+  });
+  while(Date.now()<deadline){
+   const response=await evaluate();
+   const value=response.result?.result?.value;
+   const state=value?JSON.parse(value):{};
+   if(state.report){
+    const report=JSON.parse(state.report);
+    console.log(JSON.stringify(report,null,2));
+    if(state.status!=='passed'||report.failed!==0)process.exitCode=1;
+    return;
+   }
+   await sleep(100);
+  }
+  throw Error('Browser test did not finish within 30 seconds');
+ }finally{
+  ws?.close();
+  const exited=new Promise(resolve=>child.once('exit',resolve));
+  child.kill('SIGTERM');
+  await Promise.race([exited,sleep(2000)]);
+  if(child.exitCode===null)child.kill('SIGKILL');
+  fs.rmSync(profile,{recursive:true,force:true});
+ }
+})().catch(error=>{console.error(error.message);process.exitCode=1;});
