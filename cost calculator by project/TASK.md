@@ -202,3 +202,22 @@ Verification: module 127/127, calculator browser 8/8, parent browser 37/37, SQL 
 **ข้อควรรู้เรื่องการเปิดเผย:** `fs_chats` ไหลออกทาง `exportChatExcel` ที่ OPC ใช้ได้ เส้นทางนี้ไม่ได้ถูกจำกัดเพิ่ม สิ่งที่ป้องกันคือเนื้อหาของข้อความล้วน ๆ บันทึกไว้ใน ADR 0002 แล้ว
 
 Status: LOCAL_VERIFIED / INTEGRATION_BLOCKED — UAT, independent review และ deployment ยังไม่ได้ทำ
+
+## เครื่องมือตรวจไฟล์แคตตาล็อก RM แบบ offline — 2026-09-05
+
+ผู้ใช้ถามว่า RD Center ต่อเข้าระบบได้ 100% หรือยัง คำตอบตามหลักฐานคือ **ยัง** — `docs/IMPLEMENTATION_PLAN.md:25` ระบุ audit A01–A10 เป็น FAIL, `REGISTRY.md:8` ระบุ governed RM price ว่า audit FAIL และ sync ไม่ยืนยัน, `SPEC.md:43` ระบุว่า sync 30 นาทีเป็นเป้าหมายไม่ใช่สถานะ และยังไม่เคยมีการเปิดฐานข้อมูลจริงใน session ใด จึงตอบเป็นเปอร์เซ็นต์ไม่ได้โดยไม่เดา
+
+- [x] `tools/check-rm-catalog.js`: รับ .xlsx/.csv รายงานว่าแถวไหนผ่าน/ไม่ผ่านเพราะอะไร อ่านอย่างเดียว ไม่นำเข้าระบบ ไม่เขียนไฟล์ ไม่ต่อเน็ต
+- [x] ใช้ `costParseCatalogRows` จริงจาก `index.html` ไม่คัดลอกกฎ รายงานจึงตรงกับผลนำเข้าจริงเสมอ
+- [x] อ่าน .xlsx ด้วย `zlib` ที่มากับ node (xlsx คือ zip ของ xml) จึงไม่เพิ่ม dependency ตามกฎข้อ 3 ทดสอบกับ .xlsx จริงในโปรเจกต์แล้ว
+- [x] ปิดราคาและชื่อซัพพลายเออร์เป็นค่าเริ่มต้น เปิดด้วย `--show-values` เพื่อให้ส่งผลตรวจต่อได้
+- [x] `docs/RM_CATALOG_FILE_FORMAT.md` สำหรับส่งต่อ Procurement พร้อมเตือนกับดัก `1400/25kg`
+- [x] แก้บั๊กที่พบระหว่างทำ: Excel ส่งเซลล์วันที่มาเป็น serial number ทำให้ `validUntil` ถูกปฏิเสธทุกแถวถ้า Procurement จัดรูปแบบเป็นวันที่จริง แก้ให้รับทั้ง serial, Date object และข้อความ
+
+Files: `cost calculator by project/tools/check-rm-catalog.js` (ใหม่), `cost calculator by project/tests/check-rm-catalog.test.js` (ใหม่ 6 ข้อ), `cost calculator by project/docs/RM_CATALOG_FILE_FORMAT.md` (ใหม่), `index.html` (รับวันที่จาก Excel + build stamp), `tests/cost-calculator-local.test.js`
+
+Verification: module 134/134, calculator browser 8/8, parent browser 37/37, SQL 33 exit 0, `git diff --check` clean
+
+Security/database/permission/dependency impact: ไม่มี เครื่องมือเป็น read-only ใช้ node built-in ล้วน มี test ยืนยันว่าไม่สร้าง ไม่ลบ และไม่แก้ไฟล์ input
+
+Status: LOCAL_VERIFIED / INTEGRATION_BLOCKED — RD Center ยังไม่ผ่าน audit และยังไม่มีการต่อจริง

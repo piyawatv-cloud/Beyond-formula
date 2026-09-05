@@ -170,3 +170,12 @@ test('a failed chat write is rolled back so a later retry still delivers exactly
  assert.equal(retry.sendState,'sent');
  assert.equal(c.chats[0].messages.filter(m=>m.costKey===key).length,1);
  assert.ok(JSON.parse(c.backing.fs_chats)[0].messages.some(m=>m.costKey===key),'and it must be persisted');});
+test('validUntil survives Excel handing it over as a date serial or a Date object',()=>{const c=fixture();
+ for(const value of [47484,'47484',new Date(Date.UTC(2030,0,1))]){
+  const parsed=c.costParseCatalogRows([catalogRow({validUntil:value})]);
+  assert.equal(parsed.rejected.length,0,String(value));
+  assert.equal(parsed.offers[0].validUntil,'2030-01-01',String(value));
+ }
+ // A bare number outside the plausible date range must stay a rejection rather
+ // than silently becoming a validity period.
+ for(const value of [5,999,99999])assert.equal(c.costParseCatalogRows([catalogRow({validUntil:value})]).rejected.length,1,String(value));});

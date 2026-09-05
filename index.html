@@ -664,7 +664,7 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
   <div class="logo"><svg viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-1.73-3L9 11.35V4H8a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2h-1v7.35L19.73 19A2 2 0 0 1 18 22H6Zm5-10.11L8.31 16.5h7.38L13 11.89V4h-2v7.89Z"/></svg></div>
   <div>
     <div class="hdr-title">Formula Studio</div>
-    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-05.5-cost-summary</div>
+    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-05.6-rm-check</div>
   </div>
   <div class="sync-chip" id="syncChip" onclick="sbManualSync()" title="สถานะการซิงก์ข้อมูลกับเซิร์ฟเวอร์กลาง"></div>
 </div>
@@ -1686,7 +1686,7 @@ function costParseCatalogRows(rows){
       priceBasisQuantity:costCell(row,'priceBasisQuantity')===undefined?1:number(costCell(row,'priceBasisQuantity')),
       moq:number(raw.moq),moqUnit:String(raw.moqUnit).trim(),
       increment:number(raw.increment),incrementUnit:String(raw.incrementUnit).trim(),
-      leadTimeDays:number(raw.leadTimeDays),validUntil:String(raw.validUntil).trim(),
+      leadTimeDays:number(raw.leadTimeDays),validUntil:String(costExcelDate(raw.validUntil)).trim(),
       evidenceRef:String(raw.evidenceRef).trim(),scope:{type:'central'}};
     const bad=[];
     if(offer.price===null||offer.price<0)bad.push('price');
@@ -1739,6 +1739,16 @@ function costRecordPk(projectId,scenarioId,input){
     confirmedBy:currentUser,confirmedAt:new Date().toISOString()};
   store.pk.push(snapshot);saveCostStore();
   return snapshot;
+}
+function costExcelDate(value){
+  // Duck-typed rather than instanceof: a Date from another realm (an iframe, or
+  // a library boundary) is still a Date and must not be rejected as unreadable.
+  if(Object.prototype.toString.call(value)==='[object Date]' && Number.isFinite(value.getTime()))return value.toISOString().slice(0,10);
+  const serial=typeof value==='number'?value:(typeof value==='string'&&/^\d+(\.\d+)?$/.test(value.trim())?Number(value.trim()):null);
+  // 20000 = 1954-10-03, 60000 = 2064-04-08. Outside that a bare number is not a
+  // date, and guessing would turn a stray figure into a validity period.
+  if(serial===null||!Number.isFinite(serial)||serial<20000||serial>60000)return value;
+  return new Date(Date.UTC(1899,11,30)+Math.floor(serial)*86400000).toISOString().slice(0,10);
 }
 function costDateOK(value){
   return typeof value==='string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
