@@ -1,5 +1,7 @@
 # Cost Calculator — client/gateway contract reconciliation
 
+> **สถานะ: SUPERSEDED สำหรับ Cost Calculator (2026-09-05).** System Owner เลือกสถาปัตยกรรม local-first เต็มรูปแบบ ไม่ใช้ Supabase เป็นผู้ตัดสินสิทธิ์ — ดู [ADR 0002](adr/0002-local-first-cost-calculator-without-server-enforcement.md) เอกสารนี้อธิบาย gateway ที่ calculator **ไม่คุยด้วยแล้ว** เก็บไว้เป็นทางเลือกที่ผ่านการตรวจแล้วสำหรับ server-enforced segregation ในอนาคต migration และ SQL test ที่อ้างถึงยังคงอยู่และยังต้องผ่าน ส่วนการแยกสิทธิ์ที่บรรยายไว้ใน §3 และ §5 **ไม่มีผลบังคับในโหมดปัจจุบัน**
+
 Status: LOCAL_VERIFIED / INTEGRATION_BLOCKED. This document reconciles the browser `cost-v1` client in `index.html` against the local additive migration `supabase/migrations/20260905140000_cost_gateway_contract.sql`. The gateway remains default-deny and was not enabled anywhere outside the synthetic SQL test database. No production schema, grant, secret or record was touched.
 
 Task labels: P02–P04, P20–P23 (local plan labels). Issue/PR: none assigned. Reviewer for Critical Change: CODEOWNER `@phossatron` or a formally appointed substitute. The author cannot final-approve.

@@ -162,3 +162,25 @@ Code changes: `tests/sql/cost_gateway_test.sql` (+1 snapshot check, 33 total), `
 Verification: module 99/99, calculator browser 8/8, parent browser 37/37, SQL 33 named checks exit 0, `git diff --check` clean. Security/database/permission/dependency impact: none — tests only. Rollback: revert this round's commit.
 
 Status unchanged: LOCAL_VERIFIED / INTEGRATION_BLOCKED.
+
+## Local-first pivot — 2026-09-05
+
+System Owner ตอบคำถามสถาปัตยกรรม 4 ข้อ: ตารางสิทธิ์แยกต่างหาก, **local-first เต็มรูปแบบไม่ใช้ Supabase**, RD เปิดได้ทุกโครงการ, deep link เฉพาะ RD/Admin. บันทึกใน [ADR 0002](docs/adr/0002-local-first-cost-calculator-without-server-enforcement.md) พร้อมผลกระทบที่เจ้าของรับทราบแล้วว่าการแยกสิทธิ์กลายเป็น display control ไม่ใช่ access control
+
+- [x] เขียน ADR ก่อนแตะโค้ด และระบุผลกระทบด้วยถ้อยคำของตัวเลือกที่เจ้าของเลือก
+- [x] ติดสถานะ SUPERSEDED ให้ COST_GATEWAY_CONTRACT.md และปรับ acceptance ข้อ 2–4 ใน SECURITY_VERSION_CONTRACT.md ว่า "ทำไม่ได้ในโหมดนี้" ไม่ใช่ TODO ค้าง
+- [x] เก็บ migration และ SQL test 33 ข้อไว้ทั้งหมด ยังต้องผ่านตามกฎข้อ 7 และเป็นทางเลือก server-enforced ที่ผ่านการตรวจแล้ว
+- [x] เพิ่ม `COST_CALCULATOR_LOCAL` block: store `fs_cost` (key ใหม่แบบ additive), loader แยกที่ห้ามเขียนก่อนโหลดเสร็จ, ตารางสิทธิ์ `COST_ROLE_DEFAULTS`, transport ท้องถิ่นครบ 7 action
+- [x] ต่อ `costRequest` ให้เข้า local store เมื่อยังไม่ตั้ง `COST_API_ORIGIN` โดยคง network path ไว้เป็นทางเลือกที่ตรวจแล้ว
+- [x] เพิ่ม `Procurement RM` ใน `CostCalculator.project()` — พบว่าเดิมบทบาทนี้ได้ shape "ไม่มีสิทธิ์" ที่ UI จะปฏิเสธ
+- [x] bump build stamp เป็น `2026-09-05.3-cost-local` (กฎข้อ 10 มีผลรอบนี้)
+- [ ] ยังไม่ตัดสิน: สรุปที่ค้างใน outbox จะส่งเข้า `fs_chats` ในเครื่องหรือไม่ (แตะ store ที่ล็อก ต้องตัดสินแยก)
+- [ ] ยังไม่มีแหล่ง RM catalog และ PK ในเครื่อง — `adoptPK` ปฏิเสธตรง ๆ แทนการสมมติผล
+
+Files: `index.html` (core `project()`, local block, transport, build stamp), `tests/cost-calculator-local.test.js` (ใหม่ 16 ข้อ), `tests/cost-calculator-ui.test.js` (เปลี่ยนชื่อ test ให้ตรงกับสิ่งที่ทดสอบจริง), ADR 0002, COST_GATEWAY_CONTRACT.md, SECURITY_VERSION_CONTRACT.md
+
+Verification: module 115/115, calculator browser 8/8, parent browser 37/37, SQL 33 exit 0, `git diff --check` clean
+
+Security impact: **ลดลงโดยเจตนาตามการตัดสินใจของเจ้าของระบบ** — ข้อมูลต้นทุนดิบอยู่ใน `localStorage` ของเครื่องผู้ใช้ ไม่มี server บังคับสิทธิ์ การแยก RM/PK/Sales เป็นการควบคุมการแสดงผล Database/permission impact: ไม่มี ไม่แตะ schema, grant หรือ locked key เดิม Dependency: ไม่มี Rollback: revert commit นี้ `fs_cost` เป็น key ใหม่ ลบได้โดยไม่กระทบข้อมูลเดิม
+
+Status: LOCAL_VERIFIED / INTEGRATION_BLOCKED (UAT, independent review, deployment ยังไม่ได้ทำ)

@@ -81,6 +81,8 @@ Repository-scoped `rg --files --hidden -g '*.gs'` found no Apps Script source in
 
 ## Acceptance before integration can be called complete
 
+> **ปรับตาม ADR 0002 (2026-09-05):** ภายใต้สถาปัตยกรรม local-first ที่เจ้าของระบบเลือก ข้อ 2–4 ด้านล่าง (ยิง REST/RPC ตรงด้วยบัญชีสังเคราะห์, RD อ่านราคา PK ไม่ได้ / PU-PK อ่านราคา RM ไม่ได้, ปฏิเสธ forged confirmation และ unauthorized approval ที่ trusted server) **ทำไม่ได้ เพราะไม่มี trusted server ในโหมดนี้** ไม่ใช่รายการที่ค้างทำ ต้องเปลี่ยนสถาปัตยกรรมกลับไปใช้ server-enforced boundary ก่อนจึงจะกลับมาเป็นเกณฑ์ได้ ตาราง "Trusted access boundary" ด้านบนก็มีสถานะเดียวกัน
+
 1. Old Formula fixtures load without renamed keys/types or clearing stores; partial projections cannot overwrite authoritative records. Approved snapshots remain byte-stable after source updates.
 2. Authenticated synthetic accounts exercise raw REST/RPC requests, not just UI checks. Sales/OPC cannot obtain forbidden fields through records, chat/events, activities, exports, print, cache or error payloads. Cross-project requests and forged capabilities fail.
 3. RD cannot retrieve raw PK/Operation prices and PU-PK cannot retrieve raw RM prices; totals do not permit simple subtraction/division reconstruction. Unknown roles fail closed.
