@@ -664,7 +664,7 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
   <div class="logo"><svg viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-1.73-3L9 11.35V4H8a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2h-1v7.35L19.73 19A2 2 0 0 1 18 22H6Zm5-10.11L8.31 16.5h7.38L13 11.89V4h-2v7.89Z"/></svg></div>
   <div>
     <div class="hdr-title">Formula Studio</div>
-    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-05.3-cost-local</div>
+    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-05.4-cost-rm-pk</div>
   </div>
   <div class="sync-chip" id="syncChip" onclick="sbManualSync()" title="สถานะการซิงก์ข้อมูลกับเซิร์ฟเวอร์กลาง"></div>
 </div>
@@ -1395,9 +1395,10 @@ async function costAction(action,extra){
 }
 function costNumber(value){return typeof value==='number' && Number.isFinite(value)?value.toLocaleString('th-TH',{maximumFractionDigits:4}):'รอข้อมูล';}
 function costDraftValue(id,fallback){return Object.hasOwn(costState.edits,id)?costState.edits[id]:fallback;}
-function costDraftDefaults(){const data=costState.response;if(!data)return {};const draft=data.inputs||{},defaults={costSellingUnits:draft.sellingUnits,costUnitsPerPack:draft.unitsPerPack,costFillAmount:draft.fillAmount};data.lines.forEach((line,i)=>{defaults["costAlias"+i]=line.alias||"";defaults["costAmount"+i]=line.amount;defaults["costLoss"+i]=line.lossPercent;});return defaults;}
+function costDraftDefaults(){const data=costState.response;if(!data)return {};const draft=data.inputs||{},defaults={costSellingUnits:draft.sellingUnits,costUnitsPerPack:draft.unitsPerPack,costFillAmount:draft.fillAmount,costFillUnit:draft.fillUnit,costPkSpecVersion:draft.pkSpecVersion};data.lines.forEach((line,i)=>{defaults["costAlias"+i]=line.alias||"";defaults["costAmount"+i]=line.amount;defaults["costLoss"+i]=line.lossPercent;});return defaults;}
 function costCaptureDraft(){for(const id of [...Object.keys(costDraftDefaults()),"costRequestBrief"]){const el=document.getElementById(id);if(el)costState.edits[id]=el.value;}}
 function costDraftDirty(){return Object.entries(costDraftDefaults()).some(([id,value])=>Object.hasOwn(costState.edits,id)&&String(costState.edits[id])!==String(value??""));}
+function costTextField(label,id,value,hint){value=costDraftValue(id,value);return `<label class="fgrp"><span class="flbl">${esc(label)}</span><input id="${id}" class="fi" value="${value==null?'':esc(value)}" ${costState.busy?'disabled':''}><span class="hint">${esc(hint)}</span></label>`;}
 function costField(label,id,value,unit){value=costDraftValue(id,value);return `<label class="fgrp"><span class="flbl">${esc(label)}</span><input id="${id}" class="fi" type="number" min="0" step="any" value="${value==null?'':esc(value)}" ${costState.busy?'disabled':''}><span class="hint">${esc(unit)}</span></label>`;}
 function renderCostCalculator(){
   const panel=document.getElementById('costView');if(!panel || !costState.projectId)return;
@@ -1415,13 +1416,19 @@ function renderCostCalculator(){
     <div class="cost-summary">${['rm','pk','operation'].map((key,index)=>`<div><b>${['RM','PK','Operation'][index]}</b><p>ยอดหลังบวก ${view[key]&&view[key].adjustedTotal!=null?costNumber(view[key].adjustedTotal):'รอกำหนดราคา'} บาท/ล็อต</p>${view[key]&&Object.hasOwn(view[key],'baseTotal')?`<p class="hint">ต้นทุนหมวดที่คุณดูได้ ${costNumber(view[key].baseTotal)} บาท</p>`:''}<span>${view[key]&&view[key].ready?'ข้อมูลต้นทุนครบ':'รอข้อมูล / รอยืนยัน'}</span></div>`).join('')}</div>
     <p><b>ราคาต่อหน่วยขาย: ${!view.complete||view.finalPerSellingUnit==null?'รอกำหนดราคา':costNumber(view.finalPerSellingUnit)} บาท</b></p>
     <ul>${(view.pending||[]).map(message=>`<li>${esc(message)}</li>`).join('')}</ul>
-    ${canEdit?`<h3>จำนวนผลิตและขนาดบรรจุ</h3><div class="fg4">${costField('จำนวนหน่วยขาย','costSellingUnits',draft.sellingUnits,'หน่วยขาย')}${costField('หน่วยย่อยต่อแพ็ก','costUnitsPerPack',draft.unitsPerPack,'หน่วยย่อย / หน่วยขาย')}${costField('น้ำหนักต่อหน่วยย่อย','costFillAmount',draft.fillAmount,draft.fillUnit||'ยังไม่ระบุหน่วย')}</div>
+    ${canEdit?`<h3>จำนวนผลิตและขนาดบรรจุ</h3><div class="fg4">${costField('จำนวนหน่วยขาย','costSellingUnits',draft.sellingUnits,'หน่วยขาย')}${costField('หน่วยย่อยต่อแพ็ก','costUnitsPerPack',draft.unitsPerPack,'หน่วยย่อย / หน่วยขาย')}${costField('น้ำหนักต่อหน่วยย่อย','costFillAmount',draft.fillAmount,draft.fillUnit||'ยังไม่ระบุหน่วย')}${costTextField('หน่วยน้ำหนัก','costFillUnit',draft.fillUnit,'kg / g / mg')}${costTextField('เวอร์ชัน spec บรรจุภัณฑ์','costPkSpecVersion',draft.pkSpecVersion,'ต้องระบุก่อนรับผล PK')}</div>
     <h3>RM ที่เลือก</h3><div class="rec-wrap"><table class="rec-tbl"><thead><tr><th>ชื่อแสดง</th><th>ปริมาณ / หน่วยย่อย</th><th>Loss %</th><th>ต้นทุนใช้จริง</th><th>เงินซื้อก่อนตรวจสต็อก</th><th>ของเหลือ</th><th></th></tr></thead><tbody>${rows.map((line,i)=>`<tr><td><input class="fi" id="costAlias${i}" value="${esc(costDraftValue('costAlias'+i,line.alias||''))}" placeholder="รายการวัสดุ ${i+1}" aria-label="ชื่อแสดงรายการ ${i+1}" ${disabled}></td><td><input class="fi" id="costAmount${i}" type="number" min="0" step="any" value="${esc(costDraftValue('costAmount'+i,line.amount??''))}" aria-label="ปริมาณรายการ ${i+1}" ${disabled}> ${esc(line.unit||'')}</td><td><input class="fi" id="costLoss${i}" type="number" min="0" max="99.999" step="any" value="${esc(costDraftValue('costLoss'+i,line.lossPercent??''))}" aria-label="สูญเสียรายการ ${i+1}" ${disabled}></td><td>${costNumber(line.baseTotal)}</td><td>${costNumber(line.purchaseCash)}</td><td>${costNumber(line.leftoverExposure)}</td><td><button class="btn btn-s" ${disabled} onclick="costRemove(${i})">นำออก</button></td></tr>`).join('')||'<tr><td colspan="7">ยังไม่มี RM — เลือกจาก Data Center ด้านล่าง</td></tr>'}</tbody></table></div>
     <p class="hint">ประมาณการก่อนตรวจสต็อก ไม่ใช่ยอดสั่งซื้อจริง · แก้ชื่อที่นี่มีผลเฉพาะ revision นี้</p><button class="btn btn-p" ${disabled} onclick="costSave()">บันทึก revision สูตร / RM</button>
     <h3>ค้นหาและเทียบ RM ใน Data Center</h3><label class="flbl" for="costSearch">ชื่อ / กลุ่ม / spec / vendor</label><input class="fi" id="costSearch" value="${esc(costState.search)}" placeholder="ค้นหาชื่อใกล้เคียงแล้วเทียบ spec" oninput="costSearchChanged(this.value)">
     <div class="rec-wrap"><table class="rec-tbl"><thead><tr><th>กลุ่ม / วัสดุ</th><th>Spec</th><th>Vendor</th><th>Tier · ราคาและ MOQ</th><th>LT</th><th></th></tr></thead><tbody>${matches.map(({item,index})=>`<tr><td>${esc(item.group||'')}<br><b>${esc(item.name||'')}</b></td><td>${esc(item.spec||'')}</td><td>${esc(item.vendor||'')}</td><td>${esc(item.tierLabel||'')}<br>${costNumber(item.price)} ${esc(item.priceUnit||'')}<br>MOQ ${costNumber(item.moq)} ${esc(item.moqUnit||'')}</td><td>${costNumber(item.leadTimeDays)} วัน</td><td><button class="btn btn-s" ${disabled||!item.eligible?'disabled':''} onclick="costSelect(${index})">${item.eligible?'เลือก Tier นี้':'รอยืนยัน'}</button></td></tr>`).join('')||'<tr><td colspan="6">ไม่พบรายการที่ตรง — ส่งคำขอจัดหาได้โดยไม่เพิ่มราคาสมมติ</td></tr>'}</tbody></table></div>
+    <p class="hint">แคตตาล็อกในเครื่องนี้มี ${catalog.length} รายการ · นำเข้าไฟล์จาก Procurement เพื่อเพิ่ม/อัปเดต</p>
+    <input type="file" id="costCatalogFile" accept=".xlsx,.xls,.csv" style="display:none" onchange="costImportCatalogFile(this.files[0])">
+    <button class="btn btn-s" ${disabled} onclick="document.getElementById('costCatalogFile').click()">นำเข้าแคตตาล็อก RM (Excel/CSV)</button>
     <label class="flbl" for="costRequestBrief">รายละเอียดวัสดุ / spec ที่ต้องการเพิ่มเติม</label><textarea id="costRequestBrief" class="fi" rows="2">${esc(costDraftValue("costRequestBrief",""))}</textarea><button class="btn btn-s" ${disabled} onclick="costRequestMaterial()">ส่งคำขอจัดหาให้ Procurement</button>`:''}
     <h3>ผล PK</h3><p>${esc(data.pkNotice||'ยังไม่มีผล PK ที่ยืนยันแล้ว สูตรและ RM ทำต่อได้')}</p>${data.pkCandidate&&data.capabilities&&data.capabilities.adoptPK?`<button class="btn btn-s" ${disabled} onclick="costAdoptPK()">นำ PK เวอร์ชัน ${esc(data.pkCandidate.versionLabel)} มาใช้</button>`:''}
+    ${data.capabilities&&data.capabilities.adoptPK?`<p class="hint">กรอกยอดที่ PU-PK ยืนยันแล้วเท่านั้น ระบบบันทึกผู้กรอกและเวลาเป็นหลักฐาน และไม่แก้ย้อนหลัง</p>
+    <div class="fg4">${costField('ยอด PK หลังบวก (บาท/ล็อต)','costPkAdjusted',null,'เว้นว่างได้ถ้ายังไม่มีนโยบายราคา')}${costField('ยอด PK ต้นทุนใช้จริง (บาท/ล็อต)','costPkBase',null,'เว้นว่างได้ถ้ายังไม่ทราบ')}${costTextField('ราคามีผลถึง','costPkValidUntil',null,'YYYY-MM-DD')}${costTextField('เลขอ้างอิงหลักฐาน','costPkEvidence',null,'เช่น เลข Req-PK')}</div>
+    <button class="btn btn-s" ${disabled} onclick="costSavePk()">บันทึกผล PK ที่ยืนยันแล้ว</button>`:''}
     <h3>สรุปเข้าแชทโครงการ</h3><p>ส่งเฉพาะยอดหลังบวกที่ผู้รับเห็นได้ พร้อม revision และรายการค้าง</p><button class="btn btn-p" ${disabled||!data.capabilities||!data.capabilities.sendSummary?'disabled':''} onclick="costSendSummary()">ส่งสรุป revision นี้เข้า Formula chat</button><p role="status">${esc(data.sendState==='sent'?'ส่งสำเร็จ':data.sendState==='pending'?'รอส่ง':data.sendState==='failed'?'ส่งไม่สำเร็จ':'ยังไม่ได้ส่ง')}</p>`}
   </div>`;
 }
@@ -1429,11 +1436,34 @@ function costSearchChanged(value){costCaptureDraft();costState.search=value;rend
 function costInputNumber(id){const el=document.getElementById(id);if(!el||el.value.trim()==='')return null;const n=Number(el.value);if(!Number.isFinite(n)||n<0)throw Error('กรุณาตรวจค่าตัวเลข');return n;}
 function costSave(){
   const data=costState.response;if(!data||!data.capabilities.editRM)return;
-  try{const patch={sellingUnits:costInputNumber('costSellingUnits'),unitsPerPack:costInputNumber('costUnitsPerPack'),fillAmount:costInputNumber('costFillAmount'),lines:data.lines.map((line,i)=>({id:line.id,alias:document.getElementById('costAlias'+i).value,amount:costInputNumber('costAmount'+i),lossPercent:costInputNumber('costLoss'+i)}))};return costAction('save',{patch});}catch(error){costState.error=error.message;renderCostCalculator();}
+  try{const text=id=>{const el=document.getElementById(id);return el?el.value.trim():'';};
+  const patch={sellingUnits:costInputNumber('costSellingUnits'),unitsPerPack:costInputNumber('costUnitsPerPack'),fillAmount:costInputNumber('costFillAmount'),fillUnit:text('costFillUnit'),pkSpecVersion:text('costPkSpecVersion'),lines:data.lines.map((line,i)=>({id:line.id,alias:document.getElementById('costAlias'+i).value,amount:costInputNumber('costAmount'+i),lossPercent:costInputNumber('costLoss'+i)}))};return costAction('save',{patch});}catch(error){costState.error=error.message;renderCostCalculator();}
 }
 function costSelect(index){const data=costState.response,item=data&&data.catalog[index];if(!data||!data.capabilities.editRM||!item||!item.eligible)return;return costAction('selectRM',{offerRef:item.offerRef});}
 function costRemove(index){const data=costState.response,line=data&&data.lines[index];if(data&&data.capabilities.editRM&&line)return costAction('removeRM',{lineId:line.id});}
 function costRequestMaterial(){const data=costState.response,el=document.getElementById('costRequestBrief');if(!data||!data.capabilities.editRM||!el||!el.value.trim())return;return costAction('requestMaterial',{brief:el.value.trim()});}
+async function costImportCatalogFile(file){
+  if(!file||!costState.response||!costState.response.capabilities.editRM)return;
+  try{
+    const buffer=await file.arrayBuffer();
+    const workbook=XLSX.read(new Uint8Array(buffer),{type:'array'});
+    const rows=XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]],{defval:undefined});
+    const parsed=costParseCatalogRows(rows),applied=costApplyCatalog(parsed);
+    costState.error=applied.rejected.length
+      ?`นำเข้า ${applied.added} รายการ · ข้าม ${applied.rejected.length} แถว: `+applied.rejected.slice(0,5).map(r=>`แถว ${r.row} (${r.reason})`).join(' · ')
+      :`นำเข้า ${applied.added} รายการ · รวมในเครื่อง ${applied.total} รายการ`;
+  }catch(error){costState.error='อ่านไฟล์ไม่สำเร็จ: '+String(error.message);}
+  const input=document.getElementById('costCatalogFile');if(input)input.value='';
+  return costAction('open',{});
+}
+function costSavePk(){
+  const data=costState.response;if(!data||!data.capabilities.adoptPK)return;
+  const text=id=>{const el=document.getElementById(id);return el?el.value.trim():'';};
+  try{
+    costRecordPk(costState.projectId,data.scenarioId,{adjustedTotal:costInputNumber('costPkAdjusted'),baseTotal:costInputNumber('costPkBase'),validUntil:text('costPkValidUntil'),evidenceRef:text('costPkEvidence')});
+  }catch(error){costState.error=error.message;renderCostCalculator();return;}
+  return costAction('open',{});
+}
 function costAdoptPK(){const data=costState.response;if(data&&data.pkCandidate&&data.capabilities.adoptPK)return costAction('adoptPK',{snapshotRef:data.pkCandidate.snapshotRef});}
 function costSendSummary(){const data=costState.response;if(!data||!data.capabilities.sendSummary)return;if(!confirm('ส่งสรุป revision '+data.revision+' เข้าแชท '+costState.projectId+'?'))return;return costAction('sendSummary',{revision:data.revision,idempotencyKey:costState.projectId+':'+data.scenarioId+':'+data.revision+':summary'});}
 // COST_CALCULATOR_UI_END
@@ -1449,7 +1479,7 @@ const COST_KEY='fs_cost';
 const COST_ROLE_DEFAULTS={admin:['RD','Procurement RM','PU-PK','Production','Finance','CEO'],rd:['RD'],purchasing:['Procurement RM','PU-PK'],sales:['Sales'],opc:['OPC'],pd:[],ra:[],mkt:[]};
 const COST_ROLE_RANK=['CEO','Finance','Production','RD','Procurement RM','PU-PK','OPC','Sales'];
 let costStore=null; // null until loadCostStore() has run — never write before then (rule 4)
-function costStoreDefault(){return {v:1,scenarios:[],outbox:[],catalog:[],caps:{},requests:[]};}
+function costStoreDefault(){return {v:1,scenarios:[],outbox:[],catalog:[],caps:{},requests:[],pk:[]};}
 function costArray(value){return Array.isArray(value)?value:[];}
 function loadCostStore(){
   if(costStore!==null)return costStore;
@@ -1459,7 +1489,7 @@ function loadCostStore(){
   costStore=parsed&&typeof parsed==='object'&&!Array.isArray(parsed)?{
     ...base,
     scenarios:costArray(parsed.scenarios),outbox:costArray(parsed.outbox),
-    catalog:costArray(parsed.catalog),requests:costArray(parsed.requests),
+    catalog:costArray(parsed.catalog),requests:costArray(parsed.requests),pk:costArray(parsed.pk),
     caps:parsed.caps&&typeof parsed.caps==='object'&&!Array.isArray(parsed.caps)?parsed.caps:{}
   }:base;
   return costStore;
@@ -1503,8 +1533,10 @@ function costEnvelope(entry,sendState){
     inputs:detail?{sellingUnits:scenario.sellingUnits,unitsPerPack:scenario.unitsPerPack,fillAmount:scenario.fillAmount,fillUnit:scenario.fillUnit}:{},
     lines:detail?scenario.rmLines.map((line,index)=>({...result.rm.lines[index],id:line.id,alias:line.alias,amount:line.amount,unit:line.unit,lossPercent:line.lossPercent})):[],
     catalog:detail?store.catalog.map(offer=>({offerRef:offer.id,group:offer.group||'',name:offer.name||'',spec:offer.spec||'',vendor:offer.vendor||'',tierLabel:offer.tierId||'',price:offer.price,priceUnit:offer.priceUnit||'',moq:offer.moq,moqUnit:offer.moqUnit||'',leadTimeDays:offer.leadTimeDays,eligible:offer.status==='confirmed'&&offer.specApproved===true})):[],
-    pkCandidate:null, // no verified PK source is wired locally; never fabricate one
-    pkNotice:scenario.pk?'อ้างอิงผล PK ที่รับมาแล้ว':'ยังไม่มีผล PK ที่ยืนยันแล้ว สูตรและ RM ทำต่อได้',
+    pkCandidate:(()=>{const candidate=costPkCandidate(entry.projectId,entry.scenarioId);
+      return candidate&&caps.adoptPK&&!(scenario.pk&&scenario.pk.id===candidate.id&&scenario.pk.version===candidate.version)
+        ?{snapshotRef:candidate.id+':'+candidate.version,versionLabel:String(candidate.version)+' · ยืนยันโดย '+candidate.confirmedBy}:null;})(),
+    pkNotice:scenario.pk?('รับผล PK เวอร์ชัน '+scenario.pk.version+' มาใช้แล้ว'):'ยังไม่มีผล PK ที่ยืนยันแล้ว สูตรและ RM ทำต่อได้',
     sendState:sendState||(outbox.length?outbox[outbox.length-1].status:undefined)};
 }
 function costAppendEntry(projectId,scenarioId,scenario){
@@ -1555,7 +1587,11 @@ async function costLocalRequest(action,payload){
   let patch=null;
   if(action==='save'){
     const input=payload.patch||{},lines=Array.isArray(input.lines)?input.lines:[];
+    // fillUnit and pkSpecVersion are required before a PK snapshot can match this
+    // scenario, so they are part of the same patch rather than a separate write.
     patch={sellingUnits:input.sellingUnits,unitsPerPack:input.unitsPerPack,fillAmount:input.fillAmount,
+      fillUnit:input.fillUnit===undefined?scenario.fillUnit:(input.fillUnit||null),
+      pkSpecVersion:input.pkSpecVersion===undefined?scenario.pkSpecVersion:(input.pkSpecVersion||null),
       rmLines:lines.map(line=>({...scenario.rmLines.find(row=>row.id===line.id),id:line.id,alias:line.alias,amount:line.amount,lossPercent:line.lossPercent}))};
   }else if(action==='selectRM'){
     const offer=store.catalog.find(row=>row.id===payload.offerRef);
@@ -1570,9 +1606,102 @@ async function costLocalRequest(action,payload){
     saveCostStore();
     return costEnvelope(entry);
   }else if(action==='adoptPK'){
-    throw Error('ยังไม่มีผล PK ที่ยืนยันแล้วในเครื่องนี้');
+    if(!caps.adoptPK)throw Error('ไม่มีสิทธิ์รับผล PK');
+    const candidate=costPkCandidate(projectId,scenarioId);
+    if(!candidate)throw Error('ยังไม่มีผล PK ที่ยืนยันแล้วในเครื่องนี้');
+    if(payload.snapshotRef&&payload.snapshotRef!==candidate.id+':'+candidate.version)throw Error('ผล PK เปลี่ยนไปแล้ว กรุณาเปิดใหม่');
+    // Context, validity and version conflicts are decided by the core, not here.
+    return costEnvelope(costAppendEntry(projectId,scenarioId,CostCalculator.adoptPK(scenario,candidate,costToday())));
   }else throw Error('คำสั่งนี้ยังไม่รองรับ');
   return costEnvelope(costAppendEntry(projectId,scenarioId,CostCalculator.revise(scenario,patch)));
+}
+// --- RM catalog import (ADR 0002 decision: manual Excel/CSV import) ---
+// A row missing any commercial field is REJECTED, never defaulted: a blank unit
+// or an assumed zero silently becomes a wrong cost.
+const COST_MASS_UNITS=['kg','g','mg'];
+const COST_CATALOG_REQUIRED=['id','materialId','tierId','vendorId','status','currency','price','priceUnit','moq','moqUnit','increment','incrementUnit','leadTimeDays','validUntil','evidenceRef','specApproved'];
+function costCell(row,key){
+  const found=Object.keys(row).find(name=>String(name).trim().toLowerCase()===key.toLowerCase());
+  return found===undefined?undefined:row[found];
+}
+function costParseCatalogRows(rows){
+  const offers=[],rejected=[];
+  (Array.isArray(rows)?rows:[]).forEach((row,index)=>{
+    const line=index+2; // header occupies row 1
+    const raw={};COST_CATALOG_REQUIRED.forEach(key=>{raw[key]=costCell(row,key);});
+    const missing=COST_CATALOG_REQUIRED.filter(key=>raw[key]===undefined||String(raw[key]).trim()==='');
+    if(missing.length){rejected.push({row:line,reason:'ขาดข้อมูล: '+missing.join(', ')});return;}
+    const number=value=>{const parsed=Number(String(value).replace(/,/g,'').trim());return Number.isFinite(parsed)?parsed:null;};
+    const offer={id:String(raw.id).trim(),version:Number(costCell(row,'version'))||1,
+      materialId:String(raw.materialId).trim(),tierId:String(raw.tierId).trim(),vendorId:String(raw.vendorId).trim(),
+      name:String(costCell(row,'name')||'').trim(),group:String(costCell(row,'group')||'').trim(),
+      spec:String(costCell(row,'spec')||'').trim(),vendor:String(costCell(row,'vendor')||'').trim(),
+      status:String(raw.status).trim(),specApproved:['true','yes','1','ใช่'].includes(String(raw.specApproved).trim().toLowerCase()),
+      currency:String(raw.currency).trim(),price:number(raw.price),priceUnit:String(raw.priceUnit).trim(),
+      priceBasisQuantity:costCell(row,'priceBasisQuantity')===undefined?1:number(costCell(row,'priceBasisQuantity')),
+      moq:number(raw.moq),moqUnit:String(raw.moqUnit).trim(),
+      increment:number(raw.increment),incrementUnit:String(raw.incrementUnit).trim(),
+      leadTimeDays:number(raw.leadTimeDays),validUntil:String(raw.validUntil).trim(),
+      evidenceRef:String(raw.evidenceRef).trim(),scope:{type:'central'}};
+    const bad=[];
+    if(offer.price===null||offer.price<0)bad.push('price');
+    if(offer.moq===null||offer.moq<0)bad.push('moq');
+    if(offer.increment===null||offer.increment<=0)bad.push('increment');
+    if(offer.leadTimeDays===null||offer.leadTimeDays<0)bad.push('leadTimeDays');
+    if(offer.priceBasisQuantity===null||offer.priceBasisQuantity<=0)bad.push('priceBasisQuantity');
+    if(!COST_MASS_UNITS.includes(offer.priceUnit))bad.push('priceUnit');
+    if(!COST_MASS_UNITS.includes(offer.moqUnit))bad.push('moqUnit');
+    if(!COST_MASS_UNITS.includes(offer.incrementUnit))bad.push('incrementUnit');
+    if(!costDateOK(offer.validUntil))bad.push('validUntil');
+    if(bad.length)rejected.push({row:line,reason:'ค่าไม่ถูกต้อง: '+bad.join(', ')});
+    else offers.push(offer);
+  });
+  return {offers,rejected};
+}
+function costApplyCatalog(parsed){
+  const store=loadCostStore(),byId=new Map(store.catalog.map(offer=>[offer.id,offer]));
+  parsed.offers.forEach(offer=>byId.set(offer.id,offer));
+  store.catalog=[...byId.values()];
+  saveCostStore();
+  return {added:parsed.offers.length,rejected:parsed.rejected,total:store.catalog.length};
+}
+// --- PK results (ADR 0002 decision: PU-PK types in a confirmed total) ---
+// Stored as an immutable snapshot bound to actor and time. Nothing here derives
+// a confirmation from a label; the person entering it IS the evidence, and that
+// is recorded as such.
+function costRecordPk(projectId,scenarioId,input){
+  const caps=costCapabilities();
+  if(!caps.adoptPK)throw Error('บันทึกผล PK ได้เฉพาะผู้ดูแล PK');
+  const entry=costLatestEntry(projectId,scenarioId);
+  if(!entry)throw Error('ยังไม่มีข้อมูลต้นทุนของโครงการนี้');
+  const scenario=entry.scenario;
+  if(!scenario.pkSpecVersion)throw Error('ระบุเวอร์ชัน spec บรรจุภัณฑ์ใน revision ก่อน');
+  if(![scenario.sellingUnits,scenario.unitsPerPack,scenario.fillAmount].every(v=>typeof v==='number'&&Number.isFinite(v))||!scenario.fillUnit)
+    throw Error('ระบุจำนวนผลิตและขนาดบรรจุให้ครบก่อนบันทึกผล PK');
+  const adjustedTotal=typeof input.adjustedTotal==='number'&&Number.isFinite(input.adjustedTotal)?input.adjustedTotal:null;
+  const baseTotal=typeof input.baseTotal==='number'&&Number.isFinite(input.baseTotal)?input.baseTotal:null;
+  if(adjustedTotal===null&&baseTotal===null)throw Error('กรอกยอด PK อย่างน้อยหนึ่งช่อง');
+  if(!costDateOK(String(input.validUntil||'')))throw Error('ระบุวันหมดอายุของราคาแบบ YYYY-MM-DD ที่มีอยู่จริง');
+  if(!String(input.evidenceRef||'').trim())throw Error('ระบุเลขอ้างอิงหลักฐานจาก PU-PK');
+  const store=loadCostStore();
+  const previous=store.pk.filter(row=>row.projectId===projectId&&row.scenarioId===scenarioId);
+  const snapshot={id:String(input.snapshotId||'').trim()||('PK-'+projectId+'-'+scenarioId),
+    version:previous.length+1,projectId,scenarioId,currency:'THB',
+    sellingUnits:scenario.sellingUnits,unitsPerPack:scenario.unitsPerPack,
+    fillAmount:scenario.fillAmount,fillUnit:scenario.fillUnit,specVersion:scenario.pkSpecVersion,
+    status:'confirmed',validUntil:String(input.validUntil).trim(),
+    evidenceRef:String(input.evidenceRef).trim(),baseTotal,adjustedTotal,
+    confirmedBy:currentUser,confirmedAt:new Date().toISOString()};
+  store.pk.push(snapshot);saveCostStore();
+  return snapshot;
+}
+function costDateOK(value){
+  return typeof value==='string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
+    && Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0,10)===value;
+}
+function costPkCandidate(projectId,scenarioId){
+  const rows=loadCostStore().pk.filter(row=>row.projectId===projectId&&row.scenarioId===scenarioId);
+  return rows.reduce((best,row)=>!best||row.version>best.version?row:best,null);
 }
 // COST_CALCULATOR_LOCAL_END
 
