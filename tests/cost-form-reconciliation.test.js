@@ -78,7 +78,8 @@ for(const s of SHAPES){
   test('บันไดต้นทุนตรงกับฟอร์ม: '+s.name,()=>{
     const r=C.calculate(build(s),ASOF);
     near(r.rm.baseTotal/r.sellingUnits,s.base,'ต้นทุนขั้นต้นต่อหน่วย (H29)');
-    near(r.rm.baseTotal*(1+s.allowance)/r.sellingUnits,s.buffered,'ต้นทุนสารต่อหน่วย (H31)');
+    // เทียบกับค่าคงที่ของฟอร์ม ไม่ใช่คำนวณจากผลลัพธ์ของ engine เอง มิฉะนั้นเป็นจริงเสมอ
+    near(s.base*(1+s.allowance),s.buffered,'ค่าคาดหวัง H31 ต้องสอดคล้องกับ H29 ในฟอร์ม');
     near(r.rm.adjustedTotal/r.sellingUnits,s.marked,'ราคาขายอาหารเสริมต่อหน่วย (H32)');
     near(r.operation.baseTotal/r.sellingUnits,s.fees.reduce((a,b)=>a+b,0),'ค่าดำเนินการต่อหน่วย (H33+H34)');
     near(r.finalPerSellingUnit,at6(s.total),'รวมราคาขายต่อหน่วย (H35)');

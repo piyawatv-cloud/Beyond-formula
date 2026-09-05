@@ -344,12 +344,35 @@ async function catalogFixture(){
  await c.costLocalRequest('open',{projectId:'A00001'});
  return c;
 }
-test('ชื่อที่คล้ายกันถูกจัดอยู่กลุ่มเดียวกันแม้คนละรหัสสาร',async()=>{const c=await catalogFixture();
+test('Tier ของชื่อเดียวกันอยู่กลุ่มเดียวกัน เรียงราคาให้เทียบง่าย',async()=>{const c=await catalogFixture();
  const body=await c.costLocalRequest('open',{projectId:'A00001'});
  const g=body.catalogGroups.find(x=>x.offers.some(o=>o.offerRef==='O1'));
- assert.equal(g.count,3,'บัวบก 10% สองเทียร์ กับ (Powder) อีกหนึ่ง ต้องอยู่กลุ่มเดียวกัน');
- assert.ok(g.offers.some(o=>o.offerRef==='O3'),'ชื่อที่ต่างกันแค่คำต่อท้ายต้องอยู่ด้วยกัน');
- assert.deepEqual(Array.from(g.offers.map(o=>o.price)),[1600,1850,1900],'เรียงราคาต่ำไปสูงเพื่อเทียบ');});
+ assert.equal(g.count,2,'สองเทียร์ของชื่อเดียวกันต้องอยู่ด้วยกัน');
+ assert.equal(Array.from(g.offers.map(o=>o.price)).join(','),'1600,1850','เรียงราคาต่ำไปสูงเพื่อเทียบ');
+ assert.equal(g.distinctNames,1,'ชื่อเดียวกันทั้งกลุ่ม หัวกลุ่มจึงใช้ชื่อนั้นได้');});
+// UAT พบว่าการตัดตัวเลขออกจากชื่อทำให้ความเข้มข้นและเลขวิตามินหายไป
+// แล้ววัสดุคนละตัวถูกจับรวมกันโดยตัวถูกสุดลอยขึ้นบนสุด ซึ่งชวนให้กดผิด
+test('ความเข้มข้นและเลขที่ต่างกันต้องไม่ถูกจับรวมเป็นวัสดุเดียวกัน',async()=>{const c=fixture();
+ c.loadCostStore().catalog.push(
+   tierOffer('X1','MX1','สารสกัดขมิ้นชัน 95%',9800,1,14),
+   tierOffer('X2','MX2','สารสกัดขมิ้นชัน 10%',1200,1,14),
+   tierOffer('B1','MB1','วิตามินบี 1',300,1,7),
+   tierOffer('B12','MB12','วิตามินบี 12',120,1,7));
+ await c.costLocalRequest('open',{projectId:'A00001'});
+ const body=await c.costLocalRequest('open',{projectId:'A00001'});
+ const groupOf=ref=>body.catalogGroups.find(g=>g.offers.some(o=>o.offerRef===ref));
+ assert.notEqual(groupOf('X1').key,groupOf('X2').key,'95% กับ 10% ต้องคนละกลุ่ม');
+ assert.notEqual(groupOf('B1').key,groupOf('B12').key,'บี 1 กับ บี 12 ต้องคนละกลุ่ม');
+ assert.equal(groupOf('X1').label,'สารสกัดขมิ้นชัน 95%','หัวกลุ่มต้องตรงกับของจริง');});
+test('ถ้าชื่อในกลุ่มไม่เหมือนกัน หัวกลุ่มต้องไม่ยืมชื่อตัวใดตัวหนึ่งมาแทน',async()=>{const c=fixture();
+ c.loadCostStore().catalog.push(
+   tierOffer('Y1','MY1','กลีเซอรีน USP',68,25,7),
+   tierOffer('Y2','MY2','กลีเซอรีน (Pure)',61,25,7));
+ await c.costLocalRequest('open',{projectId:'A00001'});
+ const body=await c.costLocalRequest('open',{projectId:'A00001'});
+ const g=body.catalogGroups.find(x=>x.offers.some(o=>o.offerRef==='Y1'));
+ assert.equal(g.distinctNames,2);
+ assert.ok(g.label.includes('USP')&&g.label.includes('Pure'),'หัวกลุ่มต้องบอกทั้งสองชื่อ ได้ '+g.label);});
 test('ระบบไม่เลือก Tier ให้ — ทุก Tier ถูกส่งมาให้เลือกครบ',async()=>{const c=await catalogFixture();
  const body=await c.costLocalRequest('open',{projectId:'A00001'});
  const all=body.catalogGroups.flatMap(g=>g.offers);
@@ -489,3 +512,35 @@ test('รูปแบบสินค้ามี 12 แบบ และพกป
  assert.equal(cap.fillUnit,'g');
  assert.ok(list.every(f=>f.ready===false),'ยังต้องกรอกอัตราก่อนใช้');
  assert.ok(list.some(f=>f.fillAmount===null),'รูปแบบที่ยังไม่รู้ปริมาณต้องเป็น null ไม่ใช่เดา');});
+test('มีหน้าจอกรอกอัตรามาตรฐานจริง และผู้มีอำนาจด้านราคาใช้ได้ครบวงจร',async()=>{
+ const ui=grab('UI');
+ assert.match(ui,/costSaveRates\(\)/,'ต้องมีปุ่มเรียกฟังก์ชันบันทึกอัตรา');
+ assert.match(ui,/costRateAmount/,'ต้องมีช่องกรอกจำนวนเงิน');
+ assert.match(ui,/ต่อหน่วยที่ผลิต/,'ต้องบอกฐานให้ชัดว่าเป็นต่อหน่วยที่ผลิต');
+ // เดินครบวงจร: ตั้งอัตรา แล้วตั้งกฎราคา แล้วต้องได้ราคาต่อหน่วยจริง
+ const c=fixture();await readyScenario(c);
+ const admin=fixture('admin','Synthetic Admin');admin.backing.fs_cost=c.backing.fs_cost;
+ admin.costRecordOperationFormat({id:'CAP-GEL-0',label:'แคปซูลเจลาติน #0',owner:'ฝ่ายผลิต',
+   validUntil:'2999-01-01',charges:[{label:'ค่าอัดแคป',amount:0.15},{label:'ค่าแคป',amount:0.15}]});
+ admin.costRecordPricingRule('A00001','S1',RULE);
+ c.backing.fs_cost=admin.backing.fs_cost;c.run('costStore=null');
+ const body=await c.costLocalRequest('open',{projectId:'A00001'});
+ assert.ok(body.view.finalPerSellingUnit>0,'ต้องได้ราคาต่อหน่วยออกมาจริง');});
+test('ค่าดำเนินการคิดต่อหน่วยที่ผลิต ไม่ใช่ต่อหน่วยขาย',async()=>{const c=fixture();
+ c.loadCostStore().catalog.push(tierOffer('O1','M1','สาร ก.',1000,1,7));
+ await c.costLocalRequest('open',{projectId:'A00001'});
+ await c.costLocalRequest('selectRM',{projectId:'A00001',scenarioId:'S1',expectedRevision:1,offerRef:'O1'});
+ const id=c.loadCostStore().scenarios[1].scenario.rmLines[0].id;
+ // 100 ขวด x 60 แคปซูล = 6,000 แคปซูล
+ await c.costLocalRequest('save',{projectId:'A00001',scenarioId:'S1',expectedRevision:2,
+   patch:{sellingUnits:100,unitsPerPack:60,fillAmount:0.6,fillUnit:'g',pkSpecVersion:null,
+     lines:[{id,alias:'ก',amount:0.6,lossPercent:0}]}});
+ const admin=fixture('admin','Synthetic Admin');admin.backing.fs_cost=c.backing.fs_cost;
+ admin.costRecordOperationFormat({id:'CAP-GEL-0',label:'แคปซูลเจลาติน #0',owner:'ฝ่ายผลิต',
+   validUntil:'2999-01-01',charges:[{label:'ค่าอัดแคป',amount:0.25},{label:'ค่าแคป',amount:0.35}]});
+ admin.costRecordPricingRule('A00001','S1',RULE);
+ c.backing.fs_cost=admin.backing.fs_cost;c.run('costStore=null');
+ const sc=c.loadCostStore().scenarios.at(-1).scenario;
+ const calc=c.CostCalculator.calculate(sc,new Date().toISOString().slice(0,10));
+ assert.equal(calc.productionUnits,6000);
+ assert.equal(calc.operation.baseTotal,0.6*6000,'ต้องคิด 0.60 x 6,000 แคปซูล ไม่ใช่ x 100 ขวด');});

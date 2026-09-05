@@ -11,7 +11,6 @@ const pk=()=>({id:'PK1',version:1,projectId:'A00001',scenarioId:'S1',sellingUnit
 const date='2029-01-01';
 test('mass and pack math separates consumption, purchase and leftover',()=>{let x=input(); x.rmLines[0].amount=150;let r=C.calculate(x,date);assert.ok(Math.abs(r.rm.baseTotal-150)<1e-9);assert.equal(r.rm.purchaseCash,200);assert.ok(Math.abs(r.rm.leftoverExposure-50)<1e-9);assert.ok(Math.abs(r.rm.lines[0].requiredKg-1.5)<1e-9);assert.equal(r.productionUnits,10000);assert.equal(r.operation.baseTotal,1300);assert.equal(r.complete,false);});
 test('loss is yield-based and missing loss or MOQ units are never zero',()=>{let x=input();x.rmLines[0].lossPercent=20;assert.equal(C.calculate(x,date).rm.lines[0].requiredKg,12.5);x.rmLines[0].lossPercent=null;assert.equal(C.calculate(x,date).rm.baseTotal,null);x=input();delete x.rmLines[0].offer.moqUnit;assert.equal(C.calculate(x,date).rm.baseTotal,null);});
-test('unconfirmed and expired offers cannot become ready',()=>{let x=input();x.rmLines[0].offer.status='draft';assert.equal(C.calculate(x,date).rm.ready,false);x.rmLines[0].offer.status='confirmed';assert.equal(C.calculate(x,'2031-01-01').rm.ready,false);});
 test('PK delayed or draft never prevents RM calculation',()=>{let x=input();assert.equal(C.calculate(x,date).rm.baseTotal,1000);x.pk=pk();x.pk.status='draft';let r=C.calculate(x,date);assert.equal(r.pk.ready,false);assert.equal(r.pk.baseTotal,500);assert.equal(r.rm.baseTotal,1000);});
 test('PK adoption is explicit immutable idempotent and rejects conflict',()=>{let a=C.createScenario(input());let b=C.adoptPK(a,pk(),date);assert.equal(a.pk,null);assert.equal(b.revision,2);assert.equal(C.adoptPK(b,pk(),date),b);let changed=pk();changed.baseTotal=1;assert.throws(()=>C.adoptPK(b,changed,date),/CONFLICT/);assert.ok(Object.isFrozen(b));});
 test('PK rejects mismatched context and stale price',()=>{for(const patch of [{projectId:'A00002'},{sellingUnits:10},{specVersion:'P2'},{validUntil:'2020-01-01'}]){assert.throws(()=>C.adoptPK(C.createScenario(input()),{...pk(),...patch},date));}});
@@ -21,9 +20,6 @@ test('one-time batch and unit extras are explicit and not double counted',()=>{l
 test('safe projections never expose cross-category base totals or supplier details',()=>{let x=input();x.pk=pk();let r=C.calculate(x,date);for(const role of ['Sales','OPC','RD','PU-PK','unknown']){let p=C.project(r,role);assert.ok(!JSON.stringify(p).includes('PRIVATE'));assert.equal(p.baseTotal,undefined);assert.equal(p.separateCharges,undefined);if(role==='Sales')assert.equal(p.rm.baseTotal,undefined);if(role==='RD')assert.equal(p.pk.baseTotal,undefined);if(role==='PU-PK')assert.equal(p.rm.baseTotal,undefined);}});
 test('quotation freeze denies unverifiable browser authority',()=>{let x=input();assert.throws(()=>C.freezeQuotation(x,date,{actor:'CEO',approved:true}),/AUTHORITY/);});
 
-test('PK cannot become ready without stable version identity',()=>{let x=input();x.pk=pk();delete x.pk.id;assert.equal(C.calculate(x,date).pk.ready,false);});
-test('calendar dates must be real and offer validity must not be future-dated',()=>{assert.throws(()=>C.calculate(input(),'2029-02-31'));let x=input();x.rmLines[0].offer.validFrom='2029-02-01';assert.equal(C.calculate(x,date).rm.ready,false);});
-test('duplicate line identity makes RM incomplete and no totals overflow',()=>{let x=input();x.rmLines.push(line());assert.equal(C.calculate(x,date).rm.ready,false);x=input();x.rmLines[0].offer.price=Number.MAX_VALUE;assert.equal(C.calculate(x,date).rm.baseTotal,null);});
 const meta=()=>({id:'STD1',version:1,routingOwner:'RD1',rateOwner:'FIN1',currency:'THB',validFrom:'2028-01-01',validUntil:'2030-01-01',capacityUnit:'innerUnit',runRateUnit:'innerUnit/hour',dlRateUnit:'THB/person-hour',ohRateUnit:'THB/hour'});
 const policy=(mode,rate,basis='categoryTotal')=>({id:'P1',version:1,owner:'FIN1',status:'confirmed',mode,rate,currency:'THB',validFrom:'2028-01-01',validUntil:'2030-01-01',rounding:{decimals:2,mode:'halfUp',basis}});
 const readyInput=()=>{let x=input();x.currency='THB';x.rmLines[0].offer.currency='THB';x.operation={...x.operation,...meta()};x.pk={...pk(),currency:'THB'};x.policies={RM:policy('markup',0.2),Operation:policy('markup',0),Final:policy('passthrough',undefined,'sellingUnit')};return x;};
@@ -41,3 +37,77 @@ test('withdrawn obsolete and stale RM offers never finalize',()=>{for(const flag
 test('RM central and project scope are explicit and project-specific terms cannot cross projects',()=>{let x=readyInput();x.rmLines[0].offer.scope={type:'project',projectId:'A99999'};assert.equal(C.calculate(x,date).rm.ready,false);x.rmLines[0].offer.scope.projectId=x.projectId;assert.equal(C.calculate(x,date).rm.ready,true);delete x.rmLines[0].offer.scope;assert.equal(C.calculate(x,date).rm.ready,false);});
 test('unverified declared RM constraints block quotation eligibility',()=>{let x=readyInput();x.rmLines[0].offer.constraints={maximumQuantity:5};assert.equal(C.calculate(x,date).rm.ready,false);});
 test('withdrawn obsolete stale and sync-failed PK cannot be adopted or ready',()=>{for(const flag of ['withdrawn','obsolete','stale','syncFailed']){let x=readyInput();x.pk[flag]=true;assert.equal(C.calculate(x,date).pk.ready,false,flag);assert.throws(()=>C.adoptPK(C.createScenario(input()),x.pk,date));}});
+
+// เขียนใหม่จากเทสต์เดิมสี่ข้อที่ assert ค่าที่เป็น false อยู่แล้ว เพราะ input() ไม่มี currency
+// ทุกข้อเริ่มด้วย control assertion ว่า baseline เป็น true มิฉะนั้นก็จับอะไรไม่ได้เหมือนเดิม
+test('baseline ที่ใช้ทดสอบต้องพร้อมจริง มิฉะนั้น assertion ด้านล่างไม่มีความหมาย',()=>{
+  const r=C.calculate(readyInput(),date);
+  assert.equal(r.rm.ready,true,'RM ต้องพร้อมบน baseline');
+  assert.equal(r.pk.ready,true,'PK ต้องพร้อมบน baseline');
+});
+test('ข้อเสนอที่ยังไม่ยืนยันหรือหมดอายุแล้วต้องไม่พร้อมใช้',()=>{
+  assert.equal(C.calculate(readyInput(),date).rm.ready,true);
+  let x=readyInput();x.rmLines[0].offer.status='draft';
+  assert.equal(C.calculate(x,date).rm.ready,false,'สถานะ draft ต้องทำให้ไม่พร้อม');
+  assert.equal(C.calculate(readyInput(),'2031-01-01').rm.ready,false,'ราคาหมดอายุต้องทำให้ไม่พร้อม');
+});
+test('ราคาที่ยังไม่เริ่มมีผลต้องใช้ไม่ได้ และวันที่ไม่มีจริงต้องโยนข้อผิดพลาด',()=>{
+  assert.throws(()=>C.calculate(readyInput(),'2029-02-31'));
+  let x=readyInput();x.rmLines[0].offer.validFrom='2029-06-01';
+  assert.equal(C.calculate(x,date).rm.ready,false,'validFrom ที่ยังมาไม่ถึงต้องทำให้ไม่พร้อม');
+  x=readyInput();x.rmLines[0].offer.validFrom='2028-06-01';
+  assert.equal(C.calculate(x,date).rm.ready,true,'validFrom ที่ผ่านมาแล้วต้องยังพร้อม');
+});
+test('รหัสบรรทัดซ้ำทำให้ RM ไม่ครบ และตัวเลขล้นต้องไม่กลายเป็นตัวเลข',()=>{
+  let x=readyInput();x.rmLines.push({...x.rmLines[0]});
+  assert.equal(C.calculate(x,date).rm.ready,false,'บรรทัดที่ id ซ้ำต้องทำให้ไม่พร้อม');
+  x=readyInput();x.rmLines[0].offer.price=Number.MAX_VALUE;
+  assert.equal(C.calculate(x,date).rm.baseTotal,null,'ค่าที่ล้นต้องเป็น null ไม่ใช่ตัวเลขมั่ว');
+});
+test('PK ที่ไม่มีตัวตนคงที่ต้องใช้ไม่ได้',()=>{
+  assert.equal(C.calculate(readyInput(),date).pk.ready,true);
+  for(const mutate of [x=>delete x.pk.id,x=>x.pk.version=0,x=>delete x.pk.version]){
+    let x=readyInput();mutate(x);
+    assert.equal(C.calculate(x,date).pk.ready,false);
+  }
+});
+// QA ชี้ว่า allowanceRate ที่เป็น string ทำให้ 1+allowance ต่อสตริงแล้วราคาพุ่ง 4.5 เท่า
+// โดยยังรายงานว่าคำนวณสำเร็จ — ต้องปฏิเสธ ไม่ใช่แปลงชนิดให้
+test('ค่าเผื่อขั้นต้นต้องเป็นตัวเลขเท่านั้น ค่าชนิดอื่นหรือติดลบต้องไม่ให้ราคา',()=>{
+  const base=readyInput();
+  const ok=C.calculate({...base,policies:{...base.policies,RM:{...base.policies.RM,allowanceRate:0.1}}},date);
+  assert.ok(ok.rm.adjustedTotal>0,'ตัวเลขปกติต้องคำนวณได้');
+  for(const bad of ['0.1','',null,true,{},[],NaN,Infinity,-0.5]){
+    let x=readyInput();x.policies.RM={...x.policies.RM,allowanceRate:bad};
+    assert.equal(C.calculate(x,date).rm.adjustedTotal,null,'allowanceRate = '+JSON.stringify(bad));
+  }
+});
+// QA ชี้ว่า specApproved ไม่มี negative coverage ทั้งในแกนและตัวนำเข้า
+test('ข้อเสนอที่ยังไม่ผ่านการรับรอง spec ต้องใช้ไม่ได้ ไม่ว่าเขียนมาแบบไหน',()=>{
+  assert.equal(C.calculate(readyInput(),date).rm.ready,true);
+  for(const bad of [false,'no',0,'',null,undefined,'true']){
+    let x=readyInput();x.rmLines[0].offer.specApproved=bad;
+    assert.equal(C.calculate(x,date).rm.ready,false,'specApproved = '+JSON.stringify(bad));
+  }
+  let x=readyInput();delete x.rmLines[0].offer.specApproved;
+  assert.equal(C.calculate(x,date).rm.ready,false,'ไม่มีฟิลด์เลยก็ต้องไม่พร้อม');
+});
+// ค่าธรรมเนียมต่อหน่วยผลิตกับต่อหน่วยขายเป็นคนละฐาน — UAT พบว่าคิดต่ำไป 60 เท่า
+test('ค่าธรรมเนียมต่อหน่วยผลิตต้องคูณด้วยจำนวนที่ผลิต ไม่ใช่จำนวนหน่วยขาย',()=>{
+  const base=readyInput();
+  const fee=basis=>({...base,extraCosts:[{id:'F1',currency:'THB',status:'confirmed',
+    category:'Operation',basis,amount:0.6,collection:'included'}],extrasReviewed:true});
+  const perProd=C.calculate(fee('perProductionUnit'),date),perSell=C.calculate(fee('perUnit'),date);
+  const units=perProd.productionUnits,sold=perProd.sellingUnits;
+  assert.ok(units>sold,'ตัวอย่างต้องมีหลายหน่วยย่อยต่อหน่วยขาย มิฉะนั้นเทียบไม่ได้');
+  assert.equal(perProd.operation.baseTotal-C.calculate(base,date).operation.baseTotal,0.6*units);
+  assert.equal(perSell.operation.baseTotal-C.calculate(base,date).operation.baseTotal,0.6*sold);
+});
+test('ฐานค่าธรรมเนียมที่ไม่รู้จักต้องไม่ถูกคิดเป็นศูนย์เงียบ ๆ',()=>{
+  const base=readyInput();
+  for(const basis of ['perCapsule','',null,undefined,'PERUNIT']){
+    const x={...base,extraCosts:[{id:'F1',currency:'THB',status:'confirmed',
+      category:'Operation',basis,amount:0.6,collection:'included'}],extrasReviewed:true};
+    assert.equal(C.calculate(x,date).complete,false,'basis = '+JSON.stringify(basis));
+  }
+});

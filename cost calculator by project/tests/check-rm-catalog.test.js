@@ -88,3 +88,25 @@ test('a row of shared-formula cells still maps onto its header',()=>{
   assert.deepEqual(header,['price','cost']);
   assert.equal(rows[0].cost,0.5,'the computed column must not read as blank');
 });
+
+// QA พบว่า specApproved ไม่มีการทดสอบฝั่งปฏิเสธเลย ทั้งที่เป็นด่านตัดสินว่าใช้ได้หรือไม่
+const rowObj=extra=>({id:'O1',materialId:'M1',tierId:'T1',vendorId:'V1',status:'confirmed',currency:'THB',
+  price:'100',priceUnit:'kg',moq:'2',moqUnit:'kg',increment:'1',incrementUnit:'kg',leadTimeDays:'10',
+  validUntil:'2030-01-01',evidenceRef:'E1',specApproved:'true',...extra});
+test('specApproved ที่ไม่ใช่คำยืนยันต้องแปลว่ายังไม่รับรอง',()=>{
+  const {costParseCatalogRows}=require('../tools/check-rm-catalog.js').loadParser();
+  for(const value of ['no','false','FALSE','0','ไม่','ยังไม่','pending','-']){
+    const parsed=costParseCatalogRows([rowObj({specApproved:value})]);
+    assert.equal(parsed.offers.length,1,value+' ต้องยังนำเข้าได้');
+    assert.equal(parsed.offers[0].specApproved,false,value+' ต้องไม่ถือว่ารับรองแล้ว');
+  }
+  for(const value of ['true','TRUE','yes','1','ใช่']){
+    const parsed=costParseCatalogRows([rowObj({specApproved:value})]);
+    assert.equal(parsed.offers[0].specApproved,true,value);
+  }
+});
+test('แถวที่ยังไม่รับรอง spec ต้องไม่ถูกนับว่าพร้อมคิดต้นทุน',()=>{
+  const report=JSON.parse(run(`${HEADER}\n${GOOD.replace(',true,1',',false,1')}\n`,['--json']));
+  assert.equal(report.accepted,1,'ยังนำเข้าได้');
+  assert.equal(report.usable,0,'แต่ต้องไม่พร้อมใช้');
+});
