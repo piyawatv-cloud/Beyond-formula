@@ -1,8 +1,30 @@
 # Prompt สำหรับ Codex — Cost Calculator
 
+## Status clarification — 2026-09-06
+
+The previous combined label is split below. **LOCAL_VERIFIED is a completed verification result, not a blocker.** Integration cannot be marked passed without the listed evidence. Missing per-material data and pricing inputs block only affected calculations/quotation readiness, not all draft Formula/RM work.
+
+| Workstream | Current status | Owner / evidence needed to close |
+|---|---|---|
+| Local implementation and automated verification | PASS — commit d6b73f5 | 292 module, 14 calculator browser, 37 parent browser tests and SQL suite passed. No local defect remains from the bounded review; this is not UAT. |
+| Real RM import / A3 | WAITING_FOR_INPUT | Procurement/RD provide an authorized sanitized corrected export within this worktree. Run shared converter and checker, report usable count and rejection reasons, and reconcile a chosen sample calculation with owner-approved expected results. No required minimum count is invented. |
+| Ambiguous RM rows and missing LT | WAITING_FOR_DATA, affected records only | Procurement resolves 24 ambiguous rows and missing LT for 19 records. Keep those records unselectable; confirmed complete materials can proceed independently. Counts describe prior assessment, not a fresh live scan. |
+| STD and selling-price inputs | WAITING_FOR_DATA, affected cost/quote only | Production/finance/System Owner supply rates, units, effective dates, allocation and pricing rules. Draft and partial summaries remain available; do not substitute zero. |
+| PK input responsibility | DECISION_REQUIRED | Owner chooses PU-PK-only entry or RD entry backed by PU-PK confirmation evidence. Question submitted; no answer inferred. PK delay must not stop Formula/RM. |
+| Catalog consistency between machines | DECISION_REQUIRED | Owner chooses independent local catalogs or a common versioned import workflow. ADR 0002 already accepts local-first storage; do not reopen the rejected server-enforcement requirement as a blocker. |
+| Live Procurement confirmation / A03–A04 | WAITING_FOR_BINDING_EVIDENCE | Source owner/operator provides sanitized mapping of identity, currentness, log/gate storage, locking and backup interfaces inside this worktree. Implement/review the binding and test in an approved test environment; null binding and synthetic adapter tests alone do not close this item. |
+| Live Apps Script installation / A07–A09 | OPERATOR_GATE | Validate approved artifact/routing/configuration and capture operator evidence. Optional live-sync work does not block the existing manual-import local pilot path. |
+| User acceptance and release | HUMAN_GATE | Execute existing UAT_COST_CALCULATOR.md with accountable users, resolve failures, obtain CODEOWNER approval, then operator deployment evidence. Codex cannot self-approve or deploy under AGENTS.md. |
+
+Next executable step: obtain the corrected export and sanitized pilot-binding evidence **inside the allowed worktree**, then validate the actual import and confirmation path. Existing external Sheet/script links identify sources but do not prove current values or authorize bypassing the path/data boundary. Never attach confidential prices/supplier/formula values to a shared report; use aggregate counts and sanitized evidence.
+
+This clarification changes documentation only. task_id: cost-calculator-implementation-2026-09-05; issue_id/pr_reference: none. files_changed: TASK.md, CODEX_HANDOFF.md, IMPLEMENTATION_EXECUTION.md. tests_run: documentation consistency checks and git diff --check; test_result: PASS, earlier runtime results retained without claiming a fresh test run. security/database/permission/dependency impact: none. rollback: revert this documentation commit. open_risks: evidence and decisions listed above. No data access, external writes, deployment or final approval performed.
+
+
+
 ## Current verified handoff — 2026-09-06
 
-Status: **LOCAL_VERIFIED / INTEGRATION_BLOCKED**. This section supersedes historical implementation counts and server-gateway descriptions below. The accepted architecture remains ADR 0002: local-first calculator and display-level role projections. This is not confidential server-side isolation and is not a 27/27 production completion claim.
+Previous aggregate status: **LOCAL_VERIFIED / INTEGRATION_BLOCKED**; see the workstream statuses above. This section supersedes historical implementation counts and server-gateway descriptions below. The accepted architecture remains ADR 0002: local-first calculator and display-level role projections. This is not confidential server-side isolation and is not a 27/27 production completion claim.
 
 - **A1 complete locally:** sourcing request acknowledgement/list and duplicate prevention; separate success notices; readable pending/field errors; kg/g/mg selectors; live partial formula sum; PK-not-applicable wording; historical revisions visibly read-only with a latest-revision action; unchanged saves do not create revisions. Failed catalog, revision, request and actual chat persistence cannot report success.
 - **A2 complete locally:** five mutation regressions prove future validFrom, invalid priceBasisQuantity, malformed comma numbers, 9.9% formula mismatch and direct non-RD sendSummary authorization are detected. Each baseline passes and its corresponding in-memory mutation fails.
