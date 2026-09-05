@@ -145,3 +145,18 @@ Verification: module 97/97, calculator browser 8/8, parent browser 37/37, SQL 32
 Rollback: revert this round's commit; the gateway stays default-deny either way and no production rollback is needed.
 
 Status: LOCAL_VERIFIED / INTEGRATION_BLOCKED. Not 27/27, not production-ready. P24 UAT, P25 independent review and P26 operator deployment remain unperformed.
+
+## Capability snapshot and fresh-open contract — 2026-09-05
+
+Same task label; still no Issue/PR, no Notion, no deployment, gateway never enabled outside the synthetic SQL test database.
+
+- [x] Verify the claimed module-level negatives are real, not just well-named: `exact project scenario requirement and quantity context required` genuinely patches `specVersion`/`sellingUnits`/`unitsPerPack`/`fillAmount`/`fillUnit`/`requirementRevision` and asserts a `/CONTEXT/` throw; `duplicate result is idempotent; changed bytes under same ID are rejected` asserts `CONTENT_CONFLICT` and that the stored total is unchanged
+- [x] Pin the capability surface of every schema role value with an exact-object snapshot test, plus a drift check that fails if a role allowed by the `fs_memberships` role check is missing from the snapshot
+- [x] Mutation-test that guard twice: granting `rd` a `viewRevision` and adding a new `rawPkView` capability key are both caught, the second with an explicit expected-versus-got diff
+- [x] Pin the fresh-open client contract (`scenarioId: null`, `expectedRevision: null`) and server-resolved scenario adoption with two client tests
+
+Code changes: `tests/sql/cost_gateway_test.sql` (+1 snapshot check, 33 total), `tests/cost-calculator-ui.test.js` (+2 client tests, 99 module tests total). No migration or application change in this round.
+
+Verification: module 99/99, calculator browser 8/8, parent browser 37/37, SQL 33 named checks exit 0, `git diff --check` clean. Security/database/permission/dependency impact: none — tests only. Rollback: revert this round's commit.
+
+Status unchanged: LOCAL_VERIFIED / INTEGRATION_BLOCKED.

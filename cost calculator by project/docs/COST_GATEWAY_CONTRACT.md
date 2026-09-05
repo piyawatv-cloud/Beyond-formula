@@ -32,7 +32,7 @@ So `/v1/cost/*` is a **required trusted service layer** between the browser and 
 
 ### 2.1 Fresh `open` has no server counterpart
 
-On the first open of a project, `costState.response` and `costState.route` are both null, so `costAction` sends `scenarioId: undefined, expectedRevision: null`. `fs_cost_open` rejects both with `INVALID_COST_IDENTITY`. The primary entry path is therefore unimplemented.
+On the first open of a project, `costState.response` and `costState.route` are both null, so `costAction` sends `scenarioId: null, expectedRevision: null`. `fs_cost_open` rejects both with `INVALID_COST_IDENTITY`. The primary entry path is therefore unimplemented. Both values are pinned by client tests so the service-layer input contract cannot drift silently.
 
 **Reconciliation direction:** do not relax the RPC's identity check. Project → scenario → latest-revision resolution belongs to the `/v1/cost/open` service layer, which must:
 
@@ -74,6 +74,8 @@ The `fs_memberships` role check (`supabase/schema.sql:56`) allows exactly `admin
 | Cost Accounting / Finance | — | denied (`open:false`) | No `finance` role value; before-markup totals ungranted |
 | CEO | — | denied; `fs_cost_approve` fail-closed | No CEO authority contract |
 | Sales / OPC | `sales`, `opc` | open + safe projection; sales is owner-scoped | Legacy raw read paths still open (§4) |
+
+**Guard.** A capability snapshot test pins the exact capability object for every role value the `fs_memberships` role check allows, and fails if a permitted role value is missing from the snapshot. Granting an existing capability, adding a new capability key, or introducing a new role value therefore cannot land without updating that table deliberately. It was mutation-tested: granting `rd` a `viewRevision`, and adding a `rawPkView` key to `purchasing`, are both caught.
 
 Splitting `purchasing` into Procurement RM and PU-PK, and adding Production / Finance / CEO, are **Critical Changes** requiring owner approval and independent review. Until then the generic `purchasing` role deliberately receives no raw category — a wrong guess would hand PU-PK the RM supplier prices it must never see, or the reverse.
 

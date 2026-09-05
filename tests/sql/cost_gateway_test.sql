@@ -385,4 +385,78 @@ begin
 end $$;
 \echo 'PASS approved snapshot immutable across new revision and changed source'
 
+
+-- ---------------------------------------------------------------------------
+-- Capability surface snapshot. Every role value allowed by the fs_memberships
+-- role check is pinned to its exact capability object, so adding a capability
+-- key, granting an existing one, or introducing a new role cannot pass review
+-- unnoticed. This is the guard for the class of defect where a dead role branch
+-- silently starts disclosing raw data once the role name becomes reachable.
+-- ---------------------------------------------------------------------------
+
+insert into auth.users(id,email) values
+  ('cccccccc-cccc-cccc-cccc-cccccccccccc','caps.admin@example.test'),
+  ('dddddddd-dddd-dddd-dddd-dddddddddddd','caps.pd@example.test'),
+  ('eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee','caps.ra@example.test'),
+  ('ffffffff-ffff-ffff-ffff-ffffffffffff','caps.opc@example.test')
+on conflict do nothing;
+insert into public.fs_memberships(user_id,name,role,active) values
+  ('cccccccc-cccc-cccc-cccc-cccccccccccc','Caps Admin','admin',true),
+  ('dddddddd-dddd-dddd-dddd-dddddddddddd','Caps PD','pd',true),
+  ('eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee','Caps RA','ra',true),
+  ('ffffffff-ffff-ffff-ffff-ffffffffffff','Caps OPC','opc',true)
+on conflict (user_id) do update set name=excluded.name,role=excluded.role,active=excluded.active;
+
+begin;
+set local role authenticated;
+do $$
+declare
+  -- One row per role value in the fs_memberships role check. 'denied' means the
+  -- role must not reach the gateway at all. Update this table only together
+  -- with an approved capability-mapping change.
+  spec jsonb := '[
+    {"role":"admin",     "uid":"cccccccc-cccc-cccc-cccc-cccccccccccc","open":true, "editRM":true, "adoptPK":true, "sendSummary":true, "approveCEO":false,"viewRevision":false},
+    {"role":"rd",        "uid":"99999999-9999-9999-9999-999999999999","open":true, "editRM":true, "adoptPK":true, "sendSummary":true, "approveCEO":false,"viewRevision":false},
+    {"role":"purchasing","uid":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","open":true, "editRM":false,"adoptPK":false,"sendSummary":false,"approveCEO":false,"viewRevision":false},
+    {"role":"sales",     "uid":"22222222-2222-2222-2222-222222222222","open":true, "editRM":false,"adoptPK":false,"sendSummary":false,"approveCEO":false,"viewRevision":false},
+    {"role":"opc",       "uid":"ffffffff-ffff-ffff-ffff-ffffffffffff","open":true, "editRM":false,"adoptPK":false,"sendSummary":false,"approveCEO":false,"viewRevision":false},
+    {"role":"pd",        "uid":"dddddddd-dddd-dddd-dddd-dddddddddddd","denied":true},
+    {"role":"ra",        "uid":"eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee","denied":true},
+    {"role":"mkt",       "uid":"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb","denied":true}
+  ]'::jsonb;
+  item jsonb; caps jsonb; expected jsonb; covered text[];
+begin
+  for item in select value from jsonb_array_elements(spec) loop
+    perform set_config('request.jwt.claim.sub', item->>'uid', true);
+    if coalesce((item->>'denied')::boolean,false) then
+      begin
+        perform public.fs_cost_open('A00001','S1',1);
+        raise exception 'role % reached the cost gateway without a reviewed mapping', item->>'role';
+      exception when others then
+        if SQLERRM <> 'COST_PROJECT_ACCESS_DENIED' then raise; end if;
+      end;
+    else
+      caps := public.fs_cost_open('A00001','S1',1)->'capabilities';
+      expected := jsonb_build_object(
+        'open',item->'open','editRM',item->'editRM','adoptPK',item->'adoptPK',
+        'sendSummary',item->'sendSummary','approveCEO',item->'approveCEO','viewRevision',item->'viewRevision');
+      if caps <> expected then
+        raise exception 'capability surface for role % changed. expected % got %', item->>'role', expected, caps;
+      end if;
+    end if;
+  end loop;
+
+  -- Any role value the schema permits but this snapshot does not list would go
+  -- unreviewed, so fail if the two ever drift apart.
+  select array_agg(value->>'role' order by value->>'role') into covered from jsonb_array_elements(spec);
+  if exists (
+    select 1 from unnest(array['admin','pd','ra','rd','sales','opc','mkt','purchasing']) role_value
+    where role_value <> all(covered)
+  ) then
+    raise exception 'a schema role value is missing from the capability snapshot';
+  end if;
+end $$;
+commit;
+\echo 'PASS capability surface snapshot pinned for every schema role'
+
 \echo 'PASS cost gateway projection, revision, patch and outbox contract'
