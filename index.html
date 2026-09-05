@@ -665,7 +665,7 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
   <div class="logo"><svg viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-1.73-3L9 11.35V4H8a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2h-1v7.35L19.73 19A2 2 0 0 1 18 22H6Zm5-10.11L8.31 16.5h7.38L13 11.89V4h-2v7.89Z"/></svg></div>
   <div>
     <div class="hdr-title">Formula Studio</div>
-    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-05.11-source-fix</div>
+    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-05.12-catalog-build</div>
   </div>
   <div class="sync-chip" id="syncChip" onclick="sbManualSync()" title="สถานะการซิงก์ข้อมูลกับเซิร์ฟเวอร์กลาง"></div>
 </div>
@@ -1460,7 +1460,7 @@ function renderCostCalculator(){
     ${data.capabilities&&data.capabilities.adoptPK?`<p class="hint">กรอกยอดที่ PU-PK ยืนยันแล้วเท่านั้น ระบบบันทึกผู้กรอกและเวลาเป็นหลักฐาน และไม่แก้ย้อนหลัง</p>
     <div class="fg4">${costField('ยอด PK หลังบวก (บาท/ล็อต)','costPkAdjusted',null,'เว้นว่างได้ถ้ายังไม่มีนโยบายราคา')}${costField('ยอด PK ต้นทุนใช้จริง (บาท/ล็อต)','costPkBase',null,'เว้นว่างได้ถ้ายังไม่ทราบ')}${costTextField('ราคามีผลถึง','costPkValidUntil',null,'YYYY-MM-DD')}${costTextField('เลขอ้างอิงหลักฐาน','costPkEvidence',null,'เช่น เลข Req-PK')}</div>
     <button class="btn btn-s" ${disabled} onclick="costSavePk()">บันทึกผล PK ที่ยืนยันแล้ว</button>`:''}
-    ${!canEdit?'':`<h3>กฎการบวกราคา</h3>${data.pricingRule?`<p class="hint">ใช้อยู่: เวอร์ชัน ${esc(data.pricingRule.version)} · ค่าเผื่อขั้นต้น ${esc(data.pricingRule.allowancePercent)}% · ตัวคูณ ${esc(data.pricingRule.factor)} · ผู้รับผิดชอบ ${esc(data.pricingRule.owner)} · ใช้ได้ถึง ${esc(data.pricingRule.validUntil)}</p>`:'<p class="cost-warning">ยังไม่ได้กำหนดกฎการบวกราคา จึงยังไม่มีราคาต่อหน่วย</p>'}
+    ${!(data.capabilities&&data.capabilities.setPricing)?'':`<h3>กฎการบวกราคา</h3>${data.pricingRule?`<p class="hint">ใช้อยู่: เวอร์ชัน ${esc(data.pricingRule.version)} · ค่าเผื่อขั้นต้น ${esc(data.pricingRule.allowancePercent)}% · ตัวคูณ ${esc(data.pricingRule.factor)} · ผู้รับผิดชอบ ${esc(data.pricingRule.owner)} · ใช้ได้ถึง ${esc(data.pricingRule.validUntil)}</p>`:'<p class="cost-warning">ยังไม่ได้กำหนดกฎการบวกราคา จึงยังไม่มีราคาต่อหน่วย</p>'}
     <div class="fg4">${costField('ค่าเผื่อขั้นต้น','costAllowance',data.pricingRule&&data.pricingRule.allowancePercent,'% ของต้นทุนขั้นต้น — คนละตัวกับ Loss รายบรรทัด')}${costField('ตัวคูณราคา','costFactor',data.pricingRule&&data.pricingRule.factor,'ใส่ตามที่ใช้จริง เช่น 2.2')}${costTextField('ผู้รับผิดชอบอัตรา','costRuleOwner',data.pricingRule&&data.pricingRule.owner,'ชื่อผู้กำหนดอัตรานี้')}${costTextField('ใช้ได้ถึง','costRuleUntil',data.pricingRule&&data.pricingRule.validUntil,'YYYY-MM-DD')}${costField('ทศนิยมที่ปัด','costRuleDecimals',data.pricingRule?data.pricingRule.decimals:2,'0–6 ตำแหน่ง')}
     <label class="fgrp"><span class="flbl">หมวด PK</span><select id="costPkMode" class="fi" ${disabled}><option value="">— เลือก —</option><option value="separate"${costDraftValue('costPkMode',data.pricingRule&&data.pricingRule.pkMode)==='separate'?' selected':''}>มีหมวด PK แยก (รอผลจาก PU-PK)</option><option value="notApplicable"${costDraftValue('costPkMode',data.pricingRule&&data.pricingRule.pkMode)==='notApplicable'?' selected':''}>ไม่มีหมวด PK แยก — คิดรวมเป็นค่าต่อหน่วย</option></select><span class="hint">เลือกให้ตรงกับรูปแบบสินค้า</span></label></div>
     <h4>ค่าดำเนินการต่อหน่วย (ที่ต้นทุน ไม่บวกกำไรซ้ำ)</h4>
@@ -1501,7 +1501,7 @@ async function costImportCatalogFile(file){
   return costAction('open',{});
 }
 function costSavePricingRule(){
-  const data=costState.response;if(!data||!data.capabilities.editRM)return;
+  const data=costState.response;if(!data||!data.capabilities.setPricing)return;
   const text=id=>{const el=document.getElementById(id);return el?el.value.trim():'';};
   try{
     costRecordPricingRule(costState.projectId,data.scenarioId,{
@@ -1533,6 +1533,9 @@ const COST_KEY='fs_cost';
 // without touching the locked user/role structures; one person may hold several,
 // and an explicit per-user assignment in the store overrides the default.
 const COST_ROLE_DEFAULTS={admin:['RD','Procurement RM','PU-PK','Production','Finance','CEO'],rd:['RD'],purchasing:['Procurement RM','PU-PK'],sales:['Sales'],opc:['OPC'],pd:[],ra:[],mkt:[]};
+// ผู้มีอำนาจตั้งอัตราขายและอัตรามาตรฐาน แยกจากผู้แก้สูตรโดยตั้งใจ — คนทำสูตรไม่ควร
+// ตั้งตัวคูณราคาให้ตัวเอง ค่าเริ่มต้นให้เฉพาะ Finance และ CEO จนกว่าเจ้าของระบบจะกำหนดเป็นอย่างอื่น
+const COST_PRICING_ROLES=['Finance','CEO'];
 const COST_ROLE_RANK=['CEO','Finance','Production','RD','Procurement RM','PU-PK','OPC','Sales'];
 let costStore=null; // null until loadCostStore() has run — never write before then (rule 4)
 function costStoreDefault(){return {v:1,scenarios:[],outbox:[],catalog:[],caps:{},requests:[],pk:[],formats:[]};}
@@ -1566,6 +1569,8 @@ function costCapabilities(){
   const rd=admin||roles.includes('RD');
   return {open:admin||roles.length>0,editRM:rd,adoptPK:rd||roles.includes('PU-PK'),
     sendSummary:rd,approveCEO:false, // freezeQuotation stays disabled without a server authority
+    // ตั้งกฎการบวกราคาและอัตรามาตรฐาน เป็นคนละสิทธิ์กับการแก้สูตร
+    setPricing:admin||roles.some(function(r){return COST_PRICING_ROLES.indexOf(r)>=0;}),
     viewRevision:rd}; // ADR 0002 decision 4: historical revisions are RD and Admin only
 }
 function costToday(){return new Date().toISOString().slice(0,10);}
@@ -1626,7 +1631,7 @@ function costEnvelope(entry,sendState){
   return {contract:'cost-v1',projectId:entry.projectId,scenarioId:entry.scenarioId,revision:entry.revision,
     view:CostCalculator.project(result,role),capabilities:caps,
     inputs:detail?{sellingUnits:scenario.sellingUnits,unitsPerPack:scenario.unitsPerPack,fillAmount:scenario.fillAmount,fillUnit:scenario.fillUnit,pkSpecVersion:scenario.pkSpecVersion}:{},
-    pricingRule:detail&&scenario.policies&&scenario.policies.RM?{
+    pricingRule:(detail||caps.setPricing)&&scenario.policies&&scenario.policies.RM?{
       allowancePercent:(scenario.policies.RM.allowanceRate||0)*100,factor:scenario.policies.RM.rate,
       owner:scenario.policies.RM.owner,validFrom:scenario.policies.RM.validFrom,validUntil:scenario.policies.RM.validUntil,
       version:scenario.policies.RM.version,decimals:scenario.policies.RM.rounding&&scenario.policies.RM.rounding.decimals,
@@ -1905,7 +1910,7 @@ function costFormatList(){
 function costRecordOperationFormat(input){
   // ตารางกลางเป็น master data จึงจำกัดที่ผู้ดูแลระบบ ยังไม่มีการกำหนดสิทธิ์
   // ฝ่ายผลิต/บัญชีต้นทุนแยกออกมา — บันทึกเป็นงานค้างไว้
-  if(currentRole()!=='admin')throw Error('แก้อัตรามาตรฐานกลางได้เฉพาะผู้ดูแลระบบ');
+  if(!costCapabilities().setPricing)throw Error('แก้อัตรามาตรฐานกลางได้เฉพาะผู้มีอำนาจด้านราคา');
   const id=String(input.id||'').trim();
   if(!/^[A-Z][A-Z0-9-]{1,19}$/.test(id))throw Error('รหัสรูปแบบสินค้าไม่ถูกต้อง');
   const label=String(input.label||'').trim();
@@ -1935,7 +1940,7 @@ function costPolicyVersion(entry){
 }
 function costRecordPricingRule(projectId,scenarioId,input){
   const caps=costCapabilities();
-  if(!caps.editRM)throw Error('กำหนดกฎการบวกราคาได้เฉพาะผู้ที่แก้สูตรได้');
+  if(!caps.setPricing)throw Error('กำหนดกฎการบวกราคาได้เฉพาะผู้มีอำนาจด้านราคา');
   const entry=costLatestEntry(projectId,scenarioId);
   if(!entry)throw Error('ยังไม่มีข้อมูลต้นทุนของโครงการนี้');
   const allowance=Number(input.allowancePercent),factor=Number(input.factor),decimals=Number(input.decimals);

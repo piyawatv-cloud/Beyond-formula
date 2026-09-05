@@ -203,13 +203,21 @@ function seedRates(c,amounts=[0.15,0.15],validUntil='2999-01-01'){
   c.backing.fs_cost=admin.backing.fs_cost;c.run('costStore=null');
   return admin;
 }
+// กฎการบวกราคาเป็นสิทธิ์ของผู้มีอำนาจด้านราคา ไม่ใช่ผู้แก้สูตร
+function setRule(c,rule){
+  const pricer=fixture('admin','Synthetic Admin');
+  pricer.backing.fs_cost=c.backing.fs_cost;
+  const out=pricer.costRecordPricingRule('A00001','S1',rule||RULE);
+  c.backing.fs_cost=pricer.backing.fs_cost;c.run('costStore=null');
+  return out;
+}
 
 test('กฎการบวกราคาให้ราคาต่อหน่วยตรงกับบันไดของฟอร์ม',async()=>{const c=fixture();
  await readyScenario(c);seedRates(c);
  const before=await c.costLocalRequest('open',{projectId:'A00001'});
  assert.equal(before.view.finalPerSellingUnit,null,'ยังไม่มีกฎ ต้องยังไม่มีราคา');
  assert.equal(before.pricingRule,null);
- c.costRecordPricingRule('A00001','S1',RULE);
+ setRule(c,RULE);
  const after=await c.costLocalRequest('open',{projectId:'A00001'});
  // 0.25 g x 8.5 บาท/g = 2.125 → x1.1 = 2.3375 → x2.2 = 5.1425 → +0.30 = 5.4425
  assert.ok(Math.abs(after.view.finalPerSellingUnit-5.4425)<1e-6,'ได้ '+after.view.finalPerSellingUnit);
@@ -218,8 +226,8 @@ test('กฎการบวกราคาให้ราคาต่อหน�
  assert.equal(after.pricingRule.owner,'เจ้าของอัตรา');});
 test('บันทึกกฎซ้ำสร้างเวอร์ชันใหม่ ของเดิมยังอ่านย้อนหลังได้',async()=>{const c=fixture();
  const rev=await readyScenario(c);seedRates(c);
- c.costRecordPricingRule('A00001','S1',RULE);
- c.costRecordPricingRule('A00001','S1',{...RULE,factor:2.5});
+ setRule(c,RULE);
+ setRule(c,{...RULE,factor:2.5});
  const latest=await c.costLocalRequest('open',{projectId:'A00001'});
  assert.equal(latest.pricingRule.version,2);
  assert.equal(latest.pricingRule.factor,2.5);
@@ -228,22 +236,23 @@ test('บันทึกกฎซ้ำสร้างเวอร์ชัน�
  assert.equal(old.pricingRule.factor,2.2,'revision เดิมต้องคงอัตราของตัวเอง');});
 test('กฎที่กรอกไม่ครบหรือไม่สมเหตุผลถูกปฏิเสธ ไม่บันทึกเวอร์ชัน',async()=>{const c=fixture();
  await readyScenario(c);seedRates(c);
- const before=c.loadCostStore().scenarios.length;
+ const pricer=fixture('admin','Synthetic Admin');pricer.backing.fs_cost=c.backing.fs_cost;
+ const before=pricer.loadCostStore().scenarios.length;
  for(const [patch,re] of [[{factor:0},/ตัวคูณ/],[{factor:-1},/ตัวคูณ/],[{allowancePercent:-5},/ค่าเผื่อ/],
    [{allowancePercent:150},/ค่าเผื่อ/],[{owner:'   '},/ผู้รับผิดชอบ/],[{validUntil:'2030-02-30'},/YYYY-MM-DD/],
    [{decimals:9},/ทศนิยม/],[{formatId:''},/รูปแบบสินค้า/],[{formatId:'NO-SUCH'},/รูปแบบสินค้า/],[{formatId:'TABLET'},/ยังไม่ได้กรอกอัตรา/],[{pkMode:''},/หมวด PK/],[{pkMode:'maybe'},/หมวด PK/]]){
-  assert.throws(()=>c.costRecordPricingRule('A00001','S1',{...RULE,...patch}),re,JSON.stringify(patch));
+  assert.throws(()=>pricer.costRecordPricingRule('A00001','S1',{...RULE,...patch}),re,JSON.stringify(patch));
  }
- assert.equal(c.loadCostStore().scenarios.length,before,'การปฏิเสธต้องไม่สร้าง revision');});
+ assert.equal(pricer.loadCostStore().scenarios.length,before,'การปฏิเสธต้องไม่สร้าง revision');});
 test('กฎที่หมดอายุแล้วไม่ให้ราคา แม้จะเคยบันทึกไว้',async()=>{const c=fixture();
  await readyScenario(c);seedRates(c);
- c.costRecordPricingRule('A00001','S1',{...RULE,validUntil:'2026-09-04'}); // เมื่อวาน
+ setRule(c,{...RULE,validUntil:'2026-09-04'}); // เมื่อวาน
  const body=await c.costLocalRequest('open',{projectId:'A00001'});
  assert.equal(body.view.finalPerSellingUnit,null,'อัตราหมดอายุต้องไม่ออกราคา');
  assert.equal(body.view.complete,false);});
 test('ค่าเผื่อขั้นต้นกับ loss รายบรรทัดเป็นคนละตัว และคูณทับกัน',async()=>{const c=fixture();
  await readyScenario(c);seedRates(c);
- c.costRecordPricingRule('A00001','S1',RULE);
+ setRule(c,RULE);
  const flat=(await c.costLocalRequest('open',{projectId:'A00001'})).view.finalPerSellingUnit;
  const lineId=c.loadCostStore().scenarios[3].scenario.rmLines[0].id;
  const latest=c.loadCostStore().scenarios.at(-1).revision;
@@ -253,15 +262,18 @@ test('ค่าเผื่อขั้นต้นกับ loss รายบ�
  const withLoss=(await c.costLocalRequest('open',{projectId:'A00001'})).view.finalPerSellingUnit;
  // ค่าดำเนินการคงที่ 0.30 ไม่ขึ้นกับ loss ส่วนที่เหลือต้องโตขึ้นตาม 1/0.95
  assert.ok(Math.abs((withLoss-0.30)-(flat-0.30)/0.95)<1e-6,'loss ต้องเพิ่มเฉพาะฝั่งวัตถุดิบ');});
-test('บทบาทที่แก้สูตรไม่ได้ กำหนดกฎการบวกราคาไม่ได้',async()=>{const c=fixture();
+test('บทบาทที่ไม่มีอำนาจด้านราคา กำหนดกฎการบวกราคาและอัตรากลางไม่ได้',async()=>{const c=fixture();
  await readyScenario(c);seedRates(c);
- const s=fixture('sales','Synthetic Sales');s.backing.fs_cost=c.backing.fs_cost;
- assert.throws(()=>s.costRecordPricingRule('A00001','S1',RULE),/แก้สูตรได้/);
- const p=fixture('purchasing','Synthetic Buyer');p.backing.fs_cost=c.backing.fs_cost;
- assert.throws(()=>p.costRecordPricingRule('A00001','S1',RULE),/แก้สูตรได้/);});
+ for(const [role,name] of [['sales','Synthetic Sales'],['purchasing','Synthetic Buyer'],['rd','Synthetic RD']]){
+  const u=fixture(role,name);u.backing.fs_cost=c.backing.fs_cost;
+  assert.equal(u.costCapabilities().setPricing,false,role);
+  assert.throws(()=>u.costRecordPricingRule('A00001','S1',RULE),/อำนาจด้านราคา/,role);
+  assert.throws(()=>u.costRecordOperationFormat({id:'CAP-GEL',label:'x',owner:'o',validUntil:'2999-01-01',
+    charges:[{label:'ค่าอัดแคป',amount:0.15}]}),/อำนาจด้านราคา/,role);
+ }});
 test('Sales เห็นราคาต่อหน่วยหลังกำหนดกฎ แต่ยังไม่เห็นต้นทุนหรืออัตรา',async()=>{const c=fixture();
  await readyScenario(c);seedRates(c);
- c.costRecordPricingRule('A00001','S1',RULE);
+ setRule(c,RULE);
  const s=fixture('sales','Synthetic Sales');s.backing.fs_cost=c.backing.fs_cost;
  const body=await s.costLocalRequest('open',{projectId:'A00001'});
  assert.ok(Math.abs(body.view.finalPerSellingUnit-5.4425)<1e-6);
@@ -284,11 +296,11 @@ test('ตารางกลางมาพร้อมโครงรูปแ�
  assert.ok(list.every(f=>f.ready===false),'ทุกรูปแบบต้องยังใช้ไม่ได้จนกว่าจะกรอกอัตรา');
  assert.ok(list.every(f=>f.charges.every(ch=>ch.amount===null)),'ห้ามมีอัตราตั้งต้นติดมา');
  assert.ok(list.some(f=>f.id==='CAP-GEL')&&list.some(f=>f.id==='SACHET'));});
-test('แก้อัตรากลางได้เฉพาะผู้ดูแลระบบ',()=>{
+test('แก้อัตรากลางได้เฉพาะผู้มีอำนาจด้านราคา',()=>{
  for(const role of ['rd','purchasing','sales','opc']){
   const c=fixture(role,'ผู้ใช้ '+role);
   assert.throws(()=>c.costRecordOperationFormat({id:'CAP-GEL',label:'x',owner:'o',validUntil:'2999-01-01',
-    charges:[{label:'ค่าอัดแคป',amount:0.15}]}),/ผู้ดูแลระบบ/,role);
+    charges:[{label:'ค่าอัดแคป',amount:0.15}]}),/อำนาจด้านราคา/,role);
  }});
 test('อัตรากลางที่กรอกไม่ครบถูกปฏิเสธ',()=>{const c=fixture('admin','Synthetic Admin');
  const ok={id:'CAP-GEL',label:'แคปซูลเจลาติน',owner:'ฝ่ายผลิต',validUntil:'2999-01-01',charges:[{label:'ค่าอัดแคป',amount:0.15}]};
@@ -300,7 +312,7 @@ test('อัตรากลางที่กรอกไม่ครบถู�
  assert.equal(c.costFormatCurrent('CAP-GEL').version,0,'การปฏิเสธต้องไม่สร้างเวอร์ชัน');});
 test('แก้อัตรากลางภายหลังไม่เปลี่ยนราคาที่บันทึกไปแล้ว',async()=>{const c=fixture();
  await readyScenario(c);seedRates(c,[0.15,0.15]);
- c.costRecordPricingRule('A00001','S1',RULE);
+ setRule(c,RULE);
  const first=(await c.costLocalRequest('open',{projectId:'A00001'})).view.finalPerSellingUnit;
  const pinned=c.loadCostStore().scenarios.at(-1).revision;
  seedRates(c,[0.50,0.50]); // ฝ่ายผลิตปรับอัตราขึ้น
@@ -308,13 +320,14 @@ test('แก้อัตรากลางภายหลังไม่เป�
  const old=await c.costLocalRequest('open',{projectId:'A00001',scenarioId:'S1',expectedRevision:pinned});
  assert.equal(old.view.finalPerSellingUnit,first,'revision เดิมต้องคงราคาเดิม');
  assert.equal(old.pricingRule.format.version,1,'และคงเวอร์ชันอัตราที่ใช้ตอนนั้น');
- c.costRecordPricingRule('A00001','S1',RULE); // เลือกใหม่จึงจะรับอัตราใหม่
+ setRule(c,RULE); // เลือกใหม่จึงจะรับอัตราใหม่
  const now=await c.costLocalRequest('open',{projectId:'A00001'});
  assert.equal(now.pricingRule.format.version,2);
  assert.ok(now.view.finalPerSellingUnit>first,'เลือกใหม่แล้วต้องได้อัตราใหม่');});
 test('อัตรากลางที่หมดอายุเลือกมาใช้ไม่ได้',async()=>{const c=fixture();
  await readyScenario(c);seedRates(c,[0.15,0.15],'2026-09-04');
- assert.throws(()=>c.costRecordPricingRule('A00001','S1',RULE),/หมดอายุ/);});
+ const pricer=fixture('admin','Synthetic Admin');pricer.backing.fs_cost=c.backing.fs_cost;
+ assert.throws(()=>pricer.costRecordPricingRule('A00001','S1',RULE),/หมดอายุ/);});
 
 // ── จัดกลุ่มชื่อคล้ายกัน และเปลี่ยน Tier ได้ทีหลัง ────────────────────────────
 const tierOffer=(id,mat,name,price,moq,lt,ok=true)=>({...offer,id,materialId:mat,name,price,priceUnit:'kg',
@@ -394,3 +407,20 @@ test('สารที่ข้อมูลไม่ครบยังปรา�
    .then(b=>{const line=c.loadCostStore().scenarios.at(-1).scenario.rmLines.at(-1);
      if(line&&line.offer&&line.offer.id==='O9'&&b.view.rm.baseTotal!==null)throw Error('ไม่ควรคิดต้นทุนได้');
      throw Error('EXPECTED_NO_COST');}),/EXPECTED_NO_COST/);});
+test('ตั้งอัตราขายเป็นคนละสิทธิ์กับแก้สูตร — RD ตั้งเองไม่ได้',async()=>{const c=fixture();
+ await readyScenario(c);seedRates(c);
+ assert.equal(c.costCapabilities().editRM,true,'RD แก้สูตรได้');
+ assert.equal(c.costCapabilities().setPricing,false,'แต่ตั้งอัตราขายไม่ได้');
+ assert.throws(()=>c.costRecordPricingRule('A00001','S1',RULE),/อำนาจด้านราคา/);
+ const fin=fixture('admin','Synthetic Admin');fin.backing.fs_cost=c.backing.fs_cost;
+ assert.equal(fin.costCapabilities().setPricing,true,'Admin ถือ Finance/CEO จึงตั้งได้');});
+test('ผู้ถือ capability ด้านราคาโดยตรงตั้งอัตราได้ แม้แก้สูตรไม่ได้',async()=>{const c=fixture();
+ await readyScenario(c);seedRates(c);
+ const f=fixture('sales','Synthetic Finance');f.backing.fs_cost=c.backing.fs_cost;
+ f.loadCostStore().caps['Synthetic Finance']=['Finance'];
+ assert.equal(f.costCapabilities().setPricing,true);
+ assert.equal(f.costCapabilities().editRM,false,'ตั้งราคาได้ไม่ได้แปลว่าแก้สูตรได้');
+ f.costRecordPricingRule('A00001','S1',RULE);
+ c.backing.fs_cost=f.backing.fs_cost;c.run('costStore=null');
+ const body=await c.costLocalRequest('open',{projectId:'A00001'});
+ assert.ok(Math.abs(body.view.finalPerSellingUnit-5.4425)<1e-6,'อัตราที่ตั้งโดยผู้มีอำนาจต้องมีผลจริง');});
