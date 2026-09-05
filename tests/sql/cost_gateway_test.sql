@@ -24,7 +24,7 @@ insert into private.fs_cost_scenarios(project_id,scenario_id,revision,inputs,saf
 values (
   'A00001','S1',1,
   '{"sellingUnits":1000,"unitsPerPack":1,"fillAmount":1,"fillUnit":"g"}'::jsonb,
-  '{"projectId":"A00001","scenarioId":"S1","revision":1,"label":"ยังไม่ใช่ต้นทุนรวมต่อชิ้นหรือราคาพร้อมเสนอ","complete":false,"pending":["PK รอยืนยัน"],"rm":{"adjustedTotal":125,"ready":true},"pk":{"adjustedTotal":null,"ready":false},"operation":{"adjustedTotal":null,"ready":false},"finalPerSellingUnit":null}'::jsonb,
+  '{"projectId":"A00001","scenarioId":"S1","revision":1,"label":"SUPPLIER_LABEL_SECRET","complete":false,"pending":[{"supplier":"SUPPLIER_PENDING_SECRET"}],"rm":{"adjustedTotal":125,"ready":true},"pk":{"adjustedTotal":null,"ready":false},"operation":{"adjustedTotal":null,"ready":false},"finalPerSellingUnit":null}'::jsonb,
   '{"lines":[{"id":"L1","alias":"รายการวัสดุทดสอบ","amount":1,"unit":"g","supplier":"SUPPLIER_SECRET","supplierPrice":9999}]}'::jsonb,
   '{"supplier":"PK_SECRET","supplierPrice":8888}'::jsonb,
   '{"rate":7777,"owner":"FINANCE_SECRET"}'::jsonb,
@@ -34,6 +34,34 @@ values (
 on conflict (project_id,scenario_id,revision) do update
 set inputs=excluded.inputs,safe_view=excluded.safe_view,raw_rm=excluded.raw_rm,raw_pk=excluded.raw_pk,raw_operation=excluded.raw_operation;
 
+-- The gateway is default-deny until a trusted owner enables the feature flag.
+delete from public.fs_meta where key='cost_gateway_enabled';
+begin;
+set local role authenticated;
+select set_config('request.jwt.claim.sub','99999999-9999-9999-9999-999999999999',true);
+do $$
+begin
+  perform public.fs_cost_open('A00001','S1',1);
+  raise exception 'disabled cost gateway unexpectedly allowed access';
+exception when others then
+  if SQLERRM <> 'COST_PROJECT_ACCESS_DENIED' then raise; end if;
+end $$;
+rollback;
+insert into public.fs_meta(key,value) values('cost_gateway_enabled','{"enabled":true}'::jsonb)
+on conflict (key) do update set value=excluded.value;
+
+begin;
+set local role authenticated;
+select set_config('request.jwt.claim.sub','22222222-2222-2222-2222-222222222222',true);
+do $$
+begin
+  update public.fs_meta set value='{"enabled":true}'::jsonb where key='cost_gateway_enabled';
+  raise exception 'non-admin changed gateway flag';
+exception when others then
+  if SQLERRM <> 'COST_GATEWAY_FLAG_ADMIN_ONLY' then raise; end if;
+end $$;
+rollback;
+
 begin;
 set local role authenticated;
 select set_config('request.jwt.claim.sub','22222222-2222-2222-2222-222222222222',true);
@@ -41,7 +69,7 @@ do $$
 declare body jsonb;
 begin
   body := public.fs_cost_open('A00001','S1',1);
-  if body::text like '%SUPPLIER_SECRET%' or body::text like '%supplierPrice%' or body::text like '%PK_SECRET%' then
+  if body::text like '%SUPPLIER_SECRET%' or body::text like '%SUPPLIER_LABEL_SECRET%' or body::text like '%SUPPLIER_PENDING_SECRET%' or body::text like '%supplierPrice%' or body::text like '%PK_SECRET%' then
     raise exception 'Sales projection leaked raw supplier data';
   end if;
   if body->'view'->'rm'->>'adjustedTotal' <> '125' then raise exception 'safe adjusted RM amount missing'; end if;
@@ -76,7 +104,17 @@ begin
   if current_body->'inputs'->>'sellingUnits' <> '2000' then
     raise exception 'new cost revision was not append-only saved';
   end if;
+  if current_body->'lines'->0->>'alias' <> 'ชื่อ revision' or current_body->'lines'->0->>'amount' <> '2' then
+    raise exception 'saved line edits were not reflected in current revision';
+  end if;
   if old_body->>'revision' <> '1' or old_body->'inputs'->>'sellingUnits' <> '1000' then raise exception 'old cost revision was changed'; end if;
+end $$;
+select public.fs_cost_save('A00001','S1',2,'{"lines":[]}'::jsonb);
+do $$
+declare empty_body jsonb;
+begin
+  empty_body := public.fs_cost_open('A00001','S1',3);
+  if empty_body->'lines' <> '[]'::jsonb then raise exception 'explicit empty line edit restored old RM lines'; end if;
 end $$;
 \set ON_ERROR_STOP off
 select public.fs_cost_save('A00001','S1',2,'{"price":9999}'::jsonb);

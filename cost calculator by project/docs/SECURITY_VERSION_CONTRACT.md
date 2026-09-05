@@ -56,9 +56,9 @@ Server responses must be allowlisted projections before browser receipt. Do not 
 
 ## Fail-closed adapter behavior
 
-### Smallest compatible migration candidate (not implemented)
+### Smallest compatible migration candidate (implemented locally, disabled)
 
-It is technically feasible to retain the existing physical tables and locked JSON fields while introducing projection RPCs. An RPC is preferable to a casually configured view because its actor/project checks, grants and projection can be explicitly tested. It must have a fixed safe search path, derive the authenticated identity, use narrowly granted execution and never accept the caller's asserted role as authority.
+It is technically feasible to retain the existing physical tables and locked JSON fields while introducing projection RPCs. The local migration at `supabase/migrations/20260905140000_cost_gateway_contract.sql` implements this additive shape: fixed empty search paths, authenticated identity checks, narrowly granted execution, a default-off owner-controlled gate, role-filtered responses and server-owned projection fields. The gate key has an admin-only trigger because the legacy `fs_meta` policies are broader than this feature. Generic `purchasing` is safe-only until RM versus PU-PK capability mapping is approved.
 
 1. Add reviewed read RPCs for records and chat history/events; revoke browser direct raw SELECT on those tables and remove corresponding broad policies. Preserve raw historical records as authoritative evidence under restricted access.
 2. Change `sbPull` and related read callers to consume the correct projection. A projection is not a full authoritative record. Tag/segregate projection cache state and prevent it from entering full-record sync writes. Support old local-only fixtures without permitting old secure-mode clients to bypass the new API.
@@ -67,7 +67,7 @@ It is technically feasible to retain the existing physical tables and locked JSO
 5. Review activity/meta/read/event grants and all exported response paths for secondary leaks. Retain raw audit evidence; neither a destructive chat cleanup nor silent rewriting of historical evidence is an acceptable confidentiality fix.
 6. Coordinate backend access changes, compatible client release, stale-client refusal and cache transition in a reviewed rollout. Server access control cannot retract copies a user already possessed. Migration rollback must disable affected features rather than reopen raw reads.
 
-This candidate preserves physical storage shape, but changes authorization and API compatibility. It therefore still needs System Owner contract review, independent security review and staging evidence. Keeping the cost gateway disabled until this exists is the smaller immediately safe action. Local synthetic calculation/projection tests cannot close this integration gate.
+This local migration preserves physical storage shape, but changes authorization and API compatibility. It still needs System Owner contract review, independent security review and staging evidence. Keeping the cost gateway disabled until the client/cache transition and capability mapping exist is the smaller immediately safe action. Local synthetic calculation/projection tests cannot close this integration gate.
 
 Local modules can deterministically validate units, totals, immutable snapshots, applicability, transitions, redacted projections and retry state with synthetic fixtures. They can demonstrate intended logic, not authenticate a real purchaser, secure a shared Sheet, confirm current validity or enforce remote grants.
 

@@ -53,6 +53,38 @@ alter table private.fs_cost_approvals enable row level security;
 alter table private.fs_cost_approvals force row level security;
 revoke all on table private.fs_cost_scenarios, private.fs_cost_outbox, private.fs_cost_approvals from public, anon, authenticated;
 
+create or replace function private.fs_cost_gateway_enabled()
+returns boolean
+language sql stable security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1 from public.fs_meta
+    where key='cost_gateway_enabled'
+      and value->>'enabled'='true'
+  )
+$$;
+
+create or replace function private.fs_guard_cost_gateway_flag()
+returns trigger
+language plpgsql security definer
+set search_path = ''
+as $$
+begin
+  if coalesce(old.key,new.key) = 'cost_gateway_enabled'
+     and auth.uid() is not null
+     and private.fs_current_role() <> 'admin' then
+    raise exception 'COST_GATEWAY_FLAG_ADMIN_ONLY' using errcode='42501';
+  end if;
+  if TG_OP = 'DELETE' then return old; end if;
+  return new;
+end $$;
+
+drop trigger if exists fs_meta_cost_gateway_guard on public.fs_meta;
+create trigger fs_meta_cost_gateway_guard
+before insert or update or delete on public.fs_meta
+for each row execute function private.fs_guard_cost_gateway_flag();
+
 create or replace function private.fs_cost_capabilities(p_project_id text)
 returns jsonb
 language plpgsql stable security definer
@@ -61,6 +93,9 @@ as $$
 declare r text := private.fs_current_role();
 begin
   if auth.uid() is null or not private.fs_is_active_member() then
+    return jsonb_build_object('open',false,'editRM',false,'adoptPK',false,'sendSummary',false,'approveCEO',false);
+  end if;
+  if not private.fs_cost_gateway_enabled() then
     return jsonb_build_object('open',false,'editRM',false,'adoptPK',false,'sendSummary',false,'approveCEO',false);
   end if;
   if not exists (select 1 from public.fs_records where id=p_project_id) then
@@ -74,7 +109,10 @@ begin
   end if;
   return case
     when r in ('admin','rd') then jsonb_build_object('open',true,'editRM',true,'adoptPK',true,'sendSummary',true,'approveCEO',false)
-    when r='purchasing' then jsonb_build_object('open',true,'editRM',false,'adoptPK',false,'sendSummary',true,'approveCEO',false)
+    -- The legacy purchasing role is deliberately not granted raw RM or PK:
+    -- it cannot express the required RM-vs-PU-PK separation. Add a reviewed
+    -- capability/role mapping before exposing either source category.
+    when r='purchasing' then jsonb_build_object('open',true,'editRM',false,'adoptPK',false,'sendSummary',false,'approveCEO',false)
     when r in ('sales','opc') then jsonb_build_object('open',true,'editRM',false,'adoptPK',false,'sendSummary',false,'approveCEO',false)
     -- Future role values are intentionally not added to the locked legacy
     -- role check here. Owner must define and review them before enablement.
@@ -106,6 +144,56 @@ as $$
   )
 $$;
 
+create or replace function private.fs_cost_view_projection(p_view jsonb, p_project_id text, p_scenario_id text, p_revision integer)
+returns jsonb
+language sql immutable
+set search_path = ''
+as $$
+  select jsonb_build_object(
+    'projectId',p_project_id,
+    'scenarioId',p_scenario_id,
+    'revision',p_revision,
+    'label',case when jsonb_typeof(p_view->'complete')='boolean' and (p_view->'complete')::boolean then 'ต้นทุนพร้อมตรวจสอบ' else 'ยังไม่ใช่ต้นทุนรวมต่อชิ้นหรือราคาพร้อมเสนอ' end,
+    'complete',case when jsonb_typeof(p_view->'complete')='boolean' then p_view->'complete' else 'false'::jsonb end,
+    'pending',coalesce((select jsonb_agg(to_jsonb(case value #>> '{}'
+      when 'RM_PENDING_CONFIRMATION' then 'RM รอยืนยันเงื่อนไข'
+      when 'PK_PENDING_CONFIRMATION' then 'PK รอยืนยันเงื่อนไข'
+      when 'OPERATION_PENDING_CONFIRMATION' then 'Operation รอยืนยัน'
+      when 'PRICE_POLICY_UNDEFINED' then 'รอกำหนดราคา'
+      when 'TRUSTED_CALCULATION_PENDING' then 'รอคำนวณจาก trusted calculator'
+      else 'มีรายการรอยืนยัน' end))
+      from jsonb_array_elements(case when jsonb_typeof(p_view->'pending')='array' then p_view->'pending' else '[]'::jsonb end) v(value)
+      where jsonb_typeof(v.value)='string'), '[]'::jsonb),
+    'rm',jsonb_build_object('adjustedTotal',case when jsonb_typeof(p_view->'rm'->'adjustedTotal')='number' then p_view->'rm'->'adjustedTotal' else 'null'::jsonb end,'ready',case when jsonb_typeof(p_view->'rm'->'ready')='boolean' then p_view->'rm'->'ready' else 'false'::jsonb end),
+    'pk',jsonb_build_object('adjustedTotal',case when jsonb_typeof(p_view->'pk'->'adjustedTotal')='number' then p_view->'pk'->'adjustedTotal' else 'null'::jsonb end,'ready',case when jsonb_typeof(p_view->'pk'->'ready')='boolean' then p_view->'pk'->'ready' else 'false'::jsonb end),
+    'operation',jsonb_build_object('adjustedTotal',case when jsonb_typeof(p_view->'operation'->'adjustedTotal')='number' then p_view->'operation'->'adjustedTotal' else 'null'::jsonb end,'ready',case when jsonb_typeof(p_view->'operation'->'ready')='boolean' then p_view->'operation'->'ready' else 'false'::jsonb end),
+    'finalPerSellingUnit',case when jsonb_typeof(p_view->'finalPerSellingUnit')='number' then p_view->'finalPerSellingUnit' else 'null'::jsonb end
+  )
+$$;
+
+create or replace function private.fs_cost_lines_with_inputs(p_inputs jsonb, p_raw_rm jsonb)
+returns jsonb
+language sql immutable
+set search_path = ''
+as $$
+  select case
+    when jsonb_typeof(p_inputs->'lines')='array' then coalesce(
+      (
+        select jsonb_agg(
+          coalesce((
+            select raw_line
+            from jsonb_array_elements(coalesce(p_raw_rm->'lines','[]'::jsonb)) raw_line
+            where raw_line->>'id' = input_line->>'id'
+            limit 1
+          ), '{}'::jsonb) || input_line
+          order by ordinality
+        )
+        from jsonb_array_elements(p_inputs->'lines') with ordinality as input_rows(input_line, ordinality)
+      ), '[]'::jsonb)
+    else coalesce(p_raw_rm->'lines','[]'::jsonb)
+  end
+$$;
+
 create or replace function private.fs_cost_open(p_project_id text, p_scenario_id text, p_revision integer)
 returns jsonb
 language plpgsql security definer
@@ -123,12 +211,12 @@ begin
       'capabilities',caps,'inputs','{}'::jsonb,'lines','[]'::jsonb,'catalog','[]'::jsonb);
   end if;
   result := jsonb_build_object('contract','cost-v1','projectId',p_project_id,'scenarioId',p_scenario_id,'revision',p_revision,
-    'view',row_data.safe_view,'capabilities',caps,
-    'inputs',case when r in ('admin','rd','purchasing') then row_data.inputs else '{}'::jsonb end,
-    'lines',case when r in ('admin','rd','purchasing') then coalesce(row_data.raw_rm->'lines','[]'::jsonb) else '[]'::jsonb end,
+    'view',private.fs_cost_view_projection(row_data.safe_view,p_project_id,p_scenario_id,p_revision),'capabilities',caps,
+    'inputs',case when r in ('admin','rd') then row_data.inputs else '{}'::jsonb end,
+    'lines',case when r in ('admin','rd') then private.fs_cost_lines_with_inputs(row_data.inputs,row_data.raw_rm) else '[]'::jsonb end,
     'catalog','[]'::jsonb);
-  if r in ('admin','rd','purchasing') then result := result || jsonb_build_object('rawRM',row_data.raw_rm); end if;
-  if r in ('admin','purchasing') then result := result || jsonb_build_object('rawPK',row_data.raw_pk); end if;
+  if r in ('admin','rd') then result := result || jsonb_build_object('rawRM',row_data.raw_rm); end if;
+  if r='admin' then result := result || jsonb_build_object('rawPK',row_data.raw_pk); end if;
   if r in ('admin','production','finance','ceo') then result := result || jsonb_build_object('rawOperation',row_data.raw_operation); end if;
   return result;
 end $$;
@@ -172,7 +260,9 @@ begin
     merged_inputs := current_row.inputs || p_patch;
     new_view := private.fs_cost_pending_view(p_project_id,p_scenario_id,next_revision,'รอ trusted calculator คำนวณ revision นี้');
     insert into private.fs_cost_scenarios(project_id,scenario_id,revision,inputs,safe_view,raw_rm,raw_pk,raw_operation,source_digest,created_by)
-      values (p_project_id,p_scenario_id,next_revision,merged_inputs,new_view,current_row.raw_rm,current_row.raw_pk,current_row.raw_operation,current_row.source_digest,auth.uid());
+      values (p_project_id,p_scenario_id,next_revision,merged_inputs,new_view,
+        case when p_patch ? 'lines' then jsonb_set(coalesce(current_row.raw_rm,'{}'::jsonb),'{lines}',private.fs_cost_lines_with_inputs(merged_inputs,current_row.raw_rm),true) else current_row.raw_rm end,
+        current_row.raw_pk,current_row.raw_operation,current_row.source_digest,auth.uid());
   end if;
   return private.fs_cost_open(p_project_id,p_scenario_id,next_revision);
 end $$;
@@ -188,7 +278,7 @@ begin
   if p_idempotency_key is null or p_idempotency_key !~ '^[A-Za-z0-9:_-]{1,160}$' then raise exception 'INVALID_COST_IDEMPOTENCY_KEY' using errcode='22023'; end if;
   select * into row_data from private.fs_cost_scenarios where project_id=p_project_id and scenario_id=p_scenario_id and revision=p_revision;
   if not found then raise exception 'COST_REVISION_NOT_FOUND' using errcode='22023'; end if;
-  body := jsonb_build_object('projectId',p_project_id,'scenarioId',p_scenario_id,'revision',p_revision,'view',row_data.safe_view,'label','สรุปเบื้องต้น — ยังไม่ใช่ต้นทุนรวมต่อชิ้น');
+  body := jsonb_build_object('projectId',p_project_id,'scenarioId',p_scenario_id,'revision',p_revision,'view',private.fs_cost_view_projection(row_data.safe_view,p_project_id,p_scenario_id,p_revision),'label','สรุปเบื้องต้น — ยังไม่ใช่ต้นทุนรวมต่อชิ้น');
   digest := md5(body::text);
   select * into existing from private.fs_cost_outbox where idempotency_key=p_idempotency_key;
   if found then
@@ -212,10 +302,14 @@ begin
 end $$;
 
 revoke all on function private.fs_cost_capabilities(text) from public,anon,authenticated;
+revoke all on function private.fs_cost_gateway_enabled() from public,anon,authenticated;
 revoke all on function private.fs_cost_authorized(text,text) from public,anon,authenticated;
 revoke all on function private.fs_cost_pending_view(text,text,integer,text) from public,anon,authenticated;
 revoke all on function private.fs_cost_open(text,text,integer) from public,anon,authenticated;
 revoke all on function private.fs_cost_patch_allowed(jsonb) from public,anon,authenticated;
+revoke all on function private.fs_cost_view_projection(jsonb,text,text,integer) from public,anon,authenticated;
+revoke all on function private.fs_cost_lines_with_inputs(jsonb,jsonb) from public,anon,authenticated;
+revoke all on function private.fs_guard_cost_gateway_flag() from public,anon,authenticated;
 revoke all on function public.fs_cost_open(text,text,integer) from public,anon;
 revoke all on function public.fs_cost_save(text,text,integer,jsonb) from public,anon;
 revoke all on function public.fs_cost_send_summary(text,text,integer,text) from public,anon;
