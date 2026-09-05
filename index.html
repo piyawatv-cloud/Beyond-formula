@@ -627,6 +627,21 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
 }
 @media(max-width:960px){.fg5{grid-template-columns:1fr 1fr}.fg4{grid-template-columns:1fr 1fr}.fg4 .span2{grid-column:span 2}}
 @media(max-width:700px){.fg,.fg3,.fg4,.fg5,.dbg,.spg,.sign-wrap{grid-template-columns:1fr}.fg4 .span2{grid-column:span 1}}
+/* Calculator reuses Formula Studio controls; financial responses are memory-only. */
+.cost-workspace{padding:24px;max-width:1440px;margin:0 auto}
+.cost-top{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
+.cost-top h2{margin:0 0 8px;font-size:21px}
+.cost-workspace h3{margin:26px 0 12px;font-size:16px}
+.cost-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:16px 0}
+.cost-summary>div{border:1px solid #dfe6ed;border-radius:10px;padding:16px;background:#f8fafc}
+.cost-summary p{margin:8px 0}
+.cost-warning{background:#fff5dc;border:1px solid #eed599;border-radius:8px;padding:12px;color:#694800}
+.cost-workspace .rec-wrap{overflow-x:auto;margin:12px 0}
+.cost-workspace .rec-tbl{min-width:720px;width:100%}
+.cost-workspace .rec-tbl td{vertical-align:top}
+.cost-workspace .fg4{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.cost-workspace .fi{max-width:100%}
+@media(max-width:800px){.cost-workspace{padding:14px}.cost-top{display:block}.cost-summary,.cost-workspace .fg4{grid-template-columns:1fr}.cost-top .btn{margin-top:10px}}
 </style>
 </head>
 <body>
@@ -649,7 +664,7 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
   <div class="logo"><svg viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-1.73-3L9 11.35V4H8a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2h-1v7.35L19.73 19A2 2 0 0 1 18 22H6Zm5-10.11L8.31 16.5h7.38L13 11.89V4h-2v7.89Z"/></svg></div>
   <div>
     <div class="hdr-title">Formula Studio</div>
-    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-05.1</div>
+    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-05.2-cost-draft</div>
   </div>
   <div class="sync-chip" id="syncChip" onclick="sbManualSync()" title="สถานะการซิงก์ข้อมูลกับเซิร์ฟเวอร์กลาง"></div>
 </div>
@@ -1130,6 +1145,295 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
 </div><!-- /main -->
 
 <script>
+// ===================================================================
+// COST_CALCULATOR_CORE_START
+// Pure calculations over supplied snapshots only. No storage, network, or authentication.
+// Status fields and project(role) are NOT an authorization boundary: production must
+// authorize and filter data on the server before any confidential payload reaches a browser.
+// freezeQuotation is deliberately disabled until an authenticated server command exists.
+var CostCalculator = (() => {
+  'use strict';
+  const clone = value => JSON.parse(JSON.stringify(value));
+  const freeze = value => { if (value && typeof value === 'object') { Object.values(value).forEach(freeze); Object.freeze(value); } return value; };
+  const num = (value, positive = false) => typeof value === 'number' && Number.isFinite(value) && (positive ? value > 0 : value >= 0);
+  const mass = (amount, unit) => { const factors = {kg:1,g:0.001,mg:0.000001}; if (!num(amount) || !factors[unit]) throw Error('MASS_UNIT_REQUIRED'); return amount * factors[unit]; };
+  const dateOK = value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0,10) === value;
+  const live = (until, asOf, from) => dateOK(asOf) && dateOK(until) && until >= asOf && (from == null || (dateOK(from) && from <= asOf));
+  const available = value => !['withdrawn','obsolete','stale','syncFailed','excluded','ambiguous'].some(flag => value[flag]);
+  // Same scope vocabulary as RmData.gs. Restrictions are verified by the trusted
+  // source adapter; browser-supplied booleans are not authorization evidence.
+  const applicable = (offer,projectId) => !!(offer.scope && (offer.scope.type==='central' || (offer.scope.type==='project' && offer.scope.projectId===projectId)) && (!offer.constraints || Object.keys(offer.constraints).length===0 || offer.conditionsSatisfied===true));
+  const finite = value => num(value) ? value : null;
+  const sum = values => values.every(value => num(value)) ? finite(values.reduce((a,b) => a+b,0)) : null;
+  const canonical = value => JSON.stringify(value && typeof value === 'object' ? (Array.isArray(value) ? value.map(v => JSON.parse(canonical(v))) : Object.fromEntries(Object.keys(value).sort().map(k => [k,JSON.parse(canonical(value[k]))]))) : value);
+  function createScenario(input) {
+    if (!input.projectId || !input.scenarioId || !Number.isInteger(input.revision) || input.revision < 1) throw Error('SCENARIO_IDENTITY_REQUIRED');
+    return freeze(clone(input));
+  }
+  function revise(previous, patch) {
+    if (['projectId','scenarioId','revision'].some(key => Object.prototype.hasOwnProperty.call(patch,key))) throw Error('IMMUTABLE_IDENTITY');
+    return createScenario({...clone(previous),...clone(patch),revision:previous.revision+1});
+  }
+  function pkMatches(s,p,asOf) {
+    return p && available(p) && p.id && Number.isInteger(p.version) && p.version > 0 && s.pkSpecVersion && p.projectId === s.projectId && p.scenarioId === s.scenarioId && p.sellingUnits === s.sellingUnits && p.unitsPerPack === s.unitsPerPack && p.fillAmount === s.fillAmount && p.fillUnit === s.fillUnit && p.specVersion === s.pkSpecVersion && live(p.validUntil,asOf,p.validFrom);
+  }
+  function adoptPK(s,p,asOf) {
+    if (!p.id || !Number.isInteger(p.version) || p.version < 1) throw Error('PK_IDENTITY_REQUIRED');
+    if (!pkMatches(s,p,asOf)) throw Error('PK_CONTEXT_OR_VALIDITY_MISMATCH');
+    if (s.pk && s.pk.id === p.id && s.pk.version === p.version) {
+      if (canonical(s.pk) !== canonical(p)) throw Error('PK_VERSION_CONTENT_CONFLICT');
+      return s;
+    }
+    if (s.pk && s.pk.id === p.id && p.version < s.pk.version) throw Error('PK_STALE_VERSION');
+    if (!['draft','confirmed'].includes(p.status)) throw Error('PK_NOT_USABLE');
+    return revise(s,{pk:p});
+  }
+  function policyReady(policy,asOf,basis) {
+    return policy && policy.id && Number.isInteger(policy.version) && policy.version>0 && policy.owner && policy.status==='confirmed' && policy.currency==='THB' && dateOK(policy.validFrom) && live(policy.validUntil,asOf,policy.validFrom) && policy.rounding && Number.isInteger(policy.rounding.decimals) && policy.rounding.decimals>=0 && policy.rounding.decimals<=6 && policy.rounding.mode==='halfUp' && policy.rounding.basis===basis;
+  }
+  // Round only at the explicitly supplied boundary. Unit rounding determines the
+  // final lot total, so the displayed selling price times quantity reconciles.
+  function rounded(value,rounding) {
+    if (!num(value)) return null;
+    const factor=10**rounding.decimals, scaled=value*factor;
+    if (!Number.isFinite(scaled) || scaled>Number.MAX_SAFE_INTEGER) return null;
+    return finite(Math.round(scaled + Number.EPSILON*Math.max(1,scaled))/factor);
+  }
+  function adjusted(base,policy,asOf,basis) {
+    if (!num(base) || !policyReady(policy,asOf,basis)) return null;
+    let result=null;
+    if (policy.mode==='passthrough') result=base;
+    else if (num(policy.rate) && policy.mode==='markup') result=finite(base*(1+policy.rate));
+    else if (num(policy.rate) && policy.mode==='margin' && policy.rate<1) result=finite(base/(1-policy.rate));
+    return rounded(result,policy.rounding);
+  }
+  function calculate(s,asOf) {
+    if (!dateOK(asOf)) throw Error('AS_OF_DATE_REQUIRED');
+    const pending = [], packOK = num(s.sellingUnits,true) && Number.isInteger(s.sellingUnits) && num(s.unitsPerPack,true) && Number.isInteger(s.unitsPerPack) && num(s.fillAmount,true) && ['kg','g','mg'].includes(s.fillUnit);
+    const productionUnits = packOK ? finite(s.sellingUnits*s.unitsPerPack) : null;
+    const currencyOK=s.currency==='THB';
+    if (!currencyOK) pending.push('รอระบุสกุลเงิน THB สำหรับ pilot');
+    if (!packOK) pending.push('จำนวนหน่วยขายหรือขนาดบรรจุยังไม่ครบ');
+    const seen = new Set();
+    const lines = (s.rmLines || []).map((line,index) => {
+      const output = {id:line.id,alias:line.alias || `รายการวัสดุ ${index+1}`,baseTotal:null,purchaseCash:null,leftoverExposure:null,requiredKg:null,ready:false};
+      const o = line.offer || {}, lossOK = num(line.lossPercent) && line.lossPercent < 100;
+      try {
+        if (!packOK || !num(productionUnits,true) || !line.id || seen.has(line.id) || !lossOK || !o.id || !o.tierId || !o.vendorId || !o.version || o.materialId !== line.materialId || !num(o.price) || !num(o.moq) || !num(o.increment,true) || !num(o.leadTimeDays) || !o.evidenceRef) throw Error('INCOMPLETE_RM');
+        seen.add(line.id);
+        const requiredKg = mass(line.amount,line.unit)*productionUnits/(1-line.lossPercent/100);
+        const priceBasisQuantity=Object.prototype.hasOwnProperty.call(o,'priceBasisQuantity')?o.priceBasisQuantity:1;
+        if (!num(priceBasisQuantity,true)) throw Error('PRICE_BASIS_QUANTITY_REQUIRED');
+        const pricePerKg = o.price/mass(priceBasisQuantity,o.priceUnit || 'kg');
+        const incrementKg = mass(o.increment,o.incrementUnit), moqKg = mass(o.moq,o.moqUnit);
+        // Order increments are whole purchase packs: MOQ is rounded up to a valid pack quantity.
+        const purchaseKg = Math.ceil((Math.max(requiredKg,moqKg)/incrementKg)-1e-10)*incrementKg;
+        if (![requiredKg,purchaseKg,requiredKg*pricePerKg,purchaseKg*pricePerKg].every(numValue => num(numValue))) throw Error('RM_NUMERIC_OVERFLOW');
+        Object.assign(output,{requiredKg,purchaseKg,baseTotal:requiredKg*pricePerKg,purchaseCash:purchaseKg*pricePerKg,leftoverExposure:Math.max(0,purchaseKg-requiredKg)*pricePerKg});
+        output.ready = currencyOK && o.currency==='THB' && o.status === 'confirmed' && o.specApproved === true && available(o) && applicable(o,s.projectId) && live(o.validUntil,asOf,o.validFrom);
+      } catch (_) { /* Missing/ambiguous inputs stay null, never zero. */ }
+      if (!output.ready) pending.push(`RM ${index+1}: รอข้อมูลหรือยืนยันเงื่อนไข`);
+      return output;
+    });
+    const rm = {lines,ready:lines.length>0 && lines.every(l=>l.ready),baseTotal:lines.length && lines.every(l=>l.baseTotal!==null) ? sum(lines.map(l=>l.baseTotal)) : null,purchaseCash:lines.length && lines.every(l=>l.purchaseCash!==null) ? sum(lines.map(l=>l.purchaseCash)) : null,leftoverExposure:lines.length && lines.every(l=>l.leftoverExposure!==null) ? sum(lines.map(l=>l.leftoverExposure)) : null};
+    if (!lines.length) pending.push('รอ RM');
+    let formulaKg=null;
+    try { formulaKg=sum((s.rmLines || []).map(line=>mass(line.amount,line.unit))); } catch (_) {}
+    const fillKg=packOK?mass(s.fillAmount,s.fillUnit):null;
+    const formulaComplete=!!(lines.length && num(formulaKg) && num(fillKg,true) && Math.abs(formulaKg-fillKg)<=Math.max(1e-12,fillKg*1e-9));
+    if (!formulaComplete) pending.push('ปริมาณ RM ในสูตรยังไม่ตรงกับขนาดบรรจุ');
+    rm.ready=rm.ready && formulaComplete && num(rm.baseTotal) && num(rm.purchaseCash) && num(rm.leftoverExposure);
+    const sourceSteps=Array.isArray(s.operation?.steps)?s.operation.steps:[s.operation || {}];
+    const stepIds=new Set();
+    const steps=sourceSteps.map(op=>{
+      const step={id:op.id || null,version:op.version || null,batches:null,baseTotal:null,ready:false};
+      if (packOK && num(productionUnits,true) && num(op.batchCapacity,true) && num(op.setupHoursPerBatch) && num(op.runUnitsPerHour,true) && num(op.people,true) && num(op.dlPerPersonHour) && num(op.ohPerRunHour)) {
+        step.batches=finite(Math.ceil(productionUnits/op.batchCapacity));
+        const runHours=productionUnits/op.runUnitsPerHour;
+        step.baseTotal=finite((step.batches*op.setupHoursPerBatch+runHours)*op.people*op.dlPerPersonHour+runHours*op.ohPerRunHour);
+        step.ready=!!(num(step.baseTotal) && step.id && !stepIds.has(step.id) && Number.isInteger(op.version) && op.version>0 && op.routingOwner && op.rateOwner && op.status==='confirmed' && currencyOK && op.currency==='THB' && dateOK(op.validFrom) && live(op.validUntil,asOf,op.validFrom) && !op.includesOtherCharges && op.capacityUnit==='innerUnit' && op.runRateUnit==='innerUnit/hour' && op.dlRateUnit==='THB/person-hour' && op.ohRateUnit==='THB/hour');
+      }
+      if(step.id)stepIds.add(step.id);
+      return step;
+    });
+    const operation={steps,baseTotal:steps.length?sum(steps.map(step=>step.baseTotal)):null,ready:steps.length>0 && steps.every(step=>step.ready),batches:steps.length===1?steps[0].batches:null};
+    if (!num(operation.baseTotal))operation.ready=false;
+    if (!operation.ready) pending.push('รอ routing/STD version เจ้าของอัตรา หน่วย หรือยืนยันอัตรา');
+    let extrasReady=s.extrasReviewed===true, separateCharges=0;
+    const feeIds=new Set();
+    for (const e of s.extraCosts || []) {
+      if (e.status==='notApplicable') continue;
+      const batchStep=e.stepId?steps.find(step=>step.id===e.stepId):steps.length===1?steps[0]:null;
+      const multiplier=e.basis==='once'?1:e.basis==='perBatch'?batchStep?.batches:e.basis==='perUnit'?s.sellingUnits:null;
+      const identityOK=!!(e.id && !feeIds.has(e.id));
+      if(e.id)feeIds.add(e.id);
+      if (!identityOK || e.currency!=='THB') extrasReady=false;
+      if (e.status!=='confirmed' || !num(e.amount) || !num(multiplier,true) || !['included','separate'].includes(e.collection) || !['RM','Operation'].includes(e.category) || (e.id && !identityOK)) { extrasReady=false;continue; }
+      const cost=finite(e.amount*multiplier);
+      if (cost===null) { extrasReady=false;continue; }
+      if (e.collection==='separate') { separateCharges=sum([separateCharges,cost]); if(separateCharges===null)extrasReady=false; }
+      else { const target=e.category==='RM'?rm:operation; if(target.baseTotal!==null)target.baseTotal=sum([target.baseTotal,cost]); if(target.baseTotal===null){target.ready=false;extrasReady=false;} }
+    }
+    if (!extrasReady) pending.push('ค่าใช้จ่ายเฉพาะงาน: รอข้อมูลหรือแก้รายการซ้ำ');
+    // Separate collection is not silently priced at raw cost. Owner-defined fee
+    // pricing is a distinct commercial input; until provided only drafts can use it.
+    const separatePricingReady=separateCharges===0;
+    if (!separatePricingReady) pending.push('รอกำหนดราคาขายสำหรับค่าใช้จ่ายที่เรียกเก็บแยก');
+    const p=s.pk, matches=pkMatches(s,p,asOf), pk={baseTotal:matches && num(p.baseTotal)?p.baseTotal:null,adjustedTotal:matches && num(p.adjustedTotal)?p.adjustedTotal:null,ready:!!(currencyOK && p?.currency==='THB' && matches && p.status==='confirmed' && p.evidenceRef && num(p.baseTotal) && num(p.adjustedTotal)),snapshotId:p?.id || null,version:p?.version || null};
+    if (!pk.ready) pending.push('PK: รอยืนยันหรือรอเวอร์ชันที่ตรงเงื่อนไข');
+    const policies=s.policies || {};
+    rm.adjustedTotal=adjusted(rm.baseTotal,policies.RM,asOf,'categoryTotal');
+    operation.adjustedTotal=adjusted(operation.baseTotal,policies.Operation,asOf,'categoryTotal');
+    const categories=[rm,pk,operation], baseTotal=categories.every(c=>c.baseTotal!==null)?sum(categories.map(c=>c.baseTotal)):null;
+    const adjustedTotal=categories.every(c=>c.adjustedTotal!==null)?sum(categories.map(c=>c.adjustedTotal)):null;
+    const finalPerSellingUnit=packOK && num(adjustedTotal)?adjusted(adjustedTotal/s.sellingUnits,policies.Final,asOf,'sellingUnit'):null;
+    const finalTotal=finalPerSellingUnit===null?null:finite(finalPerSellingUnit*s.sellingUnits);
+    if (finalTotal===null) pending.push('รอกำหนดราคา');
+    return freeze({projectId:s.projectId,scenarioId:s.scenarioId,revision:s.revision,sellingUnits:s.sellingUnits,productionUnits,formulaComplete,currency:s.currency || null,rm,pk,operation,baseTotal,adjustedTotal,finalTotal,finalPerSellingUnit:finalTotal!==null?finalPerSellingUnit:null,separateCharges:extrasReady?separateCharges:null,pending,complete:packOK && currencyOK && formulaComplete && categories.every(c=>c.ready) && extrasReady && separatePricingReady && finalTotal!==null,label:pending.length?(baseTotal===null || !formulaComplete || !extrasReady?'ยังไม่ใช่ต้นทุนรวมต่อชิ้นหรือราคาพร้อมเสนอ':'ยังไม่ใช่ราคาพร้อมเสนอ'):'ราคาพร้อมตรวจอนุมัติ',purchaseLabel:'ประมาณการก่อนตรวจสต็อก ไม่ใช่ยอดสั่งซื้อจริง'});
+  }
+  function project(result,role) {
+    const safe={projectId:result.projectId,scenarioId:result.scenarioId,revision:result.revision,sellingUnits:result.sellingUnits,label:result.label,complete:result.complete,pending:clone(result.pending),finalTotal:result.finalTotal,finalPerSellingUnit:result.finalPerSellingUnit};
+    ['rm','pk','operation'].forEach(key=>{safe[key]={adjustedTotal:result[key].adjustedTotal,ready:result[key].ready};});
+    const privileged=['Finance','CEO'].includes(role);
+    for (const key of ['rm','pk','operation']) {
+      if (privileged || (role==='RD' && key==='rm') || (role==='PU-PK' && key==='pk') || (role==='Production' && key==='operation')) safe[key].baseTotal=result[key].baseTotal;
+    }
+    if (role==='RD') safe.rm.lines=result.rm.lines.map(l=>({id:l.id,alias:l.alias,baseTotal:l.baseTotal,purchaseCash:l.purchaseCash,leftoverExposure:l.leftoverExposure,requiredKg:l.requiredKg,ready:l.ready}));
+    if (!['Sales','OPC','RD','PU-PK','Production','Finance','CEO'].includes(role)) return freeze({projectId:result.projectId,scenarioId:result.scenarioId,label:'ไม่มีสิทธิ์ดูข้อมูลราคา'});
+    return freeze(safe);
+  }
+  function freezeQuotation() { throw Error('VERIFIED_SERVER_AUTHORITY_REQUIRED: quotation approval is unavailable in the local calculator'); }
+  return Object.freeze({createScenario,revise,adoptPK,calculate,project,freezeQuotation,mass});
+})();
+// COST_CALCULATOR_CORE_END
+
+// COST_CALCULATOR_UI_START
+// Empty by default. Enable only after the trusted service/access migration is reviewed.
+// This is the proposed cost-v1 client contract, not a claim that a live API exists.
+let COST_API_ORIGIN = '';
+let costRouteState={handledKey:''};
+let costState = {projectId:null, response:null, error:'', busy:false, search:'', sequence:0, identity:'', edits:{}};
+function costIdentity(){ return [currentUser, currentRole(), authSession && authSession.user && authSession.user.id, impersonator].join('|'); }
+function costReset(){
+  costState={projectId:null,response:null,error:'',busy:false,search:'',sequence:costState.sequence+1,identity:costIdentity(),edits:{}};
+  const panel=document.getElementById('costView'); if(panel){panel.replaceChildren();panel.classList.remove('on');}
+}
+function costCheckSession(){if(costState.identity && costState.identity!==costIdentity()){costReset();costRouteState.handledKey='';}}
+function costAuthenticated(){return !!(currentUser && authSession && authSession.user && authSession.user.id && authMembership && !impersonator);}
+function costLinkRoute(hash){
+  if(typeof hash!=='string' || !hash.startsWith('#project='))return null;
+  const params=new URL('https://formula.invalid/?'+hash.slice(1)).searchParams;
+  if([...params.keys()].length!==3 || ['project','scenario','revision'].some(key=>params.getAll(key).length!==1))return null;
+  const projectId=params.get('project'),scenarioId=params.get('scenario'),text=params.get('revision');
+  if(!/^[A-Z]\d{5}$/.test(projectId) || !/^[A-Za-z0-9_-]{1,80}$/.test(scenarioId) || !/^[1-9]\d*$/.test(text) || !Number.isSafeInteger(Number(text)))return null;
+  return {projectId,scenarioId,revision:Number(text)};
+}
+async function costResolveLink(){
+  costCheckSession();
+  if(!costAuthenticated()){if(costState.projectId)costReset();costRouteState.handledKey='';return;}
+  const route=costLinkRoute(window.location && window.location.hash);
+  if(!route || !costAllowed(route.projectId))return;
+  const key=costIdentity()+'|'+route.projectId+'|'+route.scenarioId+'|'+route.revision;
+  if(costRouteState.handledKey===key)return;
+  costRouteState.handledKey=key; // Set before async opening; renderUserUI may run again.
+  await openCostCalculator(route.projectId,route.scenarioId,route.revision);
+}
+if(typeof window.addEventListener==='function')window.addEventListener('hashchange',()=>{void costResolveLink();});
+function costAllowed(projectId){return !!(currentUser && can('chat') && !impersonator && canSeeRecord(records.find(r=>r.id===projectId)));}
+async function costRequest(action,payload){
+  const actions=['open','save','selectRM','removeRM','requestMaterial','adoptPK','sendSummary'];
+  if(!actions.includes(action) || !costAllowed(payload.projectId))throw Error('ไม่มีสิทธิ์ทำงานกับโครงการนี้');
+  if(window.__FS_TEST__ && typeof window.__costTestRequest==='function')return window.__costTestRequest(action,payload);
+  if(!COST_API_ORIGIN)throw Error('ยังไม่เชื่อม Data Center ที่ยืนยันสิทธิ์แล้ว');
+  const origin=new URL(COST_API_ORIGIN);
+  if(origin.protocol!=='https:' || origin.origin!==COST_API_ORIGIN || origin.username || origin.password)throw Error('การเชื่อมต่อยังไม่พร้อม');
+  if(!authSession || !authMembership)throw Error('กรุณาเข้าใช้งานด้วยบัญชีที่ยืนยันแล้ว');
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15000);
+  try{
+    const response=await fetch(origin.origin+'/v1/cost/'+action,{method:'POST',credentials:'omit',cache:'no-store',redirect:'error',signal:controller.signal,headers:{'Content-Type':'application/json','Authorization':'Bearer '+authSession.access_token},body:JSON.stringify(payload)});
+    if(!response.ok)throw Error(response.status===403?'ไม่มีสิทธิ์ทำรายการนี้':'ยังทำรายการไม่สำเร็จ กรุณาลองใหม่');
+    return await response.json();
+  }finally{clearTimeout(timer);}
+}
+function costValidateResponse(data,projectId,scenarioId,minimumRevision,exactRevision){
+  if(!data || (exactRevision && (data.revision!==exactRevision || !data.capabilities || data.capabilities.viewRevision!==true)) || typeof data.scenarioId!=='string' || !data.scenarioId || (scenarioId && data.scenarioId!==scenarioId) || (minimumRevision && data.revision<minimumRevision) || data.contract!=='cost-v1' || data.projectId!==projectId || !Number.isInteger(data.revision) || data.revision<1 || !data.capabilities || typeof data.capabilities!=='object' || !Array.isArray(data.lines) || !Array.isArray(data.catalog) || !data.view || !Array.isArray(data.view.pending) || data.view.projectId!==projectId || data.view.revision!==data.revision)throw Error('ข้อมูลไม่ตรงกับโครงการหรือเวอร์ชันที่ขอ');
+  return data;
+}
+async function openCostCalculator(projectId,scenarioId,revision){
+  const exact= scenarioId!==undefined || revision!==undefined;
+  if(exact && (!costAuthenticated() || !/^[A-Za-z0-9_-]{1,80}$/.test(scenarioId || '') || !Number.isSafeInteger(revision) || revision<1))return;
+  if(!requirePerm('chat','เปิดเครื่องคำนวณได้เฉพาะผู้มีสิทธิ์โครงการ') || !costAllowed(projectId))return;
+  costReset();costState.projectId=projectId;costState.identity=costIdentity();costState.route=exact?{scenarioId,revision}:null;
+  let panel=document.getElementById('costView');if(!panel){panel=document.createElement('div');panel.id='costView';panel.className='view';document.querySelector('.main').appendChild(panel);}
+  document.querySelectorAll('.view').forEach(el=>el.classList.remove('on'));panel.classList.add('on');
+  await costAction('open',{});
+}
+async function costAction(action,extra){
+  const projectId=costState.projectId;if(!costAllowed(projectId) || costState.busy)return;
+  costCaptureDraft();
+  if(!['open','save'].includes(action) && costDraftDirty()){costState.error='บันทึก revision สูตร / RM ก่อนทำรายการนี้';renderCostCalculator();return;}
+  const route=action==='open'?costState.route:null;
+  const scenarioId=route?route.scenarioId:costState.response&&costState.response.scenarioId,minimumRevision=route?route.revision:costState.response&&costState.response.revision;
+  const seq=++costState.sequence,identity=costIdentity();costState.busy=true;costState.error='';renderCostCalculator();
+  try{
+    const payload={...extra,projectId,scenarioId,expectedRevision:minimumRevision || null};
+    const data=await costRequest(action,payload);
+    if(seq!==costState.sequence || identity!==costIdentity() || projectId!==costState.projectId)return;
+    costState.response=costValidateResponse(data,projectId,scenarioId,minimumRevision,route&&route.revision);
+    if(action!=='open' && costState.route && data.revision!==costState.route.revision)costState.route=null;
+    if(['open','save'].includes(action))costState.edits={};
+    if(['selectRM','removeRM'].includes(action)){const brief=costState.edits.costRequestBrief;costState.edits=brief===undefined?{}:{costRequestBrief:brief};}
+    if(action==='requestMaterial')delete costState.edits.costRequestBrief;
+  }catch(error){
+    if(seq===costState.sequence && identity===costIdentity())costState.error=error && error.name==='AbortError'?'การเชื่อมต่อใช้เวลานาน ข้อมูลที่บันทึกแล้วคงเดิม':(COST_API_ORIGIN?'ยังทำรายการไม่สำเร็จ ตรวจสิทธิ์หรือการเชื่อมต่อแล้วลองใหม่':String(error.message));
+  }finally{if(seq===costState.sequence){costState.busy=false;renderCostCalculator();}}
+}
+function costNumber(value){return typeof value==='number' && Number.isFinite(value)?value.toLocaleString('th-TH',{maximumFractionDigits:4}):'รอข้อมูล';}
+function costDraftValue(id,fallback){return Object.hasOwn(costState.edits,id)?costState.edits[id]:fallback;}
+function costDraftDefaults(){const data=costState.response;if(!data)return {};const draft=data.inputs||{},defaults={costSellingUnits:draft.sellingUnits,costUnitsPerPack:draft.unitsPerPack,costFillAmount:draft.fillAmount};data.lines.forEach((line,i)=>{defaults["costAlias"+i]=line.alias||"";defaults["costAmount"+i]=line.amount;defaults["costLoss"+i]=line.lossPercent;});return defaults;}
+function costCaptureDraft(){for(const id of [...Object.keys(costDraftDefaults()),"costRequestBrief"]){const el=document.getElementById(id);if(el)costState.edits[id]=el.value;}}
+function costDraftDirty(){return Object.entries(costDraftDefaults()).some(([id,value])=>Object.hasOwn(costState.edits,id)&&String(costState.edits[id])!==String(value??""));}
+function costField(label,id,value,unit){value=costDraftValue(id,value);return `<label class="fgrp"><span class="flbl">${esc(label)}</span><input id="${id}" class="fi" type="number" min="0" step="any" value="${value==null?'':esc(value)}" ${costState.busy?'disabled':''}><span class="hint">${esc(unit)}</span></label>`;}
+function renderCostCalculator(){
+  const panel=document.getElementById('costView');if(!panel || !costState.projectId)return;
+  if(costState.identity!==costIdentity() || !costAllowed(costState.projectId)){costReset();return;}
+  const data=costState.response,view=data&&data.view,canEdit=!!(data&&data.capabilities&&data.capabilities.editRM),draft=data&&data.inputs||{};
+  const disabled=costState.busy?'disabled':'';
+  const rows=data&&Array.isArray(data.lines)?data.lines:[];
+  const catalog=data&&Array.isArray(data.catalog)?data.catalog:[];
+  const query=costState.search.trim().toLocaleLowerCase();
+  const matches=catalog.map((item,index)=>({item,index})).filter(({item})=>[item.group,item.name,item.spec,item.vendor].join(' ').toLocaleLowerCase().includes(query));
+  panel.innerHTML=`<div class="sec-card cost-workspace">
+    <div class="cost-top"><div><h2>Cost Calculator · ${esc(costState.projectId)}</h2><p class="hint">${data?'Revision '+esc(data.revision):'กำลังเปิดโครงการ'} · สูตรและ RM ทำต่อได้ระหว่างรอ PK</p></div><button class="btn btn-s" onclick="switchView('chat')">กลับหน้ารายการแชท</button></div>
+    <div role="status" aria-live="polite">${costState.busy?'<p>กำลังตรวจและบันทึกข้อมูล…</p>':''}${costState.error?`<p class="cost-warning">${esc(costState.error)}</p><button class="btn btn-s" onclick="costAction('open',{})">ลองเชื่อมต่ออีกครั้ง</button>`:''}</div>
+    ${!view?'':`<p class="cost-warning">${esc(view.label||'รอข้อมูล')} · ตัวเลขแสดงตามสิทธิ์ของคุณ</p>
+    <div class="cost-summary">${['rm','pk','operation'].map((key,index)=>`<div><b>${['RM','PK','Operation'][index]}</b><p>ยอดหลังบวก ${view[key]&&view[key].adjustedTotal!=null?costNumber(view[key].adjustedTotal):'รอกำหนดราคา'} บาท/ล็อต</p>${view[key]&&Object.hasOwn(view[key],'baseTotal')?`<p class="hint">ต้นทุนหมวดที่คุณดูได้ ${costNumber(view[key].baseTotal)} บาท</p>`:''}<span>${view[key]&&view[key].ready?'ข้อมูลต้นทุนครบ':'รอข้อมูล / รอยืนยัน'}</span></div>`).join('')}</div>
+    <p><b>ราคาต่อหน่วยขาย: ${!view.complete||view.finalPerSellingUnit==null?'รอกำหนดราคา':costNumber(view.finalPerSellingUnit)} บาท</b></p>
+    <ul>${(view.pending||[]).map(message=>`<li>${esc(message)}</li>`).join('')}</ul>
+    ${canEdit?`<h3>จำนวนผลิตและขนาดบรรจุ</h3><div class="fg4">${costField('จำนวนหน่วยขาย','costSellingUnits',draft.sellingUnits,'หน่วยขาย')}${costField('หน่วยย่อยต่อแพ็ก','costUnitsPerPack',draft.unitsPerPack,'หน่วยย่อย / หน่วยขาย')}${costField('น้ำหนักต่อหน่วยย่อย','costFillAmount',draft.fillAmount,draft.fillUnit||'ยังไม่ระบุหน่วย')}</div>
+    <h3>RM ที่เลือก</h3><div class="rec-wrap"><table class="rec-tbl"><thead><tr><th>ชื่อแสดง</th><th>ปริมาณ / หน่วยย่อย</th><th>Loss %</th><th>ต้นทุนใช้จริง</th><th>เงินซื้อก่อนตรวจสต็อก</th><th>ของเหลือ</th><th></th></tr></thead><tbody>${rows.map((line,i)=>`<tr><td><input class="fi" id="costAlias${i}" value="${esc(costDraftValue('costAlias'+i,line.alias||''))}" placeholder="รายการวัสดุ ${i+1}" aria-label="ชื่อแสดงรายการ ${i+1}" ${disabled}></td><td><input class="fi" id="costAmount${i}" type="number" min="0" step="any" value="${esc(costDraftValue('costAmount'+i,line.amount??''))}" aria-label="ปริมาณรายการ ${i+1}" ${disabled}> ${esc(line.unit||'')}</td><td><input class="fi" id="costLoss${i}" type="number" min="0" max="99.999" step="any" value="${esc(costDraftValue('costLoss'+i,line.lossPercent??''))}" aria-label="สูญเสียรายการ ${i+1}" ${disabled}></td><td>${costNumber(line.baseTotal)}</td><td>${costNumber(line.purchaseCash)}</td><td>${costNumber(line.leftoverExposure)}</td><td><button class="btn btn-s" ${disabled} onclick="costRemove(${i})">นำออก</button></td></tr>`).join('')||'<tr><td colspan="7">ยังไม่มี RM — เลือกจาก Data Center ด้านล่าง</td></tr>'}</tbody></table></div>
+    <p class="hint">ประมาณการก่อนตรวจสต็อก ไม่ใช่ยอดสั่งซื้อจริง · แก้ชื่อที่นี่มีผลเฉพาะ revision นี้</p><button class="btn btn-p" ${disabled} onclick="costSave()">บันทึก revision สูตร / RM</button>
+    <h3>ค้นหาและเทียบ RM ใน Data Center</h3><label class="flbl" for="costSearch">ชื่อ / กลุ่ม / spec / vendor</label><input class="fi" id="costSearch" value="${esc(costState.search)}" placeholder="ค้นหาชื่อใกล้เคียงแล้วเทียบ spec" oninput="costSearchChanged(this.value)">
+    <div class="rec-wrap"><table class="rec-tbl"><thead><tr><th>กลุ่ม / วัสดุ</th><th>Spec</th><th>Vendor</th><th>Tier · ราคาและ MOQ</th><th>LT</th><th></th></tr></thead><tbody>${matches.map(({item,index})=>`<tr><td>${esc(item.group||'')}<br><b>${esc(item.name||'')}</b></td><td>${esc(item.spec||'')}</td><td>${esc(item.vendor||'')}</td><td>${esc(item.tierLabel||'')}<br>${costNumber(item.price)} ${esc(item.priceUnit||'')}<br>MOQ ${costNumber(item.moq)} ${esc(item.moqUnit||'')}</td><td>${costNumber(item.leadTimeDays)} วัน</td><td><button class="btn btn-s" ${disabled||!item.eligible?'disabled':''} onclick="costSelect(${index})">${item.eligible?'เลือก Tier นี้':'รอยืนยัน'}</button></td></tr>`).join('')||'<tr><td colspan="6">ไม่พบรายการที่ตรง — ส่งคำขอจัดหาได้โดยไม่เพิ่มราคาสมมติ</td></tr>'}</tbody></table></div>
+    <label class="flbl" for="costRequestBrief">รายละเอียดวัสดุ / spec ที่ต้องการเพิ่มเติม</label><textarea id="costRequestBrief" class="fi" rows="2">${esc(costDraftValue("costRequestBrief",""))}</textarea><button class="btn btn-s" ${disabled} onclick="costRequestMaterial()">ส่งคำขอจัดหาให้ Procurement</button>`:''}
+    <h3>ผล PK</h3><p>${esc(data.pkNotice||'ยังไม่มีผล PK ที่ยืนยันแล้ว สูตรและ RM ทำต่อได้')}</p>${data.pkCandidate&&data.capabilities&&data.capabilities.adoptPK?`<button class="btn btn-s" ${disabled} onclick="costAdoptPK()">นำ PK เวอร์ชัน ${esc(data.pkCandidate.versionLabel)} มาใช้</button>`:''}
+    <h3>สรุปเข้าแชทโครงการ</h3><p>ส่งเฉพาะยอดหลังบวกที่ผู้รับเห็นได้ พร้อม revision และรายการค้าง</p><button class="btn btn-p" ${disabled||!data.capabilities||!data.capabilities.sendSummary?'disabled':''} onclick="costSendSummary()">ส่งสรุป revision นี้เข้า Formula chat</button><p role="status">${esc(data.sendState==='sent'?'ส่งสำเร็จ':data.sendState==='pending'?'รอส่ง':data.sendState==='failed'?'ส่งไม่สำเร็จ':'ยังไม่ได้ส่ง')}</p>`}
+  </div>`;
+}
+function costSearchChanged(value){costCaptureDraft();costState.search=value;renderCostCalculator();const el=document.getElementById('costSearch');if(el){el.focus();el.setSelectionRange(value.length,value.length);}}
+function costInputNumber(id){const el=document.getElementById(id);if(!el||el.value.trim()==='')return null;const n=Number(el.value);if(!Number.isFinite(n)||n<0)throw Error('กรุณาตรวจค่าตัวเลข');return n;}
+function costSave(){
+  const data=costState.response;if(!data||!data.capabilities.editRM)return;
+  try{const patch={sellingUnits:costInputNumber('costSellingUnits'),unitsPerPack:costInputNumber('costUnitsPerPack'),fillAmount:costInputNumber('costFillAmount'),lines:data.lines.map((line,i)=>({id:line.id,alias:document.getElementById('costAlias'+i).value,amount:costInputNumber('costAmount'+i),lossPercent:costInputNumber('costLoss'+i)}))};return costAction('save',{patch});}catch(error){costState.error=error.message;renderCostCalculator();}
+}
+function costSelect(index){const data=costState.response,item=data&&data.catalog[index];if(!data||!data.capabilities.editRM||!item||!item.eligible)return;return costAction('selectRM',{offerRef:item.offerRef});}
+function costRemove(index){const data=costState.response,line=data&&data.lines[index];if(data&&data.capabilities.editRM&&line)return costAction('removeRM',{lineId:line.id});}
+function costRequestMaterial(){const data=costState.response,el=document.getElementById('costRequestBrief');if(!data||!data.capabilities.editRM||!el||!el.value.trim())return;return costAction('requestMaterial',{brief:el.value.trim()});}
+function costAdoptPK(){const data=costState.response;if(data&&data.pkCandidate&&data.capabilities.adoptPK)return costAction('adoptPK',{snapshotRef:data.pkCandidate.snapshotRef});}
+function costSendSummary(){const data=costState.response;if(!data||!data.capabilities.sendSummary)return;if(!confirm('ส่งสรุป revision '+data.revision+' เข้าแชท '+costState.projectId+'?'))return;return costAction('sendSummary',{revision:data.revision,idempotencyKey:costState.projectId+':'+data.scenarioId+':'+data.revision+':summary'});}
+// COST_CALCULATOR_UI_END
+
+
 // ===================================================================
 //  ตั้งค่าเซิร์ฟเวอร์กลาง (Supabase) — ใส่ค่า 2 บรรทัดนี้แล้วข้อมูลจะซิงก์ทุกเครื่อง
 //  ถ้าเว้นว่างไว้ แอปจะทำงานแบบเดิม คือเก็บข้อมูลในเครื่อง (localStorage) เท่านั้น
@@ -3168,6 +3472,8 @@ function createFirstAdmin(){
   switchView('dash');
 }
 function renderUserUI(){
+  costCheckSession();
+  void costResolveLink();
   const nameEl = document.getElementById('sideUserName');
   const chip = document.getElementById('sideUserChip');
   const roleEl = document.getElementById('sideUserRole');
@@ -3932,10 +4238,12 @@ function isFullyApproved(r){
 // ช่อง Chat ในตาราง Dashboard — มีห้องแชทแล้วกดเข้าได้เลย
 function chatCell(id){
   const c = getChat(id);
-  if(!c) return '<span class="pass-none">—</span>';
-  const done = CHAT_PARTS.filter(p=>c.approvals[p.key]).length;
-  return `<button class="btn btn-s btn-sm" onclick="openChatRoom('${id}')" title="เปิดห้องแชท">แชท · ${done}/${NPARTS}</button>`;
+  const done = c ? CHAT_PARTS.filter(p=>c.approvals[p.key]).length : 0;
+  const chat = c ? `<button class="btn btn-s btn-sm" onclick="openChatRoom('${esc(id)}')" title="เปิดห้องแชท">แชท · ${done}/${NPARTS}</button>` : '<span class="pass-none">—</span>';
+  const cost = /^[A-Z]\d{5}$/.test(id) && costAllowed(id) ? `<button class="btn btn-s btn-sm" onclick="openCostCalculator('${id}')">คำนวณต้นทุน</button>` : '';
+  return chat + cost;
 }
+
 function quickFilter(kind){
   const now = new Date();
   if(kind==='all'){ recFromStr=''; recToStr=''; }
