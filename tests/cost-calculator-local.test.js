@@ -8,11 +8,15 @@ const CORE=grab('CORE'),LOCAL=grab('LOCAL');
 
 function fixture(role='rd',name='Synthetic RD'){
  const backing={};
- const c={console,
+ const chats=[];
+ const c={console,chats,CHAT_SYS_MAX:5000,chatClamp:(t,m)=>String(t).slice(0,m),
   localStorage:{getItem:k=>Object.prototype.hasOwnProperty.call(backing,k)?backing[k]:null,setItem:(k,v)=>{backing[k]=String(v);},removeItem:k=>{delete backing[k];}},
+  getChat:id=>chats.find(x=>x.jobId===id)||null,
+  createChat:id=>{const room={jobId:id,createdAt:Date.now(),createdBy:name,messages:[],parts:[],approvals:{pd:null,ra:null,rd:null}};chats.unshift(room);return room;},
+  saveChats(){backing.fs_chats=JSON.stringify(chats);},
   currentUser:name,currentRole:()=>role,userList:[{name,role}]};
  vm.createContext(c);vm.runInContext(CORE,c);vm.runInContext(LOCAL,c);
- c.backing=backing;c.run=s=>vm.runInContext(s,c);
+ c.backing=backing;c.chats=chats;c.run=s=>vm.runInContext(s,c);
  return c;
 }
 const offer={id:'O1',materialId:'M1',name:'สารสกัดทดสอบ',group:'กลุ่มทดสอบ',spec:'Spec A',vendor:'SYNTHETIC VENDOR',tierId:'T1',status:'confirmed',specApproved:true,currency:'THB',scope:{type:'central'},price:100,priceUnit:'kg',priceBasisQuantity:1,moq:2,moqUnit:'kg',increment:1,incrementUnit:'kg',leadTimeDays:10,validUntil:'2999-01-01',evidenceRef:'E1'};
@@ -27,7 +31,49 @@ test('deep link to an older revision is refused for Sales and allowed for RD',as
 test('roles with no cost capability are refused entirely',async()=>{for(const role of ['pd','ra','mkt']){const c=fixture(role,'Someone');await assert.rejects(c.costLocalRequest('open',{projectId:'A00001'}),/ยังไม่ได้รับสิทธิ์/);}});
 test('purchasing holds both RM and PK capabilities but cannot edit the formula',async()=>{const c=fixture('purchasing','Synthetic Buyer');assert.deepEqual(Array.from(c.costBusinessRoles('Synthetic Buyer')),['Procurement RM','PU-PK']);const caps=c.costCapabilities();assert.equal(caps.open,true);assert.equal(caps.editRM,false);assert.equal(caps.adoptPK,true);});
 test('an explicit capability assignment overrides the role default',()=>{const c=fixture('sales','Synthetic Sales');c.loadCostStore().caps['Synthetic Sales']=['Finance','CEO','NOT_A_ROLE'];assert.deepEqual(Array.from(c.costBusinessRoles('Synthetic Sales')),['Finance','CEO']);assert.equal(c.costPrimaryRole(c.costBusinessRoles('Synthetic Sales')),'CEO');});
-test('queued summary is never reported as sent and reuse with changed content conflicts',async()=>{const c=fixture();await c.costLocalRequest('open',{projectId:'A00001'});const first=await c.costLocalRequest('sendSummary',{projectId:'A00001',scenarioId:'S1',expectedRevision:1,idempotencyKey:'A00001:S1:1:summary'});assert.equal(first.sendState,'pending');const again=await c.costLocalRequest('sendSummary',{projectId:'A00001',scenarioId:'S1',expectedRevision:1,idempotencyKey:'A00001:S1:1:summary'});assert.equal(again.sendState,'pending');assert.equal(c.loadCostStore().outbox.length,1);assert.equal(c.loadCostStore().outbox[0].receiptId,null);});
+test('summary posts once into the project chat and a retry does not post a second',async()=>{const c=fixture();await c.costLocalRequest('open',{projectId:'A00001'});
+ const key='A00001:S1:1:summary';
+ const first=await c.costLocalRequest('sendSummary',{projectId:'A00001',scenarioId:'S1',expectedRevision:1,idempotencyKey:key});
+ assert.equal(first.sendState,'sent');
+ const room=c.chats.find(x=>x.jobId==='A00001');
+ assert.equal(room.messages.filter(m=>m.costKey===key).length,1);
+ const again=await c.costLocalRequest('sendSummary',{projectId:'A00001',scenarioId:'S1',expectedRevision:1,idempotencyKey:key});
+ assert.equal(again.sendState,'sent');
+ assert.equal(room.messages.filter(m=>m.costKey===key).length,1,'retry must not post twice');
+ const outbox=c.loadCostStore().outbox;
+ assert.equal(outbox.length,1);assert.equal(outbox[0].status,'sent');assert.ok(outbox[0].receiptId);});
+test('a message already in the chat resolves a retry even if the outbox row is lost',async()=>{const c=fixture();await c.costLocalRequest('open',{projectId:'A00001'});
+ const key='A00001:S1:1:summary';
+ await c.costLocalRequest('sendSummary',{projectId:'A00001',scenarioId:'S1',expectedRevision:1,idempotencyKey:key});
+ c.loadCostStore().outbox.length=0; // simulate the store write failing after the chat write
+ const retry=await c.costLocalRequest('sendSummary',{projectId:'A00001',scenarioId:'S1',expectedRevision:1,idempotencyKey:key});
+ assert.equal(retry.sendState,'sent');
+ assert.equal(c.chats[0].messages.filter(m=>m.costKey===key).length,1,'must not double post');});
+test('chat summary carries adjusted totals only, never a vendor, base cost or material name',async()=>{const c=fixture();
+ c.loadCostStore().catalog.push(offer);
+ await c.costLocalRequest('open',{projectId:'A00001'});
+ await c.costLocalRequest('save',{projectId:'A00001',scenarioId:'S1',expectedRevision:1,patch:{sellingUnits:1000,unitsPerPack:1,fillAmount:1,fillUnit:'g',pkSpecVersion:'PACK1',lines:[]}});
+ await c.costLocalRequest('selectRM',{projectId:'A00001',scenarioId:'S1',expectedRevision:2,offerRef:'O1'});
+ await c.costLocalRequest('sendSummary',{projectId:'A00001',scenarioId:'S1',expectedRevision:3,idempotencyKey:'A00001:S1:3:summary'});
+ const text=JSON.stringify(c.chats[0].messages);
+ for(const secret of ['SYNTHETIC VENDOR','สารสกัดทดสอบ','O1','M1','T1','100'])assert.ok(!text.includes(secret),secret);
+ assert.match(c.chats[0].messages[0].text,/ยอดหลังบวกเท่านั้น/);
+ const stored=JSON.parse(c.backing.fs_cost).outbox[0].body;
+ assert.ok(!Object.hasOwn(stored.rm,'baseTotal'),'outbox body must be the Sales projection');
+ assert.ok(!Object.hasOwn(stored,'lines'));});
+test('a sender who can see base cost still posts only the Sales projection',async()=>{const c=fixture('admin','Synthetic Admin');
+ c.loadCostStore().catalog.push(offer);
+ await c.costLocalRequest('open',{projectId:'A00001'});
+ const own=await c.costLocalRequest('open',{projectId:'A00001'});
+ assert.ok(Object.hasOwn(own.view.rm,'baseTotal'),'admin does see base cost in their own view');
+ await c.costLocalRequest('sendSummary',{projectId:'A00001',scenarioId:'S1',expectedRevision:1,idempotencyKey:'A00001:S1:1:summary'});
+ const body=JSON.parse(c.backing.fs_cost).outbox[0].body;
+ assert.ok(!Object.hasOwn(body.rm,'baseTotal'),'the posted body must not inherit the sender projection');});
+test('a failed chat write leaves the summary unsent rather than falsely delivered',async()=>{const c=fixture();await c.costLocalRequest('open',{projectId:'A00001'});
+ c.saveChats=()=>{throw Error('DISK_FULL');};
+ await assert.rejects(c.costLocalRequest('sendSummary',{projectId:'A00001',scenarioId:'S1',expectedRevision:1,idempotencyKey:'A00001:S1:1:summary'}),/DISK_FULL/);
+ const outbox=c.loadCostStore().outbox;
+ assert.equal(outbox[0].status,'pending');assert.equal(outbox[0].receiptId,null);});
 test('adoptPK refuses rather than inventing a PK result, and PK stays absent',async()=>{const c=fixture();await c.costLocalRequest('open',{projectId:'A00001'});await assert.rejects(c.costLocalRequest('adoptPK',{projectId:'A00001',scenarioId:'S1',expectedRevision:1,snapshotRef:'PK1'}),/ยังไม่มีผล PK/);const body=await c.costLocalRequest('open',{projectId:'A00001'});assert.equal(body.pkCandidate,null);assert.equal(body.view.pk.ready,false);});
 test('sourcing request is recorded without adding a price and without a new revision',async()=>{const c=fixture();await c.costLocalRequest('open',{projectId:'A00001'});await c.costLocalRequest('requestMaterial',{projectId:'A00001',scenarioId:'S1',expectedRevision:1,brief:'ต้องการสารสกัด spec ใหม่'});const store=c.loadCostStore();assert.equal(store.requests.length,1);assert.equal(store.requests[0].status,'open');assert.equal(store.scenarios.length,1);});
 test('Procurement RM gets RM detail but never PK or Operation base cost',async()=>{const c=fixture('rd');c.loadCostStore().catalog.push(offer);await c.costLocalRequest('open',{projectId:'A00001'});await c.costLocalRequest('selectRM',{projectId:'A00001',scenarioId:'S1',expectedRevision:1,offerRef:'O1'});const b=fixture('purchasing','Synthetic Buyer');b.backing.fs_cost=c.backing.fs_cost;const body=await b.costLocalRequest('open',{projectId:'A00001'});assert.ok(Array.isArray(body.view.pending),'projection must stay a full cost-v1 view');assert.ok(Object.hasOwn(body.view.rm,'baseTotal'));assert.ok(!Object.hasOwn(body.view.pk,'baseTotal'));assert.ok(!Object.hasOwn(body.view.operation,'baseTotal'));});
@@ -113,3 +159,14 @@ test('changing pack size after adoption blocks reuse of the old PK snapshot',asy
  c.costRecordPk('A00001','S1',{adjustedTotal:300,validUntil:'2999-01-01',evidenceRef:'REQ1'});
  await c.costLocalRequest('save',{projectId:'A00001',scenarioId:'S1',expectedRevision:2,patch:{sellingUnits:2000,unitsPerPack:1,fillAmount:1,fillUnit:'g',pkSpecVersion:'PACK1',lines:[]}});
  await assert.rejects(c.costLocalRequest('adoptPK',{projectId:'A00001',scenarioId:'S1',expectedRevision:3}),/PK_CONTEXT_OR_VALIDITY_MISMATCH/);});
+test('a failed chat write is rolled back so a later retry still delivers exactly one message',async()=>{const c=fixture();await c.costLocalRequest('open',{projectId:'A00001'});
+ const key='A00001:S1:1:summary';
+ const real=c.saveChats;
+ c.saveChats=()=>{throw Error('DISK_FULL');};
+ await assert.rejects(c.costLocalRequest('sendSummary',{projectId:'A00001',scenarioId:'S1',expectedRevision:1,idempotencyKey:key}),/DISK_FULL/);
+ assert.equal(c.chats[0].messages.filter(m=>m.costKey===key).length,0,'the unsaved message must not linger in memory');
+ c.saveChats=real;
+ const retry=await c.costLocalRequest('sendSummary',{projectId:'A00001',scenarioId:'S1',expectedRevision:1,idempotencyKey:key});
+ assert.equal(retry.sendState,'sent');
+ assert.equal(c.chats[0].messages.filter(m=>m.costKey===key).length,1);
+ assert.ok(JSON.parse(c.backing.fs_chats)[0].messages.some(m=>m.costKey===key),'and it must be persisted');});

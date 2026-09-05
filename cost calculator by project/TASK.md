@@ -184,3 +184,21 @@ Verification: module 115/115, calculator browser 8/8, parent browser 37/37, SQL 
 Security impact: **ลดลงโดยเจตนาตามการตัดสินใจของเจ้าของระบบ** — ข้อมูลต้นทุนดิบอยู่ใน `localStorage` ของเครื่องผู้ใช้ ไม่มี server บังคับสิทธิ์ การแยก RM/PK/Sales เป็นการควบคุมการแสดงผล Database/permission impact: ไม่มี ไม่แตะ schema, grant หรือ locked key เดิม Dependency: ไม่มี Rollback: revert commit นี้ `fs_cost` เป็น key ใหม่ ลบได้โดยไม่กระทบข้อมูลเดิม
 
 Status: LOCAL_VERIFIED / INTEGRATION_BLOCKED (UAT, independent review, deployment ยังไม่ได้ทำ)
+
+## ปิด 3 เรื่องที่ค้าง — 2026-09-05
+
+เจ้าของระบบตอบ: สรุปเข้าแชท **เขียนแต่ยอดหลังบวก**, แคตตาล็อก RM **นำเข้า Excel/CSV**, ผล PK **กรอกยอดที่ยืนยันแล้ว**
+
+- [x] แคตตาล็อก RM: นำเข้าไฟล์ด้วย SheetJS ที่มีอยู่ ไม่เพิ่ม dependency แถวที่ขาดฟิลด์เชิงพาณิชย์ถูก **ปฏิเสธพร้อมเลขแถว ไม่ใส่ค่าแทน** และนำเข้าซ้ำเป็นการอัปเดตไม่ใช่เพิ่มซ้ำ
+- [x] ผล PK: เก็บเป็น snapshot ที่ผูกผู้กรอกและเวลา พร้อมเลขอ้างอิงหลักฐาน การต่อราคาใหม่เป็นเวอร์ชันใหม่และไม่ทับของเดิม ความเข้ากันของ context/ความถูกต้องตัดสินโดย core
+- [x] สรุปเข้าแชท: ประกอบจาก projection ของ Sales เสมอ กันส่งซ้ำด้วย `costKey` บนตัวข้อความ และถอนข้อความคืนถ้า `saveChats()` ล้มเหลว
+- [x] เพิ่ม `fillUnit` และ `pkSpecVersion` เข้า save patch เพราะ PK snapshot จับคู่ scenario ไม่ได้ถ้าขาดสองค่านี้ อัปเดต test ที่ตรึง patch shape อย่างตั้งใจ
+- [x] แก้ช่องโหว่ที่ test จับได้: `validUntil` เดิมตรวจแค่รูปทรงตัวเลข ทำให้ `2030-13-40` และ `2030-02-30` ผ่าน ตอนนี้ใช้การตรวจปฏิทินจริงทั้งใน PK entry และ catalog import
+
+Commits: `f14b315` (catalog + PK), `487b46f` (chat summary) แยกกันเพราะอันหลังแตะ `fs_chats` ที่ล็อกไว้ จึงควรตรวจแยก
+
+Verification: module 127/127, calculator browser 8/8, parent browser 37/37, SQL 33 exit 0, `git diff --check` clean
+
+**ข้อควรรู้เรื่องการเปิดเผย:** `fs_chats` ไหลออกทาง `exportChatExcel` ที่ OPC ใช้ได้ เส้นทางนี้ไม่ได้ถูกจำกัดเพิ่ม สิ่งที่ป้องกันคือเนื้อหาของข้อความล้วน ๆ บันทึกไว้ใน ADR 0002 แล้ว
+
+Status: LOCAL_VERIFIED / INTEGRATION_BLOCKED — UAT, independent review และ deployment ยังไม่ได้ทำ

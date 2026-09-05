@@ -664,7 +664,7 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
   <div class="logo"><svg viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-1.73-3L9 11.35V4H8a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2h-1v7.35L19.73 19A2 2 0 0 1 18 22H6Zm5-10.11L8.31 16.5h7.38L13 11.89V4h-2v7.89Z"/></svg></div>
   <div>
     <div class="hdr-title">Formula Studio</div>
-    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-05.4-cost-rm-pk</div>
+    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-05.5-cost-summary</div>
   </div>
   <div class="sync-chip" id="syncChip" onclick="sbManualSync()" title="สถานะการซิงก์ข้อมูลกับเซิร์ฟเวอร์กลาง"></div>
 </div>
@@ -1539,6 +1539,47 @@ function costEnvelope(entry,sendState){
     pkNotice:scenario.pk?('รับผล PK เวอร์ชัน '+scenario.pk.version+' มาใช้แล้ว'):'ยังไม่มีผล PK ที่ยืนยันแล้ว สูตรและ RM ทำต่อได้',
     sendState:sendState||(outbox.length?outbox[outbox.length-1].status:undefined)};
 }
+function costSalesView(entry){
+  return CostCalculator.project(CostCalculator.calculate(entry.scenario,costToday()),'Sales');
+}
+function costMoney(value){
+  return typeof value==='number'&&Number.isFinite(value)?value.toLocaleString('th-TH',{maximumFractionDigits:4}):'รอกำหนดราคา';
+}
+// Adjusted category totals, the final unit price and the pending list only.
+// Built from the Sales projection, which carries no baseTotal, no RM line and no
+// supplier field, so the text cannot leak one by construction.
+function costSummaryText(view){
+  const lines=[`สรุปต้นทุน revision ${view.revision} — ยอดหลังบวกเท่านั้น`,
+    `RM ${costMoney(view.rm.adjustedTotal)} บาท/ล็อต`,
+    `PK ${costMoney(view.pk.adjustedTotal)} บาท/ล็อต`,
+    `Operation ${costMoney(view.operation.adjustedTotal)} บาท/ล็อต`,
+    view.complete&&view.finalPerSellingUnit!=null?`ราคาต่อหน่วยขาย ${costMoney(view.finalPerSellingUnit)} บาท`:'ราคาต่อหน่วยขาย: รอกำหนดราคา'];
+  if(Array.isArray(view.pending)&&view.pending.length)lines.push('รอดำเนินการ: '+view.pending.join(' · '));
+  return lines.join('\n');
+}
+// Appends the summary into the project chat exactly once. The idempotency key is
+// stored on the message, so a retry after a failed store write finds the posted
+// message instead of posting a second one.
+function costPostSummary(projectId,key,view){
+  if(!Array.isArray(chats))throw Error('ห้องแชทยังโหลดไม่เสร็จ');
+  const chat=getChat(projectId)||createChat(projectId);
+  if(!chat)throw Error('ไม่พบห้องแชทของโครงการนี้');
+  const posted=chat.messages.find(message=>message&&message.costKey===key);
+  if(posted)return {receiptId:'chat:'+chat.jobId+':'+posted.ts,duplicate:true};
+  const ts=Date.now();
+  // costKey is an additive optional field; older readers ignore it.
+  const message={type:'sys',user:currentUser||'',text:chatClamp(costSummaryText(view),CHAT_SYS_MAX),ts,costKey:key};
+  chat.messages.push(message);
+  try{saveChats();}
+  catch(error){
+    // Undo the in-memory append, otherwise a retry in this same session would
+    // find the message by key and report a summary that was never persisted.
+    const at=chat.messages.indexOf(message);
+    if(at>=0)chat.messages.splice(at,1);
+    throw error;
+  }
+  return {receiptId:'chat:'+chat.jobId+':'+ts,duplicate:false};
+}
 function costAppendEntry(projectId,scenarioId,scenario){
   const store=loadCostStore();
   store.scenarios.push({projectId,scenarioId,revision:scenario.revision,scenario,createdAt:new Date().toISOString(),createdBy:currentUser});
@@ -1572,15 +1613,19 @@ async function costLocalRequest(action,payload){
     if(!caps.sendSummary)throw Error('ไม่มีสิทธิ์ส่งสรุป');
     const store=loadCostStore(),key=payload.idempotencyKey;
     if(typeof key!=='string'||!/^[A-Za-z0-9:_-]{1,160}$/.test(key))throw Error('รหัสกันส่งซ้ำไม่ถูกต้อง');
-    const body=costEnvelope(entry).view,existing=store.outbox.find(row=>row.idempotencyKey===key);
-    if(existing){
-      if(JSON.stringify(existing.body)!==JSON.stringify(body))throw Error('เนื้อหาเปลี่ยนแล้วแต่ใช้รหัสกันส่งซ้ำเดิม');
-      return costEnvelope(entry,existing.status);
-    }
-    // Queued only. Nothing delivers it yet, so it must never read as sent.
-    store.outbox.push({idempotencyKey:key,projectId,scenarioId,revision:entry.revision,body,status:'pending',createdAt:new Date().toISOString(),createdBy:currentUser,receiptId:null});
+    const body=costSalesView(entry),existing=store.outbox.find(row=>row.idempotencyKey===key);
+    if(existing&&JSON.stringify(existing.body)!==JSON.stringify(body))throw Error('เนื้อหาเปลี่ยนแล้วแต่ใช้รหัสกันส่งซ้ำเดิม');
+    if(existing&&existing.status==='sent')return costEnvelope(entry,'sent');
+    const row=existing||{idempotencyKey:key,projectId,scenarioId,revision:entry.revision,body,status:'pending',createdAt:new Date().toISOString(),createdBy:currentUser,receiptId:null};
+    if(!existing)store.outbox.push(row);
+    let receipt=null;
+    try{receipt=costPostSummary(projectId,key,body);}
+    catch(error){row.status='pending';saveCostStore();throw error;}
+    // Chat write succeeded, so the receipt is real. If this store write fails the
+    // retry finds the posted message by key and still resolves to sent.
+    row.status='sent';row.receiptId=receipt.receiptId;row.sentAt=new Date().toISOString();
     saveCostStore();
-    return costEnvelope(entry,'pending');
+    return costEnvelope(entry,'sent');
   }
   if(!caps.editRM)throw Error('ไม่มีสิทธิ์แก้ไขต้นทุนของโครงการนี้');
   const store=loadCostStore(),scenario=entry.scenario;
