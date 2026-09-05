@@ -315,3 +315,65 @@ test('แก้อัตรากลางภายหลังไม่เป�
 test('อัตรากลางที่หมดอายุเลือกมาใช้ไม่ได้',async()=>{const c=fixture();
  await readyScenario(c);seedRates(c,[0.15,0.15],'2026-09-04');
  assert.throws(()=>c.costRecordPricingRule('A00001','S1',RULE),/หมดอายุ/);});
+
+// ── จัดกลุ่มชื่อคล้ายกัน และเปลี่ยน Tier ได้ทีหลัง ────────────────────────────
+const tierOffer=(id,mat,name,price,moq,lt,ok=true)=>({...offer,id,materialId:mat,name,price,priceUnit:'kg',
+  priceBasisQuantity:1,moq,moqUnit:'kg',increment:1,incrementUnit:'kg',leadTimeDays:lt,tierId:'T'+id.slice(-1),
+  status:ok?'confirmed':'draft',specApproved:ok});
+async function catalogFixture(){
+ const c=fixture();
+ c.loadCostStore().catalog.push(
+   tierOffer('O1','M1','สารสกัดใบบัวบก 10%',1850,5,14),
+   tierOffer('O2','M1','สารสกัดใบบัวบก 10%',1600,25,21),
+   tierOffer('O3','M2','สารสกัดใบบัวบก (Powder)',1900,5,10),
+   tierOffer('O4','M3','กลีเซอรีน USP',68,25,7),
+   tierOffer('O5','M3','กลีเซอรีน USP',61,100,7,false));
+ await c.costLocalRequest('open',{projectId:'A00001'});
+ return c;
+}
+test('ชื่อที่คล้ายกันถูกจัดอยู่กลุ่มเดียวกันแม้คนละรหัสสาร',async()=>{const c=await catalogFixture();
+ const body=await c.costLocalRequest('open',{projectId:'A00001'});
+ const g=body.catalogGroups.find(x=>x.offers.some(o=>o.offerRef==='O1'));
+ assert.equal(g.count,3,'บัวบก 10% สองเทียร์ กับ (Powder) อีกหนึ่ง ต้องอยู่กลุ่มเดียวกัน');
+ assert.ok(g.offers.some(o=>o.offerRef==='O3'),'ชื่อที่ต่างกันแค่คำต่อท้ายต้องอยู่ด้วยกัน');
+ assert.deepEqual(Array.from(g.offers.map(o=>o.price)),[1600,1850,1900],'เรียงราคาต่ำไปสูงเพื่อเทียบ');});
+test('ระบบไม่เลือก Tier ให้ — ทุก Tier ถูกส่งมาให้เลือกครบ',async()=>{const c=await catalogFixture();
+ const body=await c.costLocalRequest('open',{projectId:'A00001'});
+ const all=body.catalogGroups.flatMap(g=>g.offers);
+ assert.equal(all.length,5,'ต้องไม่คัดเหลือ max หรือ min');
+ assert.equal(all.filter(o=>!o.eligible).length,1,'ตัวที่ยังไม่ยืนยันต้องยังแสดงแต่กดไม่ได้');
+ all.forEach(o=>{assert.ok(o.moq!=null&&o.leadTimeDays!=null&&o.price!=null,'ต้องมีข้อมูลพอให้ตัดสินใจ');});});
+test('เปลี่ยน Tier ของบรรทัดที่ลงสูตรแล้วได้ โดยคงปริมาณและชื่อแสดงเดิม',async()=>{const c=await catalogFixture();
+ await c.costLocalRequest('selectRM',{projectId:'A00001',scenarioId:'S1',expectedRevision:1,offerRef:'O1'});
+ const id=c.loadCostStore().scenarios[1].scenario.rmLines[0].id;
+ await c.costLocalRequest('save',{projectId:'A00001',scenarioId:'S1',expectedRevision:2,
+   patch:{sellingUnits:1000,unitsPerPack:1,fillAmount:1,fillUnit:'g',pkSpecVersion:null,
+     lines:[{id,alias:'ชื่อที่ RD ตั้ง',amount:1,lossPercent:2}]}});
+ const before=await c.costLocalRequest('open',{projectId:'A00001'});
+ assert.equal(before.lines[0].offerRef,'O1');
+ assert.ok(before.lines[0].alternatives.some(a=>a.offerRef==='O2'),'ต้องเสนอ Tier อื่นของสารตัวเดียวกัน');
+ assert.ok(!before.lines[0].alternatives.some(a=>a.offerRef==='O3'),'ต้องไม่เสนอ Tier ของสารคนละรหัส');
+ const after=await c.costLocalRequest('changeTier',{projectId:'A00001',scenarioId:'S1',
+   expectedRevision:before.revision,lineId:id,offerRef:'O2'});
+ assert.equal(after.lines[0].offerRef,'O2');
+ assert.equal(after.lines[0].alias,'ชื่อที่ RD ตั้ง','ชื่อแสดงต้องไม่หาย');
+ assert.equal(after.lines[0].amount,1);
+ assert.equal(after.lines[0].lossPercent,2,'loss ต้องไม่หาย');
+ assert.ok(after.lines[0].baseTotal<before.lines[0].baseTotal,'ราคาถูกลงต้องสะท้อนในต้นทุน');});
+test('เปลี่ยน Tier ข้ามสารไม่ได้ และ revision เดิมยังคงราคาเดิม',async()=>{const c=await catalogFixture();
+ await c.costLocalRequest('selectRM',{projectId:'A00001',scenarioId:'S1',expectedRevision:1,offerRef:'O1'});
+ const id=c.loadCostStore().scenarios[1].scenario.rmLines[0].id;
+ await assert.rejects(c.costLocalRequest('changeTier',{projectId:'A00001',scenarioId:'S1',
+   expectedRevision:2,lineId:id,offerRef:'O4'}),/สารตัวเดียวกัน/);
+ await assert.rejects(c.costLocalRequest('changeTier',{projectId:'A00001',scenarioId:'S1',
+   expectedRevision:2,lineId:'ไม่มีจริง',offerRef:'O2'}),/ไม่พบรายการ/);
+ await c.costLocalRequest('changeTier',{projectId:'A00001',scenarioId:'S1',expectedRevision:2,lineId:id,offerRef:'O2'});
+ const old=await c.costLocalRequest('open',{projectId:'A00001',scenarioId:'S1',expectedRevision:2});
+ assert.equal(old.lines[0].offerRef,'O1','revision เดิมต้องยังใช้ Tier เดิม');});
+test('Sales ไม่เห็นทั้งกลุ่มแคตตาล็อกและตัวเลือก Tier',async()=>{const c=await catalogFixture();
+ await c.costLocalRequest('selectRM',{projectId:'A00001',scenarioId:'S1',expectedRevision:1,offerRef:'O1'});
+ const s=fixture('sales','Synthetic Sales');s.backing.fs_cost=c.backing.fs_cost;
+ const body=await s.costLocalRequest('open',{projectId:'A00001'});
+ assert.deepEqual(Array.from(body.catalogGroups),[]);
+ assert.deepEqual(Array.from(body.lines),[]);
+ assert.ok(!JSON.stringify(body).includes('SYNTHETIC VENDOR'));});

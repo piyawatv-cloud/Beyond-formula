@@ -635,6 +635,7 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
 .cost-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:16px 0}
 .cost-summary>div{border:1px solid #dfe6ed;border-radius:10px;padding:16px;background:#f8fafc}
 .cost-summary p{margin:8px 0}
+.cost-group{background:var(--bg2,#f3f5f4);font-weight:600;padding-top:10px}
 .cost-warning{background:#fff5dc;border:1px solid #eed599;border-radius:8px;padding:12px;color:#694800}
 .cost-workspace .rec-wrap{overflow-x:auto;margin:12px 0}
 .cost-workspace .rec-tbl{min-width:720px;width:100%}
@@ -664,7 +665,7 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
   <div class="logo"><svg viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-1.73-3L9 11.35V4H8a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2h-1v7.35L19.73 19A2 2 0 0 1 18 22H6Zm5-10.11L8.31 16.5h7.38L13 11.89V4h-2v7.89Z"/></svg></div>
   <div>
     <div class="hdr-title">Formula Studio</div>
-    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-05.9-rate-table</div>
+    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-05.10-tier-choice</div>
   </div>
   <div class="sync-chip" id="syncChip" onclick="sbManualSync()" title="สถานะการซิงก์ข้อมูลกับเซิร์ฟเวอร์กลาง"></div>
 </div>
@@ -1367,7 +1368,7 @@ async function costResolveLink(){
 if(typeof window.addEventListener==='function')window.addEventListener('hashchange',()=>{void costResolveLink();});
 function costAllowed(projectId){return !!(currentUser && can('chat') && !impersonator && canSeeRecord(records.find(r=>r.id===projectId)));}
 async function costRequest(action,payload){
-  const actions=['open','save','selectRM','removeRM','requestMaterial','adoptPK','sendSummary'];
+  const actions=['open','save','selectRM','changeTier','removeRM','requestMaterial','adoptPK','sendSummary'];
   if(!actions.includes(action) || !costAllowed(payload.projectId))throw Error('ไม่มีสิทธิ์ทำงานกับโครงการนี้');
   if(window.__FS_TEST__ && typeof window.__costTestRequest==='function')return window.__costTestRequest(action,payload);
   // Local-first is the configured mode (ADR 0002). The network path below stays
@@ -1432,7 +1433,12 @@ function renderCostCalculator(){
   const rows=data&&Array.isArray(data.lines)?data.lines:[];
   const catalog=data&&Array.isArray(data.catalog)?data.catalog:[];
   const query=costState.search.trim().toLocaleLowerCase();
-  const matches=catalog.map((item,index)=>({item,index})).filter(({item})=>[item.group,item.name,item.spec,item.vendor].join(' ').toLocaleLowerCase().includes(query));
+  const match=item=>[item.group,item.name,item.spec,item.vendor,item.tierLabel].join(' ').toLocaleLowerCase().includes(query);
+  // ถ้า response ยังไม่ส่งกลุ่มมา ให้แสดงเป็นกลุ่มเดียว เพื่อให้ contract เดิมยังใช้ได้
+  const source=data&&Array.isArray(data.catalogGroups)&&data.catalogGroups.length
+    ?data.catalogGroups
+    :(catalog.length?[{key:'all',label:'รายการทั้งหมด',count:catalog.length,offers:catalog}]:[]);
+  const groups=source.map(g=>({...g,offers:g.offers.filter(match)})).filter(g=>g.offers.length);
   panel.innerHTML=`<div class="sec-card cost-workspace">
     <div class="cost-top"><div><h2>Cost Calculator · ${esc(costState.projectId)}</h2><p class="hint">${data?'Revision '+esc(data.revision):'กำลังเปิดโครงการ'} · สูตรและ RM ทำต่อได้ระหว่างรอ PK</p></div><button class="btn btn-s" onclick="switchView('chat')">กลับหน้ารายการแชท</button></div>
     <div role="status" aria-live="polite">${costState.busy?'<p>กำลังตรวจและบันทึกข้อมูล…</p>':''}${costState.error?`<p class="cost-warning">${esc(costState.error)}</p><button class="btn btn-s" onclick="costAction('open',{})">ลองเชื่อมต่ออีกครั้ง</button>`:''}</div>
@@ -1441,10 +1447,11 @@ function renderCostCalculator(){
     <p><b>ราคาต่อหน่วยขาย: ${!view.complete||view.finalPerSellingUnit==null?'รอกำหนดราคา':costNumber(view.finalPerSellingUnit)} บาท</b></p>
     <ul>${(view.pending||[]).map(message=>`<li>${esc(message)}</li>`).join('')}</ul>
     ${canEdit?`<h3>จำนวนผลิตและขนาดบรรจุ</h3><div class="fg4">${costField('จำนวนหน่วยขาย','costSellingUnits',draft.sellingUnits,'หน่วยขาย')}${costField('หน่วยย่อยต่อแพ็ก','costUnitsPerPack',draft.unitsPerPack,'หน่วยย่อย / หน่วยขาย')}${costField('น้ำหนักต่อหน่วยย่อย','costFillAmount',draft.fillAmount,draft.fillUnit||'ยังไม่ระบุหน่วย')}${costTextField('หน่วยน้ำหนัก','costFillUnit',draft.fillUnit,'kg / g / mg')}${costTextField('เวอร์ชัน spec บรรจุภัณฑ์','costPkSpecVersion',draft.pkSpecVersion,'ต้องระบุก่อนรับผล PK')}</div>
-    <h3>RM ที่เลือก</h3><div class="rec-wrap"><table class="rec-tbl"><thead><tr><th>ชื่อแสดง</th><th>ปริมาณ / หน่วยย่อย</th><th>Loss %</th><th>ต้นทุนใช้จริง</th><th>เงินซื้อก่อนตรวจสต็อก</th><th>ของเหลือ</th><th></th></tr></thead><tbody>${rows.map((line,i)=>`<tr><td><input class="fi" id="costAlias${i}" value="${esc(costDraftValue('costAlias'+i,line.alias||''))}" placeholder="รายการวัสดุ ${i+1}" aria-label="ชื่อแสดงรายการ ${i+1}" ${disabled}></td><td><input class="fi" id="costAmount${i}" type="number" min="0" step="any" value="${esc(costDraftValue('costAmount'+i,line.amount??''))}" aria-label="ปริมาณรายการ ${i+1}" ${disabled}> ${esc(line.unit||'')}</td><td><input class="fi" id="costLoss${i}" type="number" min="0" max="99.999" step="any" value="${esc(costDraftValue('costLoss'+i,line.lossPercent??''))}" aria-label="สูญเสียรายการ ${i+1}" ${disabled}></td><td>${costNumber(line.baseTotal)}</td><td>${costNumber(line.purchaseCash)}</td><td>${costNumber(line.leftoverExposure)}</td><td><button class="btn btn-s" ${disabled} onclick="costRemove(${i})">นำออก</button></td></tr>`).join('')||'<tr><td colspan="7">ยังไม่มี RM — เลือกจาก Data Center ด้านล่าง</td></tr>'}</tbody></table></div>
+    <h3>RM ที่เลือก</h3><div class="rec-wrap"><table class="rec-tbl"><thead><tr><th>ชื่อแสดง</th><th>ปริมาณ / หน่วยย่อย</th><th>Loss %</th><th>ต้นทุนใช้จริง</th><th>เงินซื้อก่อนตรวจสต็อก</th><th>ของเหลือ</th><th>Tier</th><th></th></tr></thead><tbody>${rows.map((line,i)=>`<tr><td><input class="fi" id="costAlias${i}" value="${esc(costDraftValue('costAlias'+i,line.alias||''))}" placeholder="รายการวัสดุ ${i+1}" aria-label="ชื่อแสดงรายการ ${i+1}" ${disabled}></td><td><input class="fi" id="costAmount${i}" type="number" min="0" step="any" value="${esc(costDraftValue('costAmount'+i,line.amount??''))}" aria-label="ปริมาณรายการ ${i+1}" ${disabled}> ${esc(line.unit||'')}</td><td><input class="fi" id="costLoss${i}" type="number" min="0" max="99.999" step="any" value="${esc(costDraftValue('costLoss'+i,line.lossPercent??''))}" aria-label="สูญเสียรายการ ${i+1}" ${disabled}></td><td>${costNumber(line.baseTotal)}</td><td>${costNumber(line.purchaseCash)}</td><td>${costNumber(line.leftoverExposure)}</td><td>${line.alternatives&&line.alternatives.length?`<select class="fi" ${disabled} onchange="costChangeTier('${esc(line.id)}',this.value)"><option value="">${esc(line.tierLabel||'Tier ปัจจุบัน')} · ${costNumber(line.offerPrice)}</option>${line.alternatives.map(alt=>`<option value="${esc(alt.offerRef)}"${alt.eligible?'':' disabled'}>${esc(alt.tierLabel||alt.offerRef)} · ${costNumber(alt.price)} · MOQ ${costNumber(alt.moq)} ${esc(alt.moqUnit||'')} · LT ${costNumber(alt.leadTimeDays)}</option>`).join('')}</select>`:`<span class="hint">${esc(line.tierLabel||'—')}</span>`}</td><td><button class="btn btn-s" ${disabled} onclick="costRemove(${i})">นำออก</button></td></tr>`).join('')||'<tr><td colspan="8">ยังไม่มี RM — เลือกจาก Data Center ด้านล่าง</td></tr>'}</tbody></table></div>
     <p class="hint">ประมาณการก่อนตรวจสต็อก ไม่ใช่ยอดสั่งซื้อจริง · แก้ชื่อที่นี่มีผลเฉพาะ revision นี้</p><button class="btn btn-p" ${disabled} onclick="costSave()">บันทึก revision สูตร / RM</button>
     <h3>ค้นหาและเทียบ RM ใน Data Center</h3><label class="flbl" for="costSearch">ชื่อ / กลุ่ม / spec / vendor</label><input class="fi" id="costSearch" value="${esc(costState.search)}" placeholder="ค้นหาชื่อใกล้เคียงแล้วเทียบ spec" oninput="costSearchChanged(this.value)">
-    <div class="rec-wrap"><table class="rec-tbl"><thead><tr><th>กลุ่ม / วัสดุ</th><th>Spec</th><th>Vendor</th><th>Tier · ราคาและ MOQ</th><th>LT</th><th></th></tr></thead><tbody>${matches.map(({item,index})=>`<tr><td>${esc(item.group||'')}<br><b>${esc(item.name||'')}</b></td><td>${esc(item.spec||'')}</td><td>${esc(item.vendor||'')}</td><td>${esc(item.tierLabel||'')}<br>${costNumber(item.price)} ${esc(item.priceUnit||'')}<br>MOQ ${costNumber(item.moq)} ${esc(item.moqUnit||'')}</td><td>${costNumber(item.leadTimeDays)} วัน</td><td><button class="btn btn-s" ${disabled||!item.eligible?'disabled':''} onclick="costSelect(${index})">${item.eligible?'เลือก Tier นี้':'รอยืนยัน'}</button></td></tr>`).join('')||'<tr><td colspan="6">ไม่พบรายการที่ตรง — ส่งคำขอจัดหาได้โดยไม่เพิ่มราคาสมมติ</td></tr>'}</tbody></table></div>
+    <div class="rec-wrap"><table class="rec-tbl"><thead><tr><th>กลุ่ม / วัสดุ</th><th>Spec</th><th>Vendor</th><th>Tier · ราคาและ MOQ</th><th>LT</th><th></th></tr></thead><tbody>${groups.map(g=>`<tr><td colspan="6" class="cost-group">${esc(g.label)}${g.count>1?` · ${g.count} ตัวเลือกที่ชื่อใกล้เคียงกัน`:''}</td></tr>`+g.offers.map(item=>`<tr><td>${esc(item.group||'')}<br><b>${esc(item.name||'')}</b></td><td>${esc(item.spec||'')}</td><td>${esc(item.vendor||'')}</td><td>${esc(item.tierLabel||'')}<br>${costNumber(item.price)} บาท ต่อ ${costNumber(item.priceBasisQuantity)} ${esc(item.priceUnit||'')}<br>MOQ ${costNumber(item.moq)} ${esc(item.moqUnit||'')}${item.condition?`<br><span class="hint">${esc(item.condition)}</span>`:''}</td><td>${costNumber(item.leadTimeDays)} วัน</td><td><button class="btn btn-s" ${disabled||!item.eligible?'disabled':''} onclick="costSelectRef('${esc(item.offerRef)}')">${item.eligible?'เลือก Tier นี้':'รอยืนยัน'}</button></td></tr>`).join('')).join('')||'<tr><td colspan="6">ไม่พบรายการที่ตรง — ส่งคำขอจัดหาได้โดยไม่เพิ่มราคาสมมติ</td></tr>'}</tbody></table></div>
+    <p class="hint">ระบบไม่เลือก Tier ให้ · เรียงจากราคาต่ำไปสูงเพื่อให้เทียบง่ายเท่านั้น · เลือกแล้วยังเปลี่ยนได้ภายหลัง</p>
     <p class="hint">แคตตาล็อกในเครื่องนี้มี ${catalog.length} รายการ · นำเข้าไฟล์จาก Procurement เพื่อเพิ่ม/อัปเดต</p>
     <input type="file" id="costCatalogFile" accept=".xlsx,.xls,.csv" style="display:none" onchange="costImportCatalogFile(this.files[0])">
     <button class="btn btn-s" ${disabled} onclick="document.getElementById('costCatalogFile').click()">นำเข้าแคตตาล็อก RM (Excel/CSV)</button>
@@ -1472,7 +1479,11 @@ function costSave(){
   try{const text=id=>{const el=document.getElementById(id);return el?el.value.trim():'';};
   const patch={sellingUnits:costInputNumber('costSellingUnits'),unitsPerPack:costInputNumber('costUnitsPerPack'),fillAmount:costInputNumber('costFillAmount'),fillUnit:text('costFillUnit'),pkSpecVersion:text('costPkSpecVersion'),lines:data.lines.map((line,i)=>({id:line.id,alias:document.getElementById('costAlias'+i).value,amount:costInputNumber('costAmount'+i),lossPercent:costInputNumber('costLoss'+i)}))};return costAction('save',{patch});}catch(error){costState.error=error.message;renderCostCalculator();}
 }
-function costSelect(index){const data=costState.response,item=data&&data.catalog[index];if(!data||!data.capabilities.editRM||!item||!item.eligible)return;return costAction('selectRM',{offerRef:item.offerRef});}
+function costSelectRef(offerRef){const data=costState.response;if(!data||!data.capabilities.editRM)return;
+  const item=(data.catalogGroups||[]).flatMap(g=>g.offers).find(o=>o.offerRef===offerRef);
+  if(!item||!item.eligible)return;return costAction('selectRM',{offerRef});}
+function costChangeTier(lineId,offerRef){const data=costState.response;if(!data||!data.capabilities.editRM||!offerRef)return;
+  return costAction('changeTier',{lineId,offerRef});}
 function costRemove(index){const data=costState.response,line=data&&data.lines[index];if(data&&data.capabilities.editRM&&line)return costAction('removeRM',{lineId:line.id});}
 function costRequestMaterial(){const data=costState.response,el=document.getElementById('costRequestBrief');if(!data||!data.capabilities.editRM||!el||!el.value.trim())return;return costAction('requestMaterial',{brief:el.value.trim()});}
 async function costImportCatalogFile(file){
@@ -1567,6 +1578,35 @@ function costEntry(projectId,scenarioId,revision){
 function costLatestEntry(projectId,scenarioId){
   return costEntries(projectId,scenarioId).reduce((best,row)=>!best||row.revision>best.revision?row:best,null);
 }
+// จัดกลุ่มชื่อที่เหมือนหรือคล้ายกัน เพราะปัญหาตั้งต้นคือ RD ต้องไล่อ่านสารชื่อคล้ายกัน
+// ที่ spec/LT/MOQ/ราคาต่างกัน ระบบไม่เลือก Tier ให้ — แสดงทุกตัวเลือกให้ตัดสินเอง
+function costGroupKey(name){
+  // ตัดสิ่งที่แยก "รุ่นย่อย" ออกจากชื่อวงศ์เดียวกัน: เครื่องหมาย ความเข้มข้น และคำขยาย
+  // เกรด ตัวเลข/เปอร์เซ็นต์ถูกตัดเพราะความเข้มข้นเป็นความต่างของ spec ไม่ใช่คนละวัสดุ
+  // รายละเอียดที่ต่างกันยังแสดงครบในแต่ละแถว การจัดกลุ่มกว้างจึงช่วยให้เห็นตัวใกล้เคียง
+  // ไม่ใช้ \b เพราะขอบเขตคำไม่ทำงานกับภาษาไทย
+  var s=String(name||'').toLocaleLowerCase()
+    .replace(/[®™()[\]{}.,\-_/\\%]/g,' ')
+    .replace(/\d+/g,' ');
+  ['powder','extract','usp','bp','food','grade','pure','pharma'].forEach(function(word){
+    s=s.split(' ').filter(function(t){return t!==word;}).join(' ');
+  });
+  return s.replace(/\s+/g,' ').trim();
+}
+function costCatalogGroups(offers){
+  const groups=new Map();
+  offers.forEach(offer=>{
+    const key=costGroupKey(offer.name)||offer.materialId||offer.offerRef;
+    if(!groups.has(key))groups.set(key,{key,label:offer.name||offer.materialId||'',offers:[]});
+    groups.get(key).offers.push(offer);
+  });
+  return [...groups.values()]
+    .map(group=>({...group,
+      // เรียงราคาจากถูกไปแพงเพื่อให้เทียบง่าย ไม่ใช่การเลือกให้
+      offers:group.offers.slice().sort((a,b)=>(a.price??Infinity)-(b.price??Infinity)),
+      count:group.offers.length}))
+    .sort((a,b)=>b.count-a.count||a.label.localeCompare(b.label,'th'));
+}
 function costEnvelope(entry,sendState){
   const store=loadCostStore(),caps=costCapabilities(),businessRole=costPrimaryRole(costBusinessRoles(currentUser));
   const role=currentRole()==='admin'?(businessRole||'CEO'):businessRole;
@@ -1583,9 +1623,16 @@ function costEnvelope(entry,sendState){
       pkMode:scenario.pkNotApplicable===true?'notApplicable':'separate',
       format:scenario.operationFormat||null,
       charges:(scenario.extraCosts||[]).map(fee=>({label:fee.label||fee.id,amount:fee.amount}))}:null,
-    lines:detail?scenario.rmLines.map((line,index)=>({...result.rm.lines[index],id:line.id,alias:line.alias,amount:line.amount,unit:line.unit,lossPercent:line.lossPercent})):[],
+    lines:detail?scenario.rmLines.map((line,index)=>({...result.rm.lines[index],id:line.id,alias:line.alias,amount:line.amount,unit:line.unit,lossPercent:line.lossPercent,
+      offerRef:line.offer&&line.offer.id,materialId:line.materialId,
+      tierLabel:line.offer&&line.offer.tierId,offerPrice:line.offer&&line.offer.price,offerMoq:line.offer&&line.offer.moq,
+      // Tier อื่นของสารตัวเดียวกัน เพื่อให้เปลี่ยนได้แม้ลงสูตรไปแล้ว
+      alternatives:store.catalog.filter(offer=>offer.materialId===line.materialId&&offer.id!==(line.offer&&line.offer.id))
+        .map(offer=>({offerRef:offer.id,tierLabel:offer.tierId||'',price:offer.price,moq:offer.moq,moqUnit:offer.moqUnit||'',leadTimeDays:offer.leadTimeDays,
+          eligible:offer.status==='confirmed'&&offer.specApproved===true}))})):[],
     catalog:detail?store.catalog.map(offer=>({offerRef:offer.id,group:offer.group||'',name:offer.name||'',spec:offer.spec||'',vendor:offer.vendor||'',tierLabel:offer.tierId||'',price:offer.price,priceUnit:offer.priceUnit||'',moq:offer.moq,moqUnit:offer.moqUnit||'',leadTimeDays:offer.leadTimeDays,eligible:offer.status==='confirmed'&&offer.specApproved===true})):[],
     operationFormats:detail?costFormatList():[],
+    catalogGroups:detail?costCatalogGroups(store.catalog.map(offer=>({offerRef:offer.id,materialId:offer.materialId,group:offer.group||'',name:offer.name||'',spec:offer.spec||'',vendor:offer.vendor||'',tierLabel:offer.tierId||'',price:offer.price,priceUnit:offer.priceUnit||'',priceBasisQuantity:offer.priceBasisQuantity??1,moq:offer.moq,moqUnit:offer.moqUnit||'',leadTimeDays:offer.leadTimeDays,condition:offer.condition||'',eligible:offer.status==='confirmed'&&offer.specApproved===true}))):[],
     pkCandidate:(()=>{const candidate=costPkCandidate(entry.projectId,entry.scenarioId);
       return candidate&&caps.adoptPK&&!(scenario.pk&&scenario.pk.id===candidate.id&&scenario.pk.version===candidate.version)
         ?{snapshotRef:candidate.id+':'+candidate.version,versionLabel:String(candidate.version)+' · ยืนยันโดย '+candidate.confirmedBy}:null;})(),
@@ -1695,6 +1742,14 @@ async function costLocalRequest(action,payload){
     const offer=store.catalog.find(row=>row.id===payload.offerRef);
     if(!offer)throw Error('ไม่พบรายการที่เลือกในแคตตาล็อกของเครื่องนี้');
     patch={rmLines:scenario.rmLines.concat([{id:'L'+(scenario.rmLines.length+1)+'-'+Date.now().toString(36),materialId:offer.materialId,alias:offer.name||'',amount:null,unit:'g',lossPercent:0,offer}])};
+  }else if(action==='changeTier'){
+    // เปลี่ยน Tier ของบรรทัดที่ลงสูตรไปแล้ว โดยคงปริมาณ ชื่อแสดง และ loss เดิม
+    const line=scenario.rmLines.find(row=>row.id===payload.lineId);
+    if(!line)throw Error('ไม่พบรายการที่จะเปลี่ยน');
+    const offer=store.catalog.find(row=>row.id===payload.offerRef);
+    if(!offer)throw Error('ไม่พบ Tier ที่เลือกในแคตตาล็อกของเครื่องนี้');
+    if(offer.materialId!==line.materialId)throw Error('เปลี่ยนได้เฉพาะ Tier ของสารตัวเดียวกัน');
+    patch={rmLines:scenario.rmLines.map(row=>row.id===line.id?{...row,offer}:row)};
   }else if(action==='removeRM'){
     patch={rmLines:scenario.rmLines.filter(line=>line.id!==payload.lineId)};
   }else if(action==='requestMaterial'){
