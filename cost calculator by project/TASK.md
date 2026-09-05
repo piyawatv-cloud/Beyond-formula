@@ -22,6 +22,25 @@ This clarification changes documentation only. task_id: cost-calculator-implemen
 
 
 
+## Independent verification round — 2026-09-06 (Claude Code)
+
+รับช่วงตาม `docs/CLAUDE_CODE_HANDOFF.md` ตรวจสถานะจริงก่อนแก้ ไม่ reset ไม่รื้อของที่ผ่านแล้ว
+
+**ยืนยันคำกล่าวอ้างของ commit ก่อนหน้าด้วยการรันเอง** module 292/292 · calculator browser 14/14 · parent browser 37/37 · SQL 33 · `git diff --check` clean · skipped 0 ตรงกับที่รายงานไว้ทุกตัว
+
+**พิสูจน์ว่ากลไกใหม่สองตัวจับความพังได้จริง ไม่ใช่เขียวเพราะเลิกตรวจ**
+
+- *parent harness ที่เขียนใหม่* — ทำ mutation ให้ `esc()` ไม่ escape บนสำเนาใน `/tmp` แล้ว harness คืน exit 1 พร้อมระบุชื่อเทสต์ XSS ทั้งสองข้อ (35 ผ่าน 2 ล้ม) การเปลี่ยนจาก virtual-time เป็น real-time CDP polling จึงไม่ได้ลดอำนาจการตรวจ
+- *parity guard ระหว่าง canonical `.gs` กับสำเนาใน `index.html`* — แก้เพดานราคาใน canonical โดยไม่ sync แล้วเทสต์ `embedded browser adapters match canonical Apps Script byte-for-byte` ล้มทันที กฎสองชุดจึงแตกกันเงียบ ๆ ไม่ได้
+
+**ยืนยันคุณสมบัติตามข้อ 6 ของ handoff** ด้วย scenario ที่ไม่มี PK ไม่มีกฎราคา และไม่มีอัตรา Operation: บันทึก revision ได้ · เห็นและแก้ตาราง RM ได้ · แถบรวมปริมาณทำงาน · ได้ข้อความสรุปบางส่วน · และราคาต่อหน่วยถูกปิดไว้ถูกต้อง ข้อมูลที่ขาดจึงปิดเฉพาะความพร้อมด้านราคา ไม่ได้ปิดงาน draft
+
+**ยืนยันว่า `RmConfirmationAdapter` fail-closed** ทั้ง `preview` และ `apply` ปฏิเสธด้วย `REVIEWED_PILOT_BINDING_REQUIRED` เมื่อ binding เป็น null
+
+**ข้อ 1–3 ของ handoff ทำต่อไม่ได้** ตรวจแล้วไม่มี corrected Data Center export และไม่มี sanitized binding evidence อยู่ใน worktree จึงเดินท่อทั้งเส้นด้วยไฟล์สังเคราะห์แทน เพื่อพิสูจน์ความพร้อมและถอดข้อกำหนดของไฟล์ที่ต้องส่งมา บันทึกไว้ใน [ประเมิน RD Data Center](docs/RD_DATA_CENTER_ASSESSMENT.md) ท้ายไฟล์ — **ข้อค้นพบสำคัญคือถ้า export ขาดคอลัมน์ `Price Status` จะไม่มีแถวไหนใช้ได้เลย และรายงานจะขึ้นว่า "ยังไม่ confirmed" ซึ่งดูเหมือนปัญหาของข้อมูล ไม่ใช่ปัญหาของไฟล์**
+
+ไม่มีการเขียนลง Google Sheets · ไม่มีการอ่านข้อมูลธุรกิจจริง · ไม่มีตัวเลขธุรกิจถูกสร้างขึ้นแทนข้อมูลที่ไม่มี · สถานะทุก workstream ในตารางด้านบนไม่เปลี่ยน
+
 ## Current verified handoff — 2026-09-06
 
 Previous aggregate status: **LOCAL_VERIFIED / INTEGRATION_BLOCKED**; see the workstream statuses above. This section supersedes historical implementation counts and server-gateway descriptions below. The accepted architecture remains ADR 0002: local-first calculator and display-level role projections. This is not confidential server-side isolation and is not a 27/27 production completion claim.
