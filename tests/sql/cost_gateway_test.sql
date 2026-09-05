@@ -424,7 +424,7 @@ declare
     {"role":"ra",        "uid":"eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee","denied":true},
     {"role":"mkt",       "uid":"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb","denied":true}
   ]'::jsonb;
-  item jsonb; caps jsonb; expected jsonb; covered text[];
+  item jsonb; caps jsonb; expected jsonb; covered text[]; schema_roles text[]; missing text;
 begin
   for item in select value from jsonb_array_elements(spec) loop
     perform set_config('request.jwt.claim.sub', item->>'uid', true);
@@ -447,13 +447,23 @@ begin
   end loop;
 
   -- Any role value the schema permits but this snapshot does not list would go
-  -- unreviewed, so fail if the two ever drift apart.
-  select array_agg(value->>'role' order by value->>'role') into covered from jsonb_array_elements(spec);
-  if exists (
-    select 1 from unnest(array['admin','pd','ra','rd','sales','opc','mkt','purchasing']) role_value
-    where role_value <> all(covered)
-  ) then
-    raise exception 'a schema role value is missing from the capability snapshot';
+  -- unreviewed, so read the permitted values out of the fs_memberships role
+  -- check constraint itself and fail if the two ever drift apart. Reading the
+  -- constraint rather than repeating the list keeps this check honest when a
+  -- new role value is added to the schema.
+  select array_agg(value->>'role') into covered from jsonb_array_elements(spec);
+  select array_agg(distinct m[1]) into schema_roles
+  from pg_constraint c,
+       lateral regexp_matches(pg_get_constraintdef(c.oid), '''([a-z_]+)''', 'g') m
+  where c.conrelid = 'public.fs_memberships'::regclass
+    and c.contype = 'c'
+    and pg_get_constraintdef(c.oid) like '%role%';
+  if schema_roles is null or array_length(schema_roles,1) < 2 then
+    raise exception 'could not read the fs_memberships role check constraint';
+  end if;
+  select string_agg(r, ', ' order by r) into missing from unnest(schema_roles) r where r <> all(covered);
+  if missing is not null then
+    raise exception 'schema role values missing from the capability snapshot: %', missing;
   end if;
 end $$;
 commit;

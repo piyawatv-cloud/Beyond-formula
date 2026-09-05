@@ -154,6 +154,8 @@ Same task label; still no Issue/PR, no Notion, no deployment, gateway never enab
 - [x] Pin the capability surface of every schema role value with an exact-object snapshot test, plus a drift check that fails if a role allowed by the `fs_memberships` role check is missing from the snapshot
 - [x] Mutation-test that guard twice: granting `rd` a `viewRevision` and adding a new `rawPkView` capability key are both caught, the second with an explicit expected-versus-got diff
 - [x] Pin the fresh-open client contract (`scenarioId: null`, `expectedRevision: null`) and server-resolved scenario adoption with two client tests
+- [x] Replace the hand-written role list in the drift check with `pg_get_constraintdef` on the `fs_memberships` role check, so a role added to the schema and not to the snapshot fails by name; mutation-tested by dropping `mkt` from the snapshot
+- [x] Record that the browser entry gate is still the legacy `chat` permission, so rule 8's three-layer requirement is met by the RPCs rather than the client
 
 Code changes: `tests/sql/cost_gateway_test.sql` (+1 snapshot check, 33 total), `tests/cost-calculator-ui.test.js` (+2 client tests, 99 module tests total). No migration or application change in this round.
 
