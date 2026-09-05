@@ -664,7 +664,7 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
   <div class="logo"><svg viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-1.73-3L9 11.35V4H8a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2h-1v7.35L19.73 19A2 2 0 0 1 18 22H6Zm5-10.11L8.31 16.5h7.38L13 11.89V4h-2v7.89Z"/></svg></div>
   <div>
     <div class="hdr-title">Formula Studio</div>
-    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-05.6-rm-check</div>
+    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-05.7-pricing-rule</div>
   </div>
   <div class="sync-chip" id="syncChip" onclick="sbManualSync()" title="สถานะการซิงก์ข้อมูลกับเซิร์ฟเวอร์กลาง"></div>
 </div>
@@ -1201,10 +1201,21 @@ var CostCalculator = (() => {
   }
   function adjusted(base,policy,asOf,basis) {
     if (!num(base) || !policyReady(policy,asOf,basis)) return null;
+    // ค่าเผื่อขั้นต้น: an allowance on the base, set in the pricing rule. It is a
+    // commercial buffer and is NOT process loss — per-line lossPercent already
+    // raises the required quantity. Applying both is intentional only if the
+    // owner says so; the two are deliberately separate inputs.
+    const allowance=Object.prototype.hasOwnProperty.call(policy,'allowanceRate')?policy.allowanceRate:0;
+    if (!num(allowance)) return null;
+    const buffered=finite(base*(1+allowance));
+    if (buffered===null) return null;
     let result=null;
-    if (policy.mode==='passthrough') result=base;
-    else if (num(policy.rate) && policy.mode==='markup') result=finite(base*(1+policy.rate));
-    else if (num(policy.rate) && policy.mode==='margin' && policy.rate<1) result=finite(base/(1-policy.rate));
+    if (policy.mode==='passthrough') result=buffered;
+    // 'factor' multiplies directly, so a policy record reads 2.2 when the sheet
+    // and the owner both say 2.2. 'markup' keeps its original +rate meaning.
+    else if (num(policy.rate) && policy.mode==='factor' && policy.rate>0) result=finite(buffered*policy.rate);
+    else if (num(policy.rate) && policy.mode==='markup') result=finite(buffered*(1+policy.rate));
+    else if (num(policy.rate) && policy.mode==='margin' && policy.rate<1) result=finite(buffered/(1-policy.rate));
     return rounded(result,policy.rounding);
   }
   function calculate(s,asOf) {
@@ -1243,7 +1254,8 @@ var CostCalculator = (() => {
     const formulaComplete=!!(lines.length && num(formulaKg) && num(fillKg,true) && Math.abs(formulaKg-fillKg)<=Math.max(1e-12,fillKg*1e-9));
     if (!formulaComplete) pending.push('ปริมาณ RM ในสูตรยังไม่ตรงกับขนาดบรรจุ');
     rm.ready=rm.ready && formulaComplete && num(rm.baseTotal) && num(rm.purchaseCash) && num(rm.leftoverExposure);
-    const sourceSteps=Array.isArray(s.operation?.steps)?s.operation.steps:[s.operation || {}];
+    const standardRateOnly=s.operation?.mode==='standardRateOnly';
+    const sourceSteps=standardRateOnly?[]:(Array.isArray(s.operation?.steps)?s.operation.steps:[s.operation || {}]);
     const stepIds=new Set();
     const steps=sourceSteps.map(op=>{
       const step={id:op.id || null,version:op.version || null,batches:null,baseTotal:null,ready:false};
@@ -1256,9 +1268,9 @@ var CostCalculator = (() => {
       if(step.id)stepIds.add(step.id);
       return step;
     });
-    const operation={steps,baseTotal:steps.length?sum(steps.map(step=>step.baseTotal)):null,ready:steps.length>0 && steps.every(step=>step.ready),batches:steps.length===1?steps[0].batches:null};
+    const operation={steps,baseTotal:standardRateOnly?0:(steps.length?sum(steps.map(step=>step.baseTotal)):null),ready:standardRateOnly?true:(steps.length>0 && steps.every(step=>step.ready)),batches:steps.length===1?steps[0].batches:null};
     if (!num(operation.baseTotal))operation.ready=false;
-    if (!operation.ready) pending.push('รอ routing/STD version เจ้าของอัตรา หน่วย หรือยืนยันอัตรา');
+    if (!standardRateOnly && !operation.ready) pending.push('รอ routing/STD version เจ้าของอัตรา หน่วย หรือยืนยันอัตรา');
     let extrasReady=s.extrasReviewed===true, separateCharges=0;
     const feeIds=new Set();
     for (const e of s.extraCosts || []) {
@@ -1275,12 +1287,24 @@ var CostCalculator = (() => {
       else { const target=e.category==='RM'?rm:operation; if(target.baseTotal!==null)target.baseTotal=sum([target.baseTotal,cost]); if(target.baseTotal===null){target.ready=false;extrasReady=false;} }
     }
     if (!extrasReady) pending.push('ค่าใช้จ่ายเฉพาะงาน: รอข้อมูลหรือแก้รายการซ้ำ');
+    if (standardRateOnly) {
+      operation.ready=extrasReady && num(operation.baseTotal) && operation.baseTotal>0;
+      // Drop the placeholder zero when the rates are not confirmed. Leaving it at
+      // 0 would let the category total add up and produce a final unit price for a
+      // scenario whose Operation cost is simply unknown.
+      if (!operation.ready) { operation.baseTotal=null; pending.push('รออัตรามาตรฐาน Operation ที่ยืนยันแล้ว'); }
+    }
     // Separate collection is not silently priced at raw cost. Owner-defined fee
     // pricing is a distinct commercial input; until provided only drafts can use it.
     const separatePricingReady=separateCharges===0;
     if (!separatePricingReady) pending.push('รอกำหนดราคาขายสำหรับค่าใช้จ่ายที่เรียกเก็บแยก');
-    const p=s.pk, matches=pkMatches(s,p,asOf), pk={baseTotal:matches && num(p.baseTotal)?p.baseTotal:null,adjustedTotal:matches && num(p.adjustedTotal)?p.adjustedTotal:null,ready:!!(currencyOK && p?.currency==='THB' && matches && p.status==='confirmed' && p.evidenceRef && num(p.baseTotal) && num(p.adjustedTotal)),snapshotId:p?.id || null,version:p?.version || null};
-    if (!pk.ready) pending.push('PK: รอยืนยันหรือรอเวอร์ชันที่ตรงเงื่อนไข');
+    // An explicit human declaration that this product has no separate PK category
+    // — the current cost form folds packaging into per-unit charges. Declared, not
+    // inferred: a merely absent PK still blocks, so a forgotten PK cannot read as
+    // zero. The two cannot be combined.
+    const pkNotApplicable=s.pkNotApplicable===true && !s.pk;
+    const p=s.pk, matches=pkMatches(s,p,asOf), pk=pkNotApplicable?{baseTotal:0,adjustedTotal:0,ready:true,notApplicable:true}:{baseTotal:matches && num(p.baseTotal)?p.baseTotal:null,adjustedTotal:matches && num(p.adjustedTotal)?p.adjustedTotal:null,ready:!!(currencyOK && p?.currency==='THB' && matches && p.status==='confirmed' && p.evidenceRef && num(p.baseTotal) && num(p.adjustedTotal)),snapshotId:p?.id || null,version:p?.version || null};
+    if (!pk.ready && !pkNotApplicable) pending.push('PK: รอยืนยันหรือรอเวอร์ชันที่ตรงเงื่อนไข');
     const policies=s.policies || {};
     rm.adjustedTotal=adjusted(rm.baseTotal,policies.RM,asOf,'categoryTotal');
     operation.adjustedTotal=adjusted(operation.baseTotal,policies.Operation,asOf,'categoryTotal');
