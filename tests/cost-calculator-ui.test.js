@@ -98,3 +98,48 @@ test('ยังไม่มีข้อมูลหรือยังไม่�
   c.costSearchChanged('อะไรก็ได้');
   assert.equal(c.run('costState.search'),'อะไรก็ได้','ต้องไม่ล้มเมื่อยังไม่มีข้อมูล');
 });
+
+test('รายการค้างถูกจัดกลุ่มตามคนที่ต้องลงมือ ไม่กองรวมกัน',()=>{
+  const c=fixture();
+  const groups=c.run(`costPendingGroups(${JSON.stringify([
+    'รอกำหนดราคา','RM 1: รอข้อมูลหรือยืนยันเงื่อนไข','PK: รอยืนยันหรือรอเวอร์ชันที่ตรงเงื่อนไข',
+    'ปริมาณ RM ในสูตรยังไม่ตรงกับขนาดบรรจุ','ฝ่ายผลิตและผู้ดูแลต้นทุนยังไม่ได้ยืนยันขั้นตอนผลิตและอัตราค่าดำเนินการ'])})`);
+  const own=groups.map(g=>g.owner);
+  assert.equal(own[0],'คุณทำต่อได้เลย','สิ่งที่ RD แก้เองได้ต้องอยู่บนสุด');
+  assert.equal(groups[0].items.length,2);
+  assert.ok(own.includes('รอ PU-PK')&&own.includes('รอผู้ดูแลด้านราคา (Finance หรือ CEO)'));
+  assert.equal(groups.reduce((a,g)=>a+g.items.length,0),5,'ต้องไม่มีรายการไหนหายไป');
+});
+test('ทุกข้อความค้างที่เครื่องคำนวณสร้างได้ ต้องมีเจ้าของ ไม่ตกลงถังรวม',()=>{
+  // ถ้ามีคนเพิ่มข้อความใหม่ในเครื่องคำนวณแล้วลืมระบุเจ้าของ เทสต์นี้จะจับได้ทันที
+  const core=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8')
+    .match(/\/\/ COST_CALCULATOR_CORE_START([\s\S]*?)\/\/ COST_CALCULATOR_CORE_END/)[1];
+  const literals=[...core.matchAll(/pending\.push\(\s*(?:[^)]*?\?\s*)?'([^']{6,})'/g)].map(m=>m[1]);
+  assert.ok(literals.length>=8,'ต้องอ่านข้อความออกได้จริง พบ '+literals.length);
+  const c=fixture();
+  const orphan=literals.filter(t=>c.run(`costPendingOwner(${JSON.stringify(t)})`)==='รอตรวจสอบ');
+  assert.deepEqual(orphan,[],'ข้อความที่ยังไม่มีเจ้าของ: '+orphan.join(' | '));
+  assert.equal(c.run(`costPendingOwner('ข้อความที่ไม่เคยมีมาก่อน')`),'รอตรวจสอบ',
+    'ข้อความที่ไม่รู้จักต้องยังแสดง ไม่ใช่หายเงียบ');
+});
+
+test('หน้าที่วาดออกมาเรียงตามลำดับการทำงานจริง และรายการค้างแสดงเจ้าของ',async()=>{
+  const c=fixture();
+  const r=c.response();
+  r.view.pending=['RM 1: รอข้อมูลหรือยืนยันเงื่อนไข','PK: รอยืนยันหรือรอเวอร์ชันที่ตรงเงื่อนไข'];
+  r.catalog=[{offerRef:'O1',name:'อัลฟาสกัด',vendor:'ผ1',tierLabel:'1 kg',price:100,
+    priceBasisQuantity:1,priceUnit:'kg',moq:1,moqUnit:'kg',leadTimeDays:14,eligible:true,missing:[]}];
+  c.window.__costTestRequest=()=>r;
+  await c.openCostCalculator('A00001');
+  const html=c.panel.innerHTML;
+  // ยังไม่ได้ค้นหาก็ยังไม่มี RM ที่เลือก ตารางค้นหาจึงต้องมาก่อน
+  // ถ้าสลับกัน RD ต้องเลื่อนลงไปหาแล้วเลื่อนกลับขึ้นมาบันทึกทุกรายการ
+  const search=html.indexOf('ค้นหาและเทียบ RM'),selected=html.indexOf('RM ที่เลือก');
+  const save=html.indexOf('บันทึก revision');
+  assert.ok(search>=0&&selected>=0&&save>=0,'ต้องมีครบทั้งสามส่วน');
+  assert.ok(search<selected,'ตารางค้นหาต้องอยู่เหนือ RM ที่เลือก');
+  assert.ok(selected<save,'ปุ่มบันทึกต้องอยู่ท้ายสุดของกลุ่ม ไม่ใช่ก่อนตารางที่ต้องกรอก');
+  assert.ok(html.includes('คุณทำต่อได้เลย'),'รายการที่ RD แก้เองได้ต้องมีหัวข้อกำกับ');
+  assert.ok(html.includes('รอ PU-PK'),'รายการที่ต้องรอคนอื่นต้องบอกว่ารอใคร');
+  assert.ok(html.indexOf('คุณทำต่อได้เลย')<html.indexOf('รอ PU-PK'),'สิ่งที่ทำเองได้ต้องอยู่บนสุด');
+});
