@@ -12,9 +12,12 @@
 var RmPriceSource = (function () {
   'use strict';
   var MASS = {kg:1, g:0.001, mg:0.000001};
+  var PRICE_MAX_PER_KG = 100000;   // เพดานเดียวกับ RmSourceMap ที่เจ้าของระบบให้ไว้
   function text(v) { return v === null || v === undefined ? '' : String(v).trim(); }
   function norm(v) {
-    return text(v).toLowerCase().replace(/[®™()\[\]{}.,\-_\/\\%]/g, ' ').replace(/\s+/g, ' ').trim();
+    // ไม่ตัด % ออก เพราะ "Acid 50%" กับ "Acid 50" เป็นคนละความเข้มข้น
+    // เดิมตัดทิ้งแล้วสองตัวยุบเป็นวัสดุเดียว ชื่อของตัวหลังหายไปและราคากลายเป็น Tier ของตัวแรก
+    return text(v).toLowerCase().replace(/[®™()\[\]{}.,\-_\/\\]/g, ' ').replace(/\s+/g, ' ').trim();
   }
   // ตัวตนที่คงที่ข้ามการนำเข้าแต่ละรอบ ต้องได้ค่าเดิมเสมอเมื่อชื่อและผู้ขายเดิม
   function materialKey(supplier, name) {
@@ -26,10 +29,14 @@ var RmPriceSource = (function () {
   function priceOf(raw) {
     // รูปแบบที่พบจริง: ตัวเลขล้วน · N/kg · N thb/kg · N baht — ทั้งหมดเป็นราคาต่อกิโลกรัม
     var s = text(raw).replace(/,/g, '');
-    var m = s.match(/^(?:thb\s*|฿\s*)?(\d+(?:\.\d+)?)\s*(?:(?:thb|baht|บาท)?\s*\/?\s*(kg|kilo|กก\.?|กิโล)?)?\.?$/i);
+    // หน่วยน้ำหนักจะยอมรับได้ก็ต่อเมื่อมี "/" หรือคำบอกสกุลเงินนำหน้า มิฉะนั้น "25 kg"
+    // ซึ่งเป็นค่าของคอลัมน์ MOQ จะถูกอ่านเป็นราคา 25 เมื่อคอลัมน์สลับกัน ต่ำกว่าจริง 50 เท่า
+    var m = s.match(/^(?:thb\s*|฿\s*)?(\d+(?:\.\d+)?)\s*(?:(?:thb|baht|บาท)\s*)?(?:\/\s*(?:kg|kilo|กก\.?|กิโล))?\.?$/i);
     if (!m) return null;
     var n = Number(m[1]);
-    return isFinite(n) && n > 0 ? n : null;
+    if (!isFinite(n) || n <= 0) return null;
+    // ราคาที่ทะลุเพดานมักเกิดจากวางราคาต่อถุงลงช่องราคาต่อกิโล ปฏิเสธดีกว่าปล่อยผ่าน
+    return n > PRICE_MAX_PER_KG ? null : n;
   }
   function moqOf(raw) {
     var s = text(raw).replace(/,/g, '').replace(/^moq\s*/i, '').replace(/^repack\s+moq\s*/i, '');
@@ -38,23 +45,34 @@ var RmPriceSource = (function () {
     var range = s.match(/^(\d+(?:\.\d+)?)\s*[-–]\s*(\d+(?:\.\d+)?)\s*([a-zA-Zก-๙]+)?\.?$/);
     if (range) {
       var unit = (range[3] || 'kg').toLowerCase();
-      if (!MASS[unit]) return null;
+      if (!Object.prototype.hasOwnProperty.call(MASS, unit)) return null;
       var lo = Number(range[1]), hi = Number(range[2]);
-      if (!(hi > lo)) return null;                       // 10-1 หรือ 5-5 อ่านไม่ได้ ไม่เดา
-      return {quantity:lo, unit:unit, fromRange:true, rangeUpper:hi};
+      if (!(lo > 0) || !(hi > lo)) return null;          // 10-1 · 5-5 · 0-10 อ่านไม่ได้ ไม่เดา
+      // ช่วงที่ไม่มีหน่วยก็เดาว่าเป็นกิโลกรัมเหมือนกัน จึงต้องติดเครื่องหมายด้วย
+      var r = {quantity:lo, unit:unit, fromRange:true, rangeUpper:hi};
+      if (!range[3]) r.assumedUnit = true;
+      return r;
     }
     var one = s.match(/^(\d+(?:\.\d+)?)\s*([a-zA-Zก-๙]+)?\.?$/);
     if (!one) return null;
     var u = (one[2] || '').toLowerCase();
-    if (u === '') return {quantity:Number(one[1]), unit:'kg', assumedUnit:true};
-    if (!MASS[u]) return null;
-    return {quantity:Number(one[1]), unit:u};
+    var q = Number(one[1]);
+    if (!(q > 0)) return null;                           // MOQ ศูนย์ไม่มีความหมาย
+    if (u === '') return {quantity:q, unit:'kg', assumedUnit:true};
+    if (!Object.prototype.hasOwnProperty.call(MASS, u)) return null;
+    return {quantity:q, unit:u};
   }
   // rows = ตารางราคา · codes = ตาราง RD-Code (ไม่บังคับ) · options.priceValidDays = อายุราคา
   function build(rows, codes, options) {
     var opts = options || {};
-    var validDays = opts.priceValidDays;
-    var asOf = text(opts.asOf);
+    // ต้องเป็นตัวเลขและวันที่ที่ใช้ได้จริง มิฉะนั้น addDays จะโยน RangeError ทิ้งทั้งการนำเข้า
+    // หรือแย่กว่านั้นคือติดป้ายว่าใช้นโยบายแล้วทั้งที่ไม่มีวันหมดอายุติดไปเลย
+    var days = Number(opts.priceValidDays);
+    var rawAsOf = text(opts.asOf);
+    var validPolicy = isFinite(days) && days > 0 && /^\d{4}-\d{2}-\d{2}$/.test(rawAsOf)
+      && !isNaN(new Date(rawAsOf + 'T00:00:00Z').getTime());
+    var validDays = validPolicy ? days : null;
+    var asOf = validPolicy ? rawAsOf : '';
     var codeByName = {};
     (codes || []).forEach(function (c) {
       var k = norm(c['Ingredients Name']);
@@ -64,7 +82,12 @@ var RmPriceSource = (function () {
     (rows || []).forEach(function (row, index) {
       var name = text(row['Name']), supplier = text(row['Supplier']);
       var rawPrice = text(row['Price/kg']), rawMoq = text(row['MOQ']);
-      if (!name) return;                                   // แถวว่าง ไม่ใช่ข้อผิดพลาด
+      // แถวว่างสนิทข้ามได้ แต่แถวที่มีราคาหรือผู้ขายแล้วไม่มีชื่อ ต้องนับไว้
+      // มิฉะนั้น offers + skipped จะไม่เท่ากับจำนวนแถว แล้วไล่ตรวจไม่ได้ว่าหายไปไหน
+      if (!name) {
+        if (rawPrice || supplier || rawMoq) skipped.push({row:index + 2, reason:'ไม่มีชื่อสาร'});
+        return;
+      }
       if (!rawPrice) { skipped.push({row:index + 2, reason:'ยังไม่มีราคา'}); return; }
       // ไม่มีผู้ขาย = ระบุตัวตนไม่ได้ ถ้าเดาให้เป็น "ไม่ระบุ" สองแถวคนละเจ้าจะยุบเป็น
       // วัสดุตัวเดียวแล้วเอาราคาสองเจ้ามาเรียงเป็นบันไดราคาเดียว ซึ่งซื้อจริงไม่ได้
@@ -84,15 +107,20 @@ var RmPriceSource = (function () {
       var g = groups[key];
       materials++;
       // Tier เรียงตาม MOQ จากน้อยไปมาก เพื่อให้หมายเลข Tier คงที่ทุกรอบการนำเข้า
-      g.offers.sort(function (a, b) { return a.moq.quantity - b.moq.quantity || a.price - b.price; });
+      // เรียงตามน้ำหนักจริง ไม่ใช่ตัวเลขดิบ มิฉะนั้น 500 g จะไปอยู่หลัง 25 kg
+      var kg = function (m) { return m.moq.quantity * MASS[m.moq.unit]; };
+      g.offers.sort(function (a, b) { return kg(a) - kg(b) || a.price - b.price; });
       g.offers.forEach(function (o) {
         var notes = [];
         if (o.moq.fromRange) notes.push('MOQ_FROM_RANGE');
         if (o.moq.assumedUnit) notes.push('MOQ_UNIT_ASSUMED_KG');
         // รหัสผูกกับปริมาณขั้นต่ำ ไม่ใช่ลำดับที่เรียงได้ การเติมแถวราคาแบ่งขายเข้ามา
         // ใหม่จึงไม่ทำให้รหัสของ Tier เดิมเลื่อน ซึ่งเคยทำให้การรับรอง spec ไปเกาะราคาผิดตัว
-        var moqKg = o.moq.quantity * MASS[o.moq.unit];
-        var slug = String(Math.round(moqKg * 1000)) + 'G';
+        // ไมโครกรัมเพื่อไม่ให้ MOQ ที่เล็กกว่ากรัมยุบเป็น 0 เหมือนกันหมด และผูกราคาไว้ด้วย
+        // เพราะสองแถวที่ MOQ เท่ากันแต่ราคาต่างกันเป็นคนละข้อเสนอ ถ้ารหัสชนกัน
+        // ตัวนำเข้าจะปฏิเสธทั้งไฟล์ ไม่ใช่แค่แถวนั้น
+        var moqUg = Math.round(o.moq.quantity * MASS[o.moq.unit] * 1e6);
+        var slug = moqUg + 'UG-' + String(Math.round(o.price * 1000)) + 'M';
         offers.push({
           id: key + '-' + slug, version: 1, tierId: o.moq.quantity + ' ' + o.moq.unit,
           materialId: key, rdCode: g.rdCode,
