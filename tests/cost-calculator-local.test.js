@@ -606,3 +606,20 @@ test('หน้าจอบอกว่าแคตตาล็อกมาจ�
  assert.match(ui,/แคตตาล็อกเก็บแยกในแต่ละเครื่อง/,'ต้องเตือนบนหน้าจอว่าเครื่องอื่นอาจใช้คนละชุด');
  const s=fixture('sales','Synthetic Sales');s.backing.fs_cost=c.backing.fs_cost;
  assert.equal((await s.costLocalRequest('open',{projectId:'A00001'})).catalogSource,null,'Sales ไม่ต้องเห็นที่มาของแคตตาล็อก');});
+
+// บันทึกพฤติกรรมการนำเข้าซ้ำไว้ให้เห็นชัด ไม่ใช่การรับรองว่าถูกต้อง
+// การตัดสินว่าการรับรอง spec ควรอยู่ต่อเมื่อราคาเปลี่ยนหรือไม่ เป็นของเจ้าของข้อมูล
+test('นำเข้าซ้ำด้วยรหัสเดิมทับของเดิมทั้งก้อน ไม่สร้างรายการซ้ำ แต่ล้างการยืนยันของจัดซื้อ',()=>{
+  const c=fixture();
+  c.loadCostStore().catalog.push({...offer,id:'RMS-AAA-5000000UG',materialId:'RMS-AAA',price:1000});
+  c.saveCostStore();
+  c.costApplyCatalog({offers:[{...offer,id:'RMS-AAA-5000000UG',materialId:'RMS-AAA',price:1050,
+    status:'review',specApproved:null,leadTimeDays:null,validUntil:''}],
+    rejected:[],replaceMaterialIds:['RMS-AAA']},'รอบสอง.xlsx');
+  const after=c.loadCostStore().catalog;
+  assert.equal(after.length,1,'รหัสที่เสถียรทำให้ทับของเดิม ไม่ทิ้งรายการกำพร้าไว้');
+  assert.equal(after[0].price,1050,'ราคาใหม่ต้องเข้ามาจริง');
+  assert.equal(after[0].specApproved,null,'พฤติกรรมปัจจุบัน: การรับรองไม่ถูกยกมา');
+  assert.equal(after[0].leadTimeDays,null,'พฤติกรรมปัจจุบัน: Lead Time ไม่ถูกยกมา');
+  assert.equal(after[0].status,'review','ยังคิดต้นทุนไม่ได้จนกว่าจะยืนยันใหม่');
+});
