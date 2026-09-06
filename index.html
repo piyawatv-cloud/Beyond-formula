@@ -668,7 +668,7 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
   <div class="logo"><svg viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-1.73-3L9 11.35V4H8a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2h-1v7.35L19.73 19A2 2 0 0 1 18 22H6Zm5-10.11L8.31 16.5h7.38L13 11.89V4h-2v7.89Z"/></svg></div>
   <div>
     <div class="hdr-title">Formula Studio</div>
-    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-06.1-workflow-completion</div>
+    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-06.2-pk-authority</div>
   </div>
   <div class="sync-chip" id="syncChip" onclick="sbManualSync()" title="สถานะการซิงก์ข้อมูลกับเซิร์ฟเวอร์กลาง"></div>
 </div>
@@ -1741,13 +1741,14 @@ function renderCostCalculator(){
     <h3>ค้นหาและเทียบ RM ใน Data Center</h3><label class="flbl" for="costSearch">ชื่อ / กลุ่ม / spec / vendor</label><input class="fi" id="costSearch" value="${esc(costState.search)}" placeholder="ค้นหาชื่อใกล้เคียงแล้วเทียบ spec" oninput="costSearchChanged(this.value)">
     <div class="rec-wrap"><table class="rec-tbl"><thead><tr><th>กลุ่ม / วัสดุ</th><th>Spec</th><th>Vendor</th><th>Tier · ราคาและ MOQ</th><th>LT</th><th></th></tr></thead><tbody>${groups.map(g=>`<tr><td colspan="6" class="cost-group">${esc(g.label)}${g.count>1?` · ${g.count} ตัวเลือกที่ชื่อใกล้เคียงกัน`:''}</td></tr>`+g.offers.map(item=>`<tr><td>${esc(item.group||'')}<br><b>${esc(item.name||'')}</b></td><td>${esc(item.spec||'')}</td><td>${esc(item.vendor||'')}</td><td>${esc(item.tierLabel||'')}<br>${costNumber(item.price)} บาท ต่อ ${costNumber(item.priceBasisQuantity)} ${esc(item.priceUnit||'')}<br>MOQ ${costNumber(item.moq)} ${esc(item.moqUnit||'')}${item.condition?`<br><span class="hint">${esc(item.condition)}</span>`:''}</td><td>${costNumber(item.leadTimeDays)} วัน</td><td><button class="btn btn-s" ${disabled||!item.eligible?'disabled':''} onclick="costSelectRef('${esc(item.offerRef)}')">${item.eligible?'เลือก Tier นี้':'ใช้ไม่ได้'}</button>${item.missing&&item.missing.length?`<br><span class="hint">ขาด ${esc(item.missing.join(' · '))}</span>`:''}</td></tr>`).join('')).join('')||'<tr><td colspan="6">ไม่พบรายการที่ตรง — ส่งคำขอจัดหาได้โดยไม่เพิ่มราคาสมมติ</td></tr>'}</tbody></table></div>
     <p class="hint">ระบบไม่เลือก Tier ให้ · เรียงจากราคาต่ำไปสูงเพื่อให้เทียบง่ายเท่านั้น · เลือกแล้วยังเปลี่ยนได้ภายหลัง</p>
+    <p class="hint">${data.catalogSource?`แคตตาล็อกชุดนี้มาจากไฟล์ <b>${esc(data.catalogSource.file)}</b> · นำเข้าโดย ${esc(data.catalogSource.by)} เมื่อ ${esc(String(data.catalogSource.at).slice(0,16).replace('T',' '))} · ${esc(data.catalogSource.total)} รายการ<br>แคตตาล็อกเก็บแยกในแต่ละเครื่อง เครื่องอื่นอาจใช้ไฟล์คนละชุด ตรวจบรรทัดนี้ให้ตรงกันก่อนเทียบราคากับคนอื่น`:'ยังไม่เคยนำเข้าแคตตาล็อกในเครื่องนี้'}</p>
     <p class="hint">แคตตาล็อกในเครื่องนี้มี ${catalog.length} รายการ · นำเข้าไฟล์จาก Procurement เพื่อเพิ่ม/อัปเดต</p>
     <input type="file" id="costCatalogFile" accept=".xlsx,.xls,.csv" style="display:none" onchange="costImportCatalogFile(this.files[0])">
     <button class="btn btn-s" ${disabled} onclick="document.getElementById('costCatalogFile').click()">นำเข้าแคตตาล็อก RM (Excel/CSV)</button>
     <label class="flbl" for="costRequestBrief">รายละเอียดวัสดุ / spec ที่ต้องการเพิ่มเติม</label><textarea id="costRequestBrief" class="fi" rows="2">${esc(costDraftValue("costRequestBrief",""))}</textarea><button class="btn btn-s" ${disabled} onclick="costRequestMaterial()">บันทึกคำขอจัดหาให้ Procurement</button>`:''}
     ${data.requests?`<h3>คำขอจัดหาของโครงการ</h3><p class="hint">บันทึกไว้ในเครื่องนี้ ยังไม่ได้ส่งข้อความหรืออีเมลถึง Procurement</p><ul>${data.requests.map(request=>`<li><b>${esc(request.status==='open'?'รอจัดหา':request.status)}</b> · ${esc(request.brief)} · revision ${esc(request.revision)} · ${esc(request.by)} · ${esc(request.at)}</li>`).join('')||'<li>ยังไม่มีคำขอจัดหา</li>'}</ul>`:''}
     <h3>ผล PK</h3><p>${esc(data.pkNotice||'ยังไม่มีผล PK ที่ยืนยันแล้ว สูตรและ RM ทำต่อได้')}</p>${data.pkCandidate&&data.capabilities&&data.capabilities.adoptPK?`<button class="btn btn-s" ${disabled} onclick="costAdoptPK()">นำ PK เวอร์ชัน ${esc(data.pkCandidate.versionLabel)} มาใช้</button>`:''}
-    ${data.capabilities&&data.capabilities.adoptPK?`<p class="hint">กรอกยอดที่ PU-PK ยืนยันแล้วเท่านั้น ระบบบันทึกผู้กรอกและเวลาเป็นหลักฐาน และไม่แก้ย้อนหลัง</p>
+    ${data.capabilities&&data.capabilities.recordPK?`<p class="hint">กรอกยอดที่ PU-PK ยืนยันแล้วเท่านั้น ระบบบันทึกผู้กรอกและเวลาเป็นหลักฐาน และไม่แก้ย้อนหลัง</p>
     <div class="fg4">${costField('ยอด PK หลังบวก (บาท/ล็อต)','costPkAdjusted',null,'เว้นว่างได้ถ้ายังไม่มีนโยบายราคา')}${costField('ยอด PK ต้นทุนใช้จริง (บาท/ล็อต)','costPkBase',null,'เว้นว่างได้ถ้ายังไม่ทราบ')}${costTextField('ราคามีผลถึง','costPkValidUntil',null,'YYYY-MM-DD')}${costTextField('เลขอ้างอิงหลักฐาน','costPkEvidence',null,'เช่น เลข Req-PK')}</div>
     <button class="btn btn-s" ${disabled} onclick="costSavePk()">บันทึกผล PK ที่ยืนยันแล้ว</button>`:''}
     ${!(data.capabilities&&data.capabilities.setPricing)?'':`<h3>กฎการบวกราคา</h3>${data.pricingRule?`<p class="hint">ใช้อยู่: เวอร์ชัน ${esc(data.pricingRule.version)} · ค่าเผื่อขั้นต้น ${esc(data.pricingRule.allowancePercent)}% · ตัวคูณ ${esc(data.pricingRule.factor)} · ผู้รับผิดชอบ ${esc(data.pricingRule.owner)} · ใช้ได้ถึง ${esc(data.pricingRule.validUntil)}</p>`:'<p class="cost-warning">ยังไม่ได้กำหนดกฎการบวกราคา จึงยังไม่มีราคาต่อหน่วย</p>'}
@@ -1807,7 +1808,7 @@ async function costImportCatalogFile(file){
     const buffer=await file.arrayBuffer();
     if(identity!==costIdentity()||sequence!==costState.sequence||projectId!==costState.projectId)return;
     const workbook=XLSX.read(new Uint8Array(buffer),{type:'array'});
-    const parsed=costParseCatalogWorkbook(workbook),applied=costApplyCatalog(parsed);
+    const parsed=costParseCatalogWorkbook(workbook),applied=costApplyCatalog(parsed,file&&file.name);
     const notice=applied.rejected.length
       ?`นำเข้า ${applied.added} รายการ · ข้าม ${applied.rejected.length} แถว: `+applied.rejected.slice(0,5).map(r=>`แถว ${r.row} (${r.reason})`).join(' · ')
       :`นำเข้า ${applied.added} รายการ · รวมในเครื่อง ${applied.total} รายการ`;
@@ -1854,7 +1855,7 @@ function costSavePricingRule(){
   return costAction('open',{});
 }
 function costSavePk(){
-  const data=costState.response;if(!data||!data.capabilities.adoptPK||data.historical)return;
+  const data=costState.response;if(!data||!data.capabilities.recordPK||data.historical)return;
   const text=id=>{const el=document.getElementById(id);return el?el.value.trim():'';};
   try{
     costRecordPk(costState.projectId,data.scenarioId,{adjustedTotal:costInputNumber('costPkAdjusted'),baseTotal:costInputNumber('costPkBase'),validUntil:text('costPkValidUntil'),evidenceRef:text('costPkEvidence')});
@@ -1879,7 +1880,7 @@ const COST_ROLE_DEFAULTS={admin:['RD','Procurement RM','PU-PK','Production','Fin
 const COST_PRICING_ROLES=['Finance','CEO'];
 const COST_ROLE_RANK=['CEO','Finance','Production','RD','Procurement RM','PU-PK','OPC','Sales'];
 let costStore=null; // null until loadCostStore() has run — never write before then (rule 4)
-function costStoreDefault(){return {v:1,scenarios:[],outbox:[],catalog:[],caps:{},requests:[],pk:[],formats:[]};}
+function costStoreDefault(){return {v:1,scenarios:[],outbox:[],catalog:[],caps:{},requests:[],pk:[],formats:[],catalogSource:null};}
 function costArray(value){return Array.isArray(value)?value:[];}
 function loadCostStore(){
   if(costStore!==null)return costStore;
@@ -1890,7 +1891,8 @@ function loadCostStore(){
     ...base,
     scenarios:costArray(parsed.scenarios),outbox:costArray(parsed.outbox),
     catalog:costArray(parsed.catalog),requests:costArray(parsed.requests),pk:costArray(parsed.pk),formats:costArray(parsed.formats),
-    caps:parsed.caps&&typeof parsed.caps==='object'&&!Array.isArray(parsed.caps)?parsed.caps:{}
+    caps:parsed.caps&&typeof parsed.caps==='object'&&!Array.isArray(parsed.caps)?parsed.caps:{},
+    catalogSource:parsed.catalogSource&&typeof parsed.catalogSource==='object'&&!Array.isArray(parsed.catalogSource)?parsed.catalogSource:null
   }:base;
   return costSeedFormats(costStore);
 }
@@ -1908,7 +1910,11 @@ function costPrimaryRole(roles){return COST_ROLE_RANK.find(role=>roles.includes(
 function costCapabilities(){
   const roles=costBusinessRoles(currentUser),admin=currentRole()==='admin';
   const rd=admin||roles.includes('RD');
-  return {open:admin||roles.length>0,editRM:rd,adoptPK:rd||roles.includes('PU-PK'),
+  const pupk=admin||roles.includes('PU-PK');
+  return {open:admin||roles.length>0,editRM:rd,adoptPK:rd||pupk,
+    // เจ้าของระบบยืนยัน 2026-09-06: ผล PK บันทึกได้เฉพาะ PU-PK
+    // ส่วนการนำผลที่ยืนยันแล้วมาใส่ scenario ยังเป็นขั้นตอนของผู้ทำสูตร
+    recordPK:pupk,
     sendSummary:rd,approveCEO:false, // freezeQuotation stays disabled without a server authority
     // ตั้งกฎการบวกราคาและอัตรามาตรฐาน เป็นคนละสิทธิ์กับการแก้สูตร
     setPricing:admin||roles.some(function(r){return COST_PRICING_ROLES.indexOf(r)>=0;}),
@@ -2005,6 +2011,7 @@ function costEnvelope(entry,sendState){
           eligible:offer.status==='confirmed'&&offer.specApproved===true}))})):[],
     catalog:detail?store.catalog.map(offer=>({offerRef:offer.id,group:offer.group||'',name:offer.name||'',spec:offer.spec||'',vendor:offer.vendor||'',tierLabel:offer.tierId||'',price:offer.price,priceUnit:offer.priceUnit||'',moq:offer.moq,moqUnit:offer.moqUnit||'',leadTimeDays:offer.leadTimeDays,eligible:offer.status==='confirmed'&&offer.specApproved===true})):[],
     operationFormats:detail?costFormatList():[],
+    catalogSource:detail?(store.catalogSource||null):null,
     catalogGroups:detail?costCatalogGroups(store.catalog.map(offer=>({offerRef:offer.id,materialId:offer.materialId,group:offer.group||'',name:offer.name||'',spec:offer.spec||'',vendor:offer.vendor||'',tierLabel:offer.tierId||'',price:offer.price,priceUnit:offer.priceUnit||'',priceBasisQuantity:offer.priceBasisQuantity??1,moq:offer.moq,moqUnit:offer.moqUnit||'',leadTimeDays:offer.leadTimeDays,condition:offer.condition||'',missing:costOfferMissing(offer),eligible:offer.status==='confirmed'&&offer.specApproved===true&&costOfferMissing(offer).length===0}))):[],
     pkCandidate:(()=>{const candidate=costPkCandidate(entry.projectId,entry.scenarioId);
       return candidate&&caps.adoptPK&&!(scenario.pk&&scenario.pk.id===candidate.id&&scenario.pk.version===candidate.version)
@@ -2188,7 +2195,7 @@ function costParseCatalogRows(rows){
   });
   return {offers,rejected};
 }
-function costApplyCatalog(parsed){
+function costApplyCatalog(parsed,sourceName){
   if(!costCapabilities().editRM)throw Error('ไม่มีสิทธิ์นำเข้าแคตตาล็อก RM');
   const identities=new Set();
   for(const offer of parsed.offers){if(!offer.id||identities.has(offer.id))throw Error('รหัสข้อเสนอซ้ำในไฟล์ กรุณาให้ Procurement ยืนยันรายการก่อนนำเข้า');identities.add(offer.id);}
@@ -2197,7 +2204,13 @@ function costApplyCatalog(parsed){
   for(const [id,offer] of byId){if((parsed.replaceMaterialIds||parsed.invalidMaterialIds||[]).includes(offer.materialId))byId.set(id,{...offer,status:'review'});}
   parsed.offers.forEach(offer=>byId.set(offer.id,offer));
   store.catalog=[...byId.values()];
-  if(!saveCostStore()){store.catalog=previous;throw Error('บันทึกแคตตาล็อกไม่ได้ กรุณาตรวจพื้นที่จัดเก็บแล้วลองใหม่');}
+  // เจ้าของระบบยอมรับว่าแต่ละเครื่องมีแคตตาล็อกของตัวเอง (2026-09-06) การยอมรับนั้น
+  // ต้องมาคู่กับการมองเห็น มิฉะนั้น RD สองคนจะเสนอราคาคนละชุดโดยไม่มีใครรู้
+  const previousSource=store.catalogSource;
+  store.catalogSource={file:String(sourceName||'').trim()||'ไม่ทราบชื่อไฟล์',
+    at:new Date().toISOString(),by:currentUser,added:parsed.offers.length,
+    rejected:parsed.rejected.length,total:byId.size};
+  if(!saveCostStore()){store.catalog=previous;store.catalogSource=previousSource;throw Error('บันทึกแคตตาล็อกไม่ได้ กรุณาตรวจพื้นที่จัดเก็บแล้วลองใหม่');}
   return {added:parsed.offers.length,rejected:parsed.rejected,total:store.catalog.length};
 }
 // --- PK results (ADR 0002 decision: PU-PK types in a confirmed total) ---
@@ -2206,7 +2219,7 @@ function costApplyCatalog(parsed){
 // is recorded as such.
 function costRecordPk(projectId,scenarioId,input){
   const caps=costCapabilities();
-  if(!caps.adoptPK)throw Error('บันทึกผล PK ได้เฉพาะผู้ดูแล PK');
+  if(!caps.recordPK)throw Error('บันทึกผล PK ได้เฉพาะ PU-PK');
   const entry=costLatestEntry(projectId,scenarioId);
   if(!entry)throw Error('ยังไม่มีข้อมูลต้นทุนของโครงการนี้');
   const scenario=entry.scenario;

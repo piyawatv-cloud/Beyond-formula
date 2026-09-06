@@ -130,25 +130,25 @@ test('imported offer produces a real cost and re-import updates rather than dupl
  assert.equal(body.view.rm.ready,true);});
 test('PK entry is refused until the scenario carries a spec version and pack figures',async()=>{const c=fixture();
  await c.costLocalRequest('open',{projectId:'A00001'});
- assert.throws(()=>c.costRecordPk('A00001','S1',{adjustedTotal:300,validUntil:'2999-01-01',evidenceRef:'REQ1'}),/spec บรรจุภัณฑ์/);
+ assert.throws(()=>recordPk(c,{adjustedTotal:300,validUntil:'2999-01-01',evidenceRef:'REQ1'}),/spec บรรจุภัณฑ์/);
  await c.costLocalRequest('save',{projectId:'A00001',scenarioId:'S1',expectedRevision:1,patch:{sellingUnits:1000,unitsPerPack:1,fillAmount:1,fillUnit:'g',pkSpecVersion:'PACK1',lines:[]}});
- for(const bad of ['2030-13-40','2030-02-30','01/01/2030','2030-1-1'])assert.throws(()=>c.costRecordPk('A00001','S1',{adjustedTotal:300,validUntil:bad,evidenceRef:'REQ1'}),/YYYY-MM-DD/,bad);
- assert.throws(()=>c.costRecordPk('A00001','S1',{adjustedTotal:300,validUntil:'2999-01-01',evidenceRef:'  '}),/หลักฐาน/);
- assert.throws(()=>c.costRecordPk('A00001','S1',{validUntil:'2999-01-01',evidenceRef:'REQ1'}),/อย่างน้อยหนึ่งช่อง/);});
+ for(const bad of ['2030-13-40','2030-02-30','01/01/2030','2030-1-1'])assert.throws(()=>recordPk(c,{adjustedTotal:300,validUntil:bad,evidenceRef:'REQ1'}),/YYYY-MM-DD/,bad);
+ assert.throws(()=>recordPk(c,{adjustedTotal:300,validUntil:'2999-01-01',evidenceRef:'  '}),/หลักฐาน/);
+ assert.throws(()=>recordPk(c,{validUntil:'2999-01-01',evidenceRef:'REQ1'}),/อย่างน้อยหนึ่งช่อง/);});
 test('recorded PK binds the actor and time and can then be adopted',async()=>{const c=fixture();
  await c.costLocalRequest('open',{projectId:'A00001'});
  await c.costLocalRequest('save',{projectId:'A00001',scenarioId:'S1',expectedRevision:1,patch:{sellingUnits:1000,unitsPerPack:1,fillAmount:1,fillUnit:'g',pkSpecVersion:'PACK1',lines:[]}});
- const snap=c.costRecordPk('A00001','S1',{adjustedTotal:300,baseTotal:250,validUntil:'2999-01-01',evidenceRef:'REQ1'});
- assert.equal(snap.confirmedBy,'Synthetic RD');assert.ok(snap.confirmedAt);assert.equal(snap.version,1);assert.equal(snap.specVersion,'PACK1');
+ const snap=recordPk(c,{adjustedTotal:300,baseTotal:250,validUntil:'2999-01-01',evidenceRef:'REQ1'});
+ assert.equal(snap.confirmedBy,'Synthetic PU-PK','หลักฐานต้องบันทึกผู้บันทึกจริง ซึ่งต้องเป็น PU-PK');assert.ok(snap.confirmedAt);assert.equal(snap.version,1);assert.equal(snap.specVersion,'PACK1');
  const body=await c.costLocalRequest('adoptPK',{projectId:'A00001',scenarioId:'S1',expectedRevision:2,snapshotRef:snap.id+':1'});
  assert.equal(body.view.pk.adjustedTotal,300);
  assert.equal(body.pkCandidate,null,'adopted candidate must stop being offered');});
 test('a renegotiated PK becomes a new version and never rewrites the adopted one',async()=>{const c=fixture();
  await c.costLocalRequest('open',{projectId:'A00001'});
  await c.costLocalRequest('save',{projectId:'A00001',scenarioId:'S1',expectedRevision:1,patch:{sellingUnits:1000,unitsPerPack:1,fillAmount:1,fillUnit:'g',pkSpecVersion:'PACK1',lines:[]}});
- c.costRecordPk('A00001','S1',{adjustedTotal:300,validUntil:'2999-01-01',evidenceRef:'REQ1'});
+ recordPk(c,{adjustedTotal:300,validUntil:'2999-01-01',evidenceRef:'REQ1'});
  await c.costLocalRequest('adoptPK',{projectId:'A00001',scenarioId:'S1',expectedRevision:2});
- const second=c.costRecordPk('A00001','S1',{adjustedTotal:280,validUntil:'2999-01-01',evidenceRef:'REQ2'});
+ const second=recordPk(c,{adjustedTotal:280,validUntil:'2999-01-01',evidenceRef:'REQ2'});
  assert.equal(second.version,2);
  assert.equal(c.loadCostStore().pk[0].adjustedTotal,300,'the earlier snapshot stays untouched');
  const old=await c.costLocalRequest('open',{projectId:'A00001',scenarioId:'S1',expectedRevision:3});
@@ -156,7 +156,7 @@ test('a renegotiated PK becomes a new version and never rewrites the adopted one
 test('changing pack size after adoption blocks reuse of the old PK snapshot',async()=>{const c=fixture();
  await c.costLocalRequest('open',{projectId:'A00001'});
  await c.costLocalRequest('save',{projectId:'A00001',scenarioId:'S1',expectedRevision:1,patch:{sellingUnits:1000,unitsPerPack:1,fillAmount:1,fillUnit:'g',pkSpecVersion:'PACK1',lines:[]}});
- c.costRecordPk('A00001','S1',{adjustedTotal:300,validUntil:'2999-01-01',evidenceRef:'REQ1'});
+ recordPk(c,{adjustedTotal:300,validUntil:'2999-01-01',evidenceRef:'REQ1'});
  await c.costLocalRequest('save',{projectId:'A00001',scenarioId:'S1',expectedRevision:2,patch:{sellingUnits:2000,unitsPerPack:1,fillAmount:1,fillUnit:'g',pkSpecVersion:'PACK1',lines:[]}});
  await assert.rejects(c.costLocalRequest('adoptPK',{projectId:'A00001',scenarioId:'S1',expectedRevision:3}),/PK_CONTEXT_OR_VALIDITY_MISMATCH/);});
 test('a failed chat write is rolled back so a later retry still delivers exactly one message',async()=>{const c=fixture();await c.costLocalRequest('open',{projectId:'A00001'});
@@ -191,6 +191,14 @@ async function readyScenario(c){
    patch:{sellingUnits:250000,unitsPerPack:1,fillAmount:0.25,fillUnit:'g',pkSpecVersion:null,
      lines:[{id:lineId,alias:'สารทดสอบ',amount:0.25,lossPercent:0}]}});
  return 3;
+}
+// ผล PK บันทึกได้เฉพาะ PU-PK (เจ้าของระบบยืนยัน 2026-09-06)
+function recordPk(c,input){
+  const pupk=fixture('purchasing','Synthetic PU-PK');
+  pupk.backing.fs_cost=c.backing.fs_cost;
+  const out=pupk.costRecordPk('A00001','S1',input);
+  c.backing.fs_cost=pupk.backing.fs_cost;c.run('costStore=null');
+  return out;
 }
 const RULE={allowancePercent:10,factor:2.2,decimals:6,owner:'เจ้าของอัตรา',validUntil:'2999-01-01',
   pkMode:'notApplicable',formatId:'CAP-GEL-0'};
@@ -562,3 +570,37 @@ test('A2 non-RD direct summary command is denied before any write',async()=>{
     assert.equal(JSON.stringify({backing:c.backing,chats:c.chats,store:c.loadCostStore()}),before,'denial must not touch chat, outbox or storage');
   }
 });
+test('ผล PK บันทึกได้เฉพาะ PU-PK — RD และบทบาทอื่นถูกปฏิเสธ',async()=>{const c=fixture();
+ await c.costLocalRequest('open',{projectId:'A00001'});
+ await c.costLocalRequest('save',{projectId:'A00001',scenarioId:'S1',expectedRevision:1,
+   patch:{sellingUnits:1000,unitsPerPack:1,fillAmount:1,fillUnit:'g',pkSpecVersion:'PACK1',lines:[]}});
+ const entry={adjustedTotal:300,validUntil:'2999-01-01',evidenceRef:'REQ1'};
+ for(const [role,name] of [['rd','Synthetic RD'],['sales','Synthetic Sales'],['opc','Synthetic OPC']]){
+  const u=fixture(role,name);u.backing.fs_cost=c.backing.fs_cost;
+  assert.equal(u.costCapabilities().recordPK,false,role);
+  assert.throws(()=>u.costRecordPk('A00001','S1',entry),/เฉพาะ PU-PK/,role);
+ }
+ const pupk=fixture('purchasing','Synthetic PU-PK');pupk.backing.fs_cost=c.backing.fs_cost;
+ assert.equal(pupk.costCapabilities().recordPK,true);
+ assert.ok(pupk.costRecordPk('A00001','S1',entry).version>=1,'PU-PK ต้องบันทึกได้');});
+test('RD ยังนำผล PK ที่ PU-PK บันทึกไว้มาใช้ใน scenario ได้',async()=>{const c=fixture();
+ await c.costLocalRequest('open',{projectId:'A00001'});
+ await c.costLocalRequest('save',{projectId:'A00001',scenarioId:'S1',expectedRevision:1,
+   patch:{sellingUnits:1000,unitsPerPack:1,fillAmount:1,fillUnit:'g',pkSpecVersion:'PACK1',lines:[]}});
+ recordPk(c,{adjustedTotal:300,validUntil:'2999-01-01',evidenceRef:'REQ1'});
+ assert.equal(c.costCapabilities().recordPK,false,'RD บันทึกไม่ได้');
+ assert.equal(c.costCapabilities().adoptPK,true,'แต่รับมาใช้ได้');
+ const body=await c.costLocalRequest('adoptPK',{projectId:'A00001',scenarioId:'S1',expectedRevision:2});
+ assert.equal(body.view.pk.adjustedTotal,300);});
+test('หน้าจอบอกว่าแคตตาล็อกมาจากไฟล์ไหน เพราะแต่ละเครื่องเก็บแยกกัน',async()=>{const c=fixture();
+ c.costApplyCatalog({offers:[tierOffer('O1','M1','สาร ก.',1000,1,7)],rejected:[]},'RM_2026-09.xlsx');
+ await c.costLocalRequest('open',{projectId:'A00001'});
+ const body=await c.costLocalRequest('open',{projectId:'A00001'});
+ assert.equal(body.catalogSource.file,'RM_2026-09.xlsx');
+ assert.equal(body.catalogSource.by,'Synthetic RD');
+ assert.ok(body.catalogSource.at,'ต้องบันทึกเวลาไว้');
+ assert.equal(body.catalogSource.total,1);
+ const ui=grab('UI');
+ assert.match(ui,/แคตตาล็อกเก็บแยกในแต่ละเครื่อง/,'ต้องเตือนบนหน้าจอว่าเครื่องอื่นอาจใช้คนละชุด');
+ const s=fixture('sales','Synthetic Sales');s.backing.fs_cost=c.backing.fs_cost;
+ assert.equal((await s.costLocalRequest('open',{projectId:'A00001'})).catalogSource,null,'Sales ไม่ต้องเห็นที่มาของแคตตาล็อก');});
