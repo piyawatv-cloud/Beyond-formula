@@ -668,7 +668,7 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
   <div class="logo"><svg viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-1.73-3L9 11.35V4H8a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2h-1v7.35L19.73 19A2 2 0 0 1 18 22H6Zm5-10.11L8.31 16.5h7.38L13 11.89V4h-2v7.89Z"/></svg></div>
   <div>
     <div class="hdr-title">Formula Studio</div>
-    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-06.3-tier-identity</div>
+    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-06.4-import-report-rows</div>
   </div>
   <div class="sync-chip" id="syncChip" onclick="sbManualSync()" title="สถานะการซิงก์ข้อมูลกับเซิร์ฟเวอร์กลาง"></div>
 </div>
@@ -1810,7 +1810,7 @@ async function costImportCatalogFile(file){
     const workbook=XLSX.read(new Uint8Array(buffer),{type:'array'});
     const parsed=costParseCatalogWorkbook(workbook),applied=costApplyCatalog(parsed,file&&file.name);
     const notice=applied.rejected.length
-      ?`นำเข้า ${applied.added} รายการ · ข้าม ${applied.rejected.length} แถว: `+applied.rejected.slice(0,5).map(r=>`แถว ${r.row} (${r.reason})`).join(' · ')
+      ?`นำเข้า ${applied.added} รายการ · ข้าม ${applied.rejected.length} แถว: `+applied.rejected.slice(0,5).map(r=>`${r.row?'แถว '+r.row:(r.ref?'รหัส '+r.ref:'ไม่ทราบตำแหน่ง')} (${r.reason})`).join(' · ')
       :`นำเข้า ${applied.added} รายการ · รวมในเครื่อง ${applied.total} รายการ`;
     costState.busy=false;await costAction('open',{});costState.notice=notice+(parsed.sourceSummary?` · ข้อมูลต้นทางครบ ${parsed.sourceSummary.usable} ข้อเสนอ · รายการไม่ครบยังแสดงให้ตรวจ แต่เลือกคิดต้นทุนไม่ได้`:'');
   }catch(error){costState.error='อ่านไฟล์ไม่สำเร็จ: '+String(error.message);}
@@ -1826,7 +1826,9 @@ function costParseCatalogWorkbook(workbook){
   const built=RmCatalogBuild.fromSheets(sheets,{asOf:costToday()});
   const parsed=costParseCatalogRows(built.offers),accepted=new Map(parsed.offers.map(offer=>[offer.id,offer]));
   return {offers:built.offers.map(offer=>accepted.get(offer.id)||{...offer,status:'review'}),sourceSummary:built.summary,replaceMaterialIds:[...new Set(built.offers.map(offer=>offer.materialId).concat(built.skipped.map(item=>item.code)).filter(Boolean))],invalidMaterialIds:built.skipped.map(item=>item.code).filter(Boolean),
-    rejected:built.skipped.map((item,index)=>({row:index+1,reason:item.reason}))};
+    // ตัวสร้างบางตัวบอกเลขแถวจริง บางตัวบอกได้แค่ RD-Code การนับลำดับใหม่แล้วเรียกว่า
+    // "แถว" ทำให้จัดซื้อเปิดชีตไปผิดแถวสนิท จึงส่งต่อสิ่งที่รู้จริงเท่านั้น
+    rejected:built.skipped.map(item=>({row:item.row??null,ref:item.code??null,reason:item.reason}))};
 }
 function costSaveRates(){
   const data=costState.response;if(!data||!data.capabilities.setPricing||data.historical)return;

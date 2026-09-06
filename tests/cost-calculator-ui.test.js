@@ -40,3 +40,18 @@ test('incomplete scenario never labels a calculated candidate as final unit pric
 test('first open of a project sends no scenario or revision, so the service layer owns resolution',async()=>{const c=fixture();let payload;c.window.__costTestRequest=(action,p)=>{assert.equal(action,'open');payload=p;return c.response();};await c.openCostCalculator('A00001');assert.equal(payload.projectId,'A00001');assert.equal(payload.scenarioId,null);assert.equal(payload.expectedRevision,null);assert.equal(c.run('costState.response.scenarioId'),'S1');});
 test('server-resolved scenario on first open is adopted and then pinned for later actions',async()=>{const c=fixture();c.window.__costTestRequest=()=>({...c.response(),scenarioId:'RESOLVED'});await c.openCostCalculator('A00001');assert.equal(c.run('costState.response.scenarioId'),'RESOLVED');let payload;c.window.__costTestRequest=(a,p)=>{payload=p;return {...c.response(),scenarioId:'RESOLVED'};};await c.costAction('save',{patch:{}});assert.equal(payload.scenarioId,'RESOLVED');assert.equal(payload.expectedRevision,1);});
 test('a flat catalog with no groups still renders, so the older response shape keeps working',async()=>{const c=fixture();let r=c.response();r.catalog=[{offerRef:'O1',name:'สารทดสอบ',spec:'Spec A',vendor:'V',tierLabel:'T1',price:100,priceUnit:'kg',priceBasisQuantity:1,moq:2,moqUnit:'kg',leadTimeDays:7,eligible:true}];delete r.catalogGroups;c.window.__costTestRequest=()=>r;await c.openCostCalculator('A00001');assert.match(c.panel.innerHTML,/สารทดสอบ/);assert.match(c.panel.innerHTML,/costSelectRef/);});
+
+test('รายงานการนำเข้าไม่แต่งเลขแถวขึ้นมาเมื่อต้นทางบอกได้แค่รหัส',()=>{
+  // การนับลำดับใหม่แล้วเรียกว่า "แถว" ทำให้จัดซื้อเปิดชีตไปผิดแถวสนิท
+  const c=fixture();
+  c.run(`var XLSX={utils:{sheet_to_json:()=>[['RD-Code','Price Tiers (Raw)']]}};
+    var costParseCatalogRows=()=>({offers:[],rejected:[]});
+    var costToday=()=>'2026-09-06';`);
+  c.run(`var RmCatalogBuild={fromSheets:()=>({offers:[],summary:{usable:0},
+    skipped:[{code:'RD-A-001',reason:'ยังไม่มีราคา'},{row:47,reason:'อ่าน MOQ ไม่ได้'}]})};`);
+  const parsed=c.run(`costParseCatalogWorkbook({SheetNames:['s'],Sheets:{s:{}}})`);
+  assert.equal(parsed.rejected.length,2);
+  assert.equal(parsed.rejected[0].row,null,'ไม่รู้เลขแถวต้องเป็น null ไม่ใช่ 1');
+  assert.equal(parsed.rejected[0].ref,'RD-A-001','ต้องส่งต่อรหัสที่รู้จริง');
+  assert.equal(parsed.rejected[1].row,47,'ถ้าต้นทางบอกเลขแถวจริงต้องใช้เลขนั้น');
+});
