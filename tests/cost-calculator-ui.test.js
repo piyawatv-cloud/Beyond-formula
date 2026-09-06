@@ -69,3 +69,32 @@ test('หมายเหตุยาวถูกย่อพอให้อ่�
   const linked=brief(withLink);
   assert.ok(linked.includes('https://example.com/spec.pdf'),'link ต้องอยู่ครบเส้น ไม่ถูกตัดกลาง: '+linked);
 });
+
+test('พิมพ์ค้นหาแล้ววาดใหม่เฉพาะเนื้อตาราง ไม่ทับทั้งแผง',()=>{
+  const c=fixture();
+  const body={innerHTML:'เดิม'};
+  const inputs={costSellingUnits:{value:'5000'},costAmount0:{value:'250'},costCatalogBody:body};
+  c.elements.costCatalogBody=body;
+  Object.assign(c.elements,inputs);
+  c.run(`costState.response=${JSON.stringify({contract:'cost-v1',projectId:'A00001',scenarioId:'S1',revision:1,
+    catalog:[],catalogGroups:[
+      {key:'g1',label:'อัลฟาสกัด',count:1,offers:[{offerRef:'O1',name:'อัลฟาสกัด',vendor:'ผ1',tierLabel:'1 kg',price:100,priceBasisQuantity:1,priceUnit:'kg',moq:1,moqUnit:'kg',leadTimeDays:14,eligible:true,missing:[]}]},
+      {key:'g2',label:'เบตาสกัด',count:1,offers:[{offerRef:'O2',name:'เบตาสกัด',vendor:'ผ2',tierLabel:'1 kg',price:200,priceBasisQuantity:1,priceUnit:'kg',moq:1,moqUnit:'kg',leadTimeDays:14,eligible:true,missing:[]}]}],
+    view:{},inputs:{sellingUnits:1000,unitsPerPack:1,fillAmount:1,fillUnit:'g'},
+    lines:[{id:'L1',alias:'สารหนึ่ง',amount:100,unit:'g',lossPercent:0}],capabilities:{editRM:true}})};`);
+  const panelBefore=c.panel.innerHTML;
+  c.costSearchChanged('เบตา');
+  assert.equal(c.panel.innerHTML,panelBefore,'แผงทั้งหน้าต้องไม่ถูกวาดทับ');
+  assert.notEqual(body.innerHTML,'เดิม','เนื้อตารางต้องถูกวาดใหม่');
+  assert.ok(body.innerHTML.includes('เบตาสกัด'),'ผลที่ตรงต้องอยู่');
+  assert.ok(!body.innerHTML.includes('อัลฟาสกัด'),'ตัวกรองต้องตัดที่ไม่ตรงออกจริง');
+  assert.equal(c.run('costState.edits.costAmount0'),'250','ค่าที่กำลังกรอกต้องไม่หายเพราะไปพิมพ์ในช่องค้นหา');
+  assert.equal(c.run('costState.edits.costSellingUnits'),'5000');
+  assert.equal(c.run('costState.search'),'เบตา');
+});
+test('ยังไม่มีข้อมูลหรือยังไม่มีตาราง ต้องกลับไปวาดทั้งแผงตามเดิม',()=>{
+  const c=fixture();
+  c.run('costState.response=null;');
+  c.costSearchChanged('อะไรก็ได้');
+  assert.equal(c.run('costState.search'),'อะไรก็ได้','ต้องไม่ล้มเมื่อยังไม่มีข้อมูล');
+});

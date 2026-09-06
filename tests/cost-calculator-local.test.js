@@ -647,3 +647,11 @@ test('วัสดุที่ไม่เคยมีในเครื่อ�
   assert.equal(after.specApproved,null);
   assert.equal(after.leadTimeDays,null);
 });
+
+// เจ้าของระบบยืนยัน 2026-09-06: ราคาต้นทางไม่รวม VAT และระบบไม่บวกให้
+test('ข้อความสรุปที่ถูกคัดลอกไปเสนอราคา ต้องบอกว่าไม่รวม VAT',async()=>{
+  const c=fixture();
+  await c.costLocalRequest('open',{projectId:'A00001'});
+  const body=await c.costLocalRequest('open',{projectId:'A00001'});
+  assert.match(body.summaryText,/ไม่รวม VAT/,'ผู้รับต้องไม่เข้าใจว่ารวมแล้ว: '+body.summaryText);
+});

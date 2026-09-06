@@ -668,7 +668,7 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
   <div class="logo"><svg viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-1.73-3L9 11.35V4H8a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2h-1v7.35L19.73 19A2 2 0 0 1 18 22H6Zm5-10.11L8.31 16.5h7.38L13 11.89V4h-2v7.89Z"/></svg></div>
   <div>
     <div class="hdr-title">Formula Studio</div>
-    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-06.5-carry-confirmation</div>
+    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-06.6-pre-vat</div>
   </div>
   <div class="sync-chip" id="syncChip" onclick="sbManualSync()" title="สถานะการซิงก์ข้อมูลกับเซิร์ฟเวอร์กลาง"></div>
 </div>
@@ -1710,6 +1710,11 @@ function costBrief(text,limit){
   const head=full.slice(0,max).replace(/\s+\S*$/,'');
   return link&&!head.includes(link[0])?head+'… '+link[0]:head+'…';
 }
+// เนื้อตารางแคตตาล็อกแยกออกมา เพราะการพิมพ์ค้นหาเคยวาดใหม่ทั้งแผง 103 KB
+// ทำให้หน่วง 165 มิลลิวินาทีต่อการพิมพ์หนึ่งตัวอักษร ซึ่งรู้สึกได้ชัดตอนพิมพ์
+function costCatalogBody(groups,disabled){
+  return `${groups.map(g=>`<tr><td colspan="6" class="cost-group">${esc(g.label)}${g.count>1?` · ${g.count} ตัวเลือกที่ชื่อใกล้เคียงกัน`:''}</td></tr>`+g.offers.map(item=>`<tr><td>${esc(item.group||'')}<br><b>${esc(item.name||'')}</b></td><td>${esc(item.spec||'')}</td><td>${esc(item.vendor||'')}</td><td>${esc(item.tierLabel||'')}<br>${costNumber(item.price)} บาท ต่อ ${costNumber(item.priceBasisQuantity)} ${esc(item.priceUnit||'')}<br>MOQ ${costNumber(item.moq)} ${esc(item.moqUnit||'')}${item.maxOrderQuantity?` · ใช้ได้ถึง ${costNumber(item.maxOrderQuantity)} ${esc(item.maxOrderUnit||'')}`:''}${item.condition?`<br><span class="hint" title="${esc(item.condition)}">${esc(costBrief(item.condition))}</span>`:''}</td><td>${costNumber(item.leadTimeDays)} วัน</td><td><button class="btn btn-s" ${disabled||!item.eligible?'disabled':''} onclick="costSelectRef('${esc(item.offerRef)}')">${item.eligible?'เลือก Tier นี้':'ใช้ไม่ได้'}</button>${item.missing&&item.missing.length?`<br><span class="hint">ขาด ${esc(item.missing.join(' · '))}</span>`:''}</td></tr>`).join('')).join('')||'<tr><td colspan="6">ไม่พบรายการที่ตรง — ส่งคำขอจัดหาได้โดยไม่เพิ่มราคาสมมติ</td></tr>'}`;
+}
 function costNumber(value){return typeof value==='number' && Number.isFinite(value)?value.toLocaleString('th-TH',{maximumFractionDigits:4}):'รอข้อมูล';}
 function costDraftValue(id,fallback){return Object.hasOwn(costState.edits,id)?costState.edits[id]:fallback;}
 function costDraftDefaults(){const data=costState.response;if(!data)return {};const draft=data.inputs||{},rule=data.pricingRule||{},defaults={costSellingUnits:draft.sellingUnits,costUnitsPerPack:draft.unitsPerPack,costFillAmount:draft.fillAmount,costFillUnit:draft.fillUnit,costPkSpecVersion:draft.pkSpecVersion,costAllowance:rule.allowancePercent,costFactor:rule.factor,costRuleOwner:rule.owner,costRuleUntil:rule.validUntil,costRuleDecimals:rule.decimals??2,costPkMode:rule.pkMode||'',costFormatId:(rule.format&&rule.format.id)||'',costRateId:'',costRateLabel:'',costRateOwner:'',costRateUntil:''};[0,1,2].forEach(i=>{defaults['costRateLabel'+i]='';defaults['costRateAmount'+i]='';});data.lines.forEach((line,i)=>{defaults["costAlias"+i]=line.alias||"";defaults["costAmount"+i]=line.amount;defaults["costLoss"+i]=line.lossPercent;});return defaults;}
@@ -1738,20 +1743,15 @@ function renderCostCalculator(){
   const disabled=costState.busy||data?.historical?'disabled':'';
   const rows=data&&Array.isArray(data.lines)?data.lines:[];
   const catalog=data&&Array.isArray(data.catalog)?data.catalog:[];
-  const query=costState.search.trim().toLocaleLowerCase();
-  const match=item=>[item.group,item.name,item.spec,item.vendor,item.tierLabel].join(' ').toLocaleLowerCase().includes(query);
-  // ถ้า response ยังไม่ส่งกลุ่มมา ให้แสดงเป็นกลุ่มเดียว เพื่อให้ contract เดิมยังใช้ได้
-  const source=data&&Array.isArray(data.catalogGroups)&&data.catalogGroups.length
-    ?data.catalogGroups
-    :(catalog.length?[{key:'all',label:'รายการทั้งหมด',count:catalog.length,offers:catalog}]:[]);
-  const groups=source.map(g=>({...g,offers:g.offers.filter(match)})).filter(g=>g.offers.length);
+  // ถ้า response ยังไม่ส่งกลุ่มมา costCatalogVisible จะแสดงเป็นกลุ่มเดียว contract เดิมจึงยังใช้ได้
+  const groups=data?costCatalogVisible(data,costState.search):[];
   panel.innerHTML=`<div class="sec-card cost-workspace">
     <div class="cost-top"><div><h2>Cost Calculator · ${esc(costState.projectId)}</h2><p class="hint">${data?'Revision '+esc(data.revision):'กำลังเปิดโครงการ'} · สูตรและ RM ทำต่อได้ระหว่างรอ PK</p></div><button class="btn btn-s" onclick="switchView('chat')">กลับหน้ารายการแชท</button></div>
     ${data?.historical?`<p class="cost-warning">กำลังดู revision เก่า ${esc(data.revision)} · อ่านอย่างเดียว <button class="btn btn-s" onclick="costOpenLatest()">เปิด revision ล่าสุด ${esc(data.latestRevision)}</button></p>`:''}
     <div role="status" aria-live="polite">${costState.notice?`<p>${esc(costState.notice)}</p>`:''}${costState.busy?'<p>กำลังตรวจและบันทึกข้อมูล…</p>':''}${costState.error?`<p class="cost-warning">${esc(costState.error)}</p>${!data?`<button class="btn btn-s" onclick="costAction('open',{})">ลองเปิดอีกครั้ง</button>`:`<button class="btn btn-s" onclick="costOpenLatest()">เปิด revision ล่าสุด</button>`}`:''}</div>
     ${!view?'':`<p class="cost-warning">${esc(view.label||'รอข้อมูล')} · ตัวเลขแสดงตามสิทธิ์ของคุณ</p>
     <div class="cost-summary">${['rm','pk','operation'].map((key,index)=>`<div><b>${['RM','PK','Operation'][index]}</b>${view[key]?.notApplicable?'<p>ไม่มีหมวดนี้ — รวมอยู่ในค่าดำเนินการต่อหน่วย</p>':`<p>ยอดหลังบวก ${view[key]&&view[key].adjustedTotal!=null?costNumber(view[key].adjustedTotal):'รอกำหนดราคา'} บาท/ล็อต</p>${view[key]&&Object.hasOwn(view[key],'baseTotal')?`<p class="hint">ต้นทุนหมวดที่คุณดูได้ ${costNumber(view[key].baseTotal)} บาท</p>`:''}<span>${view[key]&&view[key].ready?'ข้อมูลต้นทุนครบ':'รอข้อมูล / รอยืนยัน'}</span>`}</div>`).join('')}</div>
-    <p><b>ราคาต่อหน่วยขาย: ${!view.complete||view.finalPerSellingUnit==null?'รอกำหนดราคา':costNumber(view.finalPerSellingUnit)} บาท</b></p>
+    <p><b>ราคาต่อหน่วยขาย: ${!view.complete||view.finalPerSellingUnit==null?'รอกำหนดราคา':costNumber(view.finalPerSellingUnit)} บาท</b> <span class="hint">ไม่รวม VAT</span></p>
     <ul>${(view.pending||[]).map(message=>`<li>${esc(message)}</li>`).join('')}</ul>
     ${view.complete||canEdit&&data.capabilities.setPricing?'':'<p class="hint">ถ้ารายการค้างมีเรื่องราคา ให้แจ้งผู้ดูแลด้านราคา (Finance หรือ CEO) เป็นผู้กำหนดกฎการบวกราคาและอัตรามาตรฐาน — สิทธิ์นี้ไม่ได้อยู่กับผู้ทำสูตร</p>'}
     ${canEdit?`<h3>จำนวนผลิตและขนาดบรรจุ</h3><div class="fg4">${costField('จำนวนหน่วยขาย','costSellingUnits',draft.sellingUnits,'หน่วยขาย')}${costField('หน่วยย่อยต่อแพ็ก','costUnitsPerPack',draft.unitsPerPack,'หน่วยย่อย / หน่วยขาย')}${costField('น้ำหนักต่อหน่วยย่อย','costFillAmount',draft.fillAmount,draft.fillUnit||'ยังไม่ระบุหน่วย')}${costUnitField(draft.fillUnit)}${costTextField('เวอร์ชัน spec บรรจุภัณฑ์','costPkSpecVersion',draft.pkSpecVersion,'ต้องระบุก่อนรับผล PK')}</div>
@@ -1759,7 +1759,7 @@ function renderCostCalculator(){
     <div id="costFormulaPreview" aria-live="polite"></div>
     <p class="hint">ประมาณการก่อนตรวจสต็อก ไม่ใช่ยอดสั่งซื้อจริง · แก้ชื่อที่นี่มีผลเฉพาะ revision นี้</p><button class="btn btn-p" ${disabled} onclick="costSave()">บันทึก revision สูตร / RM</button>
     <h3>ค้นหาและเทียบ RM ใน Data Center</h3><label class="flbl" for="costSearch">ชื่อ / กลุ่ม / spec / vendor</label><input class="fi" id="costSearch" value="${esc(costState.search)}" placeholder="ค้นหาชื่อใกล้เคียงแล้วเทียบ spec" oninput="costSearchChanged(this.value)">
-    <div class="rec-wrap"><table class="rec-tbl"><thead><tr><th>กลุ่ม / วัสดุ</th><th>Spec</th><th>Vendor</th><th>Tier · ราคาและ MOQ</th><th>LT</th><th></th></tr></thead><tbody>${groups.map(g=>`<tr><td colspan="6" class="cost-group">${esc(g.label)}${g.count>1?` · ${g.count} ตัวเลือกที่ชื่อใกล้เคียงกัน`:''}</td></tr>`+g.offers.map(item=>`<tr><td>${esc(item.group||'')}<br><b>${esc(item.name||'')}</b></td><td>${esc(item.spec||'')}</td><td>${esc(item.vendor||'')}</td><td>${esc(item.tierLabel||'')}<br>${costNumber(item.price)} บาท ต่อ ${costNumber(item.priceBasisQuantity)} ${esc(item.priceUnit||'')}<br>MOQ ${costNumber(item.moq)} ${esc(item.moqUnit||'')}${item.maxOrderQuantity?` · ใช้ได้ถึง ${costNumber(item.maxOrderQuantity)} ${esc(item.maxOrderUnit||'')}`:''}${item.condition?`<br><span class="hint" title="${esc(item.condition)}">${esc(costBrief(item.condition))}</span>`:''}</td><td>${costNumber(item.leadTimeDays)} วัน</td><td><button class="btn btn-s" ${disabled||!item.eligible?'disabled':''} onclick="costSelectRef('${esc(item.offerRef)}')">${item.eligible?'เลือก Tier นี้':'ใช้ไม่ได้'}</button>${item.missing&&item.missing.length?`<br><span class="hint">ขาด ${esc(item.missing.join(' · '))}</span>`:''}</td></tr>`).join('')).join('')||'<tr><td colspan="6">ไม่พบรายการที่ตรง — ส่งคำขอจัดหาได้โดยไม่เพิ่มราคาสมมติ</td></tr>'}</tbody></table></div>
+    <div class="rec-wrap"><table class="rec-tbl"><thead><tr><th>กลุ่ม / วัสดุ</th><th>Spec</th><th>Vendor</th><th>Tier · ราคาและ MOQ</th><th>LT</th><th></th></tr></thead><tbody id="costCatalogBody">${costCatalogBody(groups,disabled)}</tbody></table></div>
     <p class="hint">ระบบไม่เลือก Tier ให้ · เรียงจากราคาต่ำไปสูงเพื่อให้เทียบง่ายเท่านั้น · เลือกแล้วยังเปลี่ยนได้ภายหลัง</p>
     <p class="hint">${data.catalogSource?`แคตตาล็อกชุดนี้มาจากไฟล์ <b>${esc(data.catalogSource.file)}</b> · นำเข้าโดย ${esc(data.catalogSource.by)} เมื่อ ${esc(String(data.catalogSource.at).slice(0,16).replace('T',' '))} · ${esc(data.catalogSource.total)} รายการ<br>แคตตาล็อกเก็บแยกในแต่ละเครื่อง เครื่องอื่นอาจใช้ไฟล์คนละชุด ตรวจบรรทัดนี้ให้ตรงกันก่อนเทียบราคากับคนอื่น`:'ยังไม่เคยนำเข้าแคตตาล็อกในเครื่องนี้'}</p>
     <p class="hint">แคตตาล็อกในเครื่องนี้มี ${catalog.length} รายการ · นำเข้าไฟล์จาก Procurement เพื่อเพิ่ม/อัปเดต</p>
@@ -1805,7 +1805,23 @@ function costCopySummary(){
     navigator.clipboard.writeText(el.value).then(()=>done(true),()=>done(false));
   else done(false);
 }
-function costSearchChanged(value){costCaptureDraft();costState.search=value;renderCostCalculator();const el=document.getElementById('costSearch');if(el){el.focus();el.setSelectionRange(value.length,value.length);}}
+function costSearchChanged(value){
+  costCaptureDraft();                       // ค่าที่กำลังกรอกอยู่ต้องไม่หายเพราะไปพิมพ์ในช่องค้นหา
+  costState.search=value;
+  const data=costState.response,tbody=document.getElementById('costCatalogBody');
+  if(!data||!tbody){renderCostCalculator();return;}
+  // วาดใหม่เฉพาะเนื้อตาราง ช่องค้นหาไม่ถูกแตะ เคอร์เซอร์จึงอยู่ที่เดิมเองโดยไม่ต้องย้ายกลับ
+  tbody.innerHTML=costCatalogBody(costCatalogVisible(data,value),costState.busy||!!data.historical);
+}
+function costCatalogVisible(data,search){
+  const query=String(search||'').trim().toLocaleLowerCase();
+  const match=item=>[item.group,item.name,item.spec,item.vendor,item.tierLabel].join(' ').toLocaleLowerCase().includes(query);
+  const catalog=Array.isArray(data.catalog)?data.catalog:[];
+  const source=Array.isArray(data.catalogGroups)&&data.catalogGroups.length
+    ?data.catalogGroups
+    :(catalog.length?[{key:'all',label:'รายการทั้งหมด',count:catalog.length,offers:catalog}]:[]);
+  return source.map(g=>({...g,offers:g.offers.filter(match)})).filter(g=>g.offers.length);
+}
 function costInputNumber(id){const el=document.getElementById(id);if(!el||el.value.trim()==='')return null;const n=Number(el.value);if(!Number.isFinite(n)||n<0){const labels={costSellingUnits:'จำนวนหน่วยขาย',costUnitsPerPack:'หน่วยย่อยต่อแพ็ก',costFillAmount:'น้ำหนักต่อหน่วยย่อย',costAllowance:'ค่าเผื่อขั้นต้น',costFactor:'ตัวคูณราคา',costRuleDecimals:'ทศนิยมที่ปัด',costPkAdjusted:'ยอด PK หลังบวก',costPkBase:'ยอด PK ต้นทุนใช้จริง'};const name=labels[id]||(el.getAttribute&&el.getAttribute('aria-label'))||(id.startsWith('costRateAmount')?'อัตรารายการ '+(Number(id.replace('costRateAmount',''))+1):id);throw Error('กรุณาตรวจช่อง '+name+': ต้องเป็นตัวเลขตั้งแต่ 0 ขึ้นไป');}return n;}
 function costSave(){
   const data=costState.response;if(!data||!data.capabilities.editRM)return;
@@ -2061,7 +2077,10 @@ function costSummaryText(view){
     `RM ${costMoney(view.rm.adjustedTotal)} บาท/ล็อต`,
     view.pk.notApplicable?'PK: ไม่มีหมวดนี้ — รวมอยู่ในค่าดำเนินการต่อหน่วย':`PK ${costMoney(view.pk.adjustedTotal)} บาท/ล็อต`,
     `Operation ${costMoney(view.operation.adjustedTotal)} บาท/ล็อต`,
-    view.complete&&view.finalPerSellingUnit!=null?`ราคาต่อหน่วยขาย ${costMoney(view.finalPerSellingUnit)} บาท`:'ราคาต่อหน่วยขาย: รอกำหนดราคา'];
+    view.complete&&view.finalPerSellingUnit!=null?`ราคาต่อหน่วยขาย ${costMoney(view.finalPerSellingUnit)} บาท`:'ราคาต่อหน่วยขาย: รอกำหนดราคา',
+    // ราคาต้นทางไม่รวม VAT และระบบไม่บวกให้ ข้อความนี้ถูกคัดลอกไปเสนอลูกค้าโดยตรง
+    // ถ้าไม่บอก ผู้รับจะเข้าใจว่ารวมแล้วและเสนอราคาต่ำกว่าจริง 7%
+    'ทุกยอดเป็นราคาไม่รวม VAT'];
   if(Array.isArray(view.pending)&&view.pending.length)lines.push('รอดำเนินการ: '+view.pending.join(' · '));
   return lines.join('\n');
 }
