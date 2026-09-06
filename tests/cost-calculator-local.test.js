@@ -607,19 +607,43 @@ test('หน้าจอบอกว่าแคตตาล็อกมาจ�
  const s=fixture('sales','Synthetic Sales');s.backing.fs_cost=c.backing.fs_cost;
  assert.equal((await s.costLocalRequest('open',{projectId:'A00001'})).catalogSource,null,'Sales ไม่ต้องเห็นที่มาของแคตตาล็อก');});
 
-// บันทึกพฤติกรรมการนำเข้าซ้ำไว้ให้เห็นชัด ไม่ใช่การรับรองว่าถูกต้อง
-// การตัดสินว่าการรับรอง spec ควรอยู่ต่อเมื่อราคาเปลี่ยนหรือไม่ เป็นของเจ้าของข้อมูล
-test('นำเข้าซ้ำด้วยรหัสเดิมทับของเดิมทั้งก้อน ไม่สร้างรายการซ้ำ แต่ล้างการยืนยันของจัดซื้อ',()=>{
+// เจ้าของระบบตัดสิน 2026-09-06: นำเข้าซ้ำให้ "ยืนยันเฉพาะราคา"
+test('นำเข้าซ้ำยกการรับรอง spec และ Lead Time มาให้ แต่ราคาใหม่ยังต้องยืนยันก่อนใช้',()=>{
   const c=fixture();
-  c.loadCostStore().catalog.push({...offer,id:'RMS-AAA-5000000UG',materialId:'RMS-AAA',price:1000});
+  c.loadCostStore().catalog.push({...offer,id:'RMS-AAA-5000000UG',materialId:'RMS-AAA',
+    price:1000,specApproved:true,leadTimeDays:14,status:'confirmed'});
   c.saveCostStore();
-  c.costApplyCatalog({offers:[{...offer,id:'RMS-AAA-5000000UG',materialId:'RMS-AAA',price:1050,
-    status:'review',specApproved:null,leadTimeDays:null,validUntil:''}],
+  const applied=c.costApplyCatalog({offers:[{...offer,id:'RMS-AAA-5000000UG',materialId:'RMS-AAA',
+    price:1050,status:'review',specApproved:null,leadTimeDays:null,validUntil:''}],
     rejected:[],replaceMaterialIds:['RMS-AAA']},'รอบสอง.xlsx');
   const after=c.loadCostStore().catalog;
   assert.equal(after.length,1,'รหัสที่เสถียรทำให้ทับของเดิม ไม่ทิ้งรายการกำพร้าไว้');
   assert.equal(after[0].price,1050,'ราคาใหม่ต้องเข้ามาจริง');
-  assert.equal(after[0].specApproved,null,'พฤติกรรมปัจจุบัน: การรับรองไม่ถูกยกมา');
-  assert.equal(after[0].leadTimeDays,null,'พฤติกรรมปัจจุบัน: Lead Time ไม่ถูกยกมา');
-  assert.equal(after[0].status,'review','ยังคิดต้นทุนไม่ได้จนกว่าจะยืนยันใหม่');
+  assert.equal(after[0].specApproved,true,'การรับรองเป็นคุณสมบัติของสาร ต้องถูกยกมา');
+  assert.equal(after[0].leadTimeDays,14,'Lead Time ต้องถูกยกมา');
+  assert.equal(after[0].status,'review','ราคาใหม่ยังไม่ผ่านการยืนยัน จึงยังคิดต้นทุนไม่ได้');
+  assert.deepEqual([...after[0].carriedFrom.fields],['specApproved','leadTimeDays'],'ต้องบันทึกว่ายกอะไรมา');
+  assert.equal(applied.carried,1,'ต้องรายงานจำนวนที่ยกมาให้ผู้นำเข้าเห็น');
+  const missing=c.costOfferMissing(after[0]);
+  assert.ok(!missing.includes('การรับรอง spec'),'ยกการรับรองมาแล้ว ห้ามสั่งให้ตรวจ spec ซ้ำ');
+  assert.ok(missing.includes('การยืนยันราคาใหม่'),'ต้องบอกให้ตรงว่ารออะไร: '+missing.join(','));
+});
+test('การรับรองที่ตรวจแล้วไม่ผ่าน หรือค่าที่ไฟล์ใหม่ระบุมาเอง ต้องไม่ถูกของเก่าทับ',()=>{
+  const c=fixture();
+  c.loadCostStore().catalog.push({...offer,id:'O9',materialId:'M9',specApproved:true,leadTimeDays:14});
+  c.saveCostStore();
+  c.costApplyCatalog({offers:[{...offer,id:'O9',materialId:'M9',status:'review',
+    specApproved:false,leadTimeDays:30}],rejected:[],replaceMaterialIds:['M9']},'รอบสอง.xlsx');
+  const after=c.loadCostStore().catalog[0];
+  assert.equal(after.specApproved,false,'ตรวจแล้วไม่ผ่านคือข้อมูลใหม่ ห้ามให้ของเก่าทับ');
+  assert.equal(after.leadTimeDays,30,'ค่าที่ไฟล์ใหม่ระบุมาต้องชนะค่าเดิม');
+  assert.equal(after.carriedFrom,undefined,'ไม่ได้ยกอะไรมาก็ต้องไม่ติดร่องรอยว่ายก');
+});
+test('วัสดุที่ไม่เคยมีในเครื่อง นำเข้าครั้งแรกต้องไม่ได้การรับรองมาฟรี',()=>{
+  const c=fixture();
+  c.costApplyCatalog({offers:[{...offer,id:'NEW1',materialId:'MNEW',status:'review',
+    specApproved:null,leadTimeDays:null}],rejected:[],replaceMaterialIds:['MNEW']},'ครั้งแรก.xlsx');
+  const after=c.loadCostStore().catalog[0];
+  assert.equal(after.specApproved,null);
+  assert.equal(after.leadTimeDays,null);
 });

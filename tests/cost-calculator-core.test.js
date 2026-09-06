@@ -127,3 +127,36 @@ test('A2 formula tolerance rejects 9.9 percent underfill and overfill',()=>{
   for(const amount of [901,1099]){const x=readyInput();x.rmLines[0].amount=amount;const r=C.calculate(x,date);assert.ok(r.rm.baseTotal>0,'draft still has the known consumed cost');assert.equal(r.formulaComplete,false,amount+' mg against 1000 mg target');assert.equal(r.complete,false);}
   const x=readyInput();x.rmLines[0].amount=1000*(1+1e-12);assert.equal(C.calculate(x,date).formulaComplete,true,'representation-level arithmetic noise remains tolerated');
 });
+
+// เจ้าของระบบยืนยัน 2026-09-06: ช่วง MOQ เช่น "1-10 kg" คือเพดานที่ราคานั้นใช้ได้
+const capped=(cap,unit,units)=>{const x=readyInput();x.sellingUnits=units;x.unitsPerPack=1;
+  x.rmLines[0].amount=1;x.rmLines[0].unit='g';
+  if(cap!==undefined){x.rmLines[0].offer.maxOrderQuantity=cap;x.rmLines[0].offer.maxOrderUnit=unit;}
+  return C.calculate(x,date);};
+test('ปริมาณที่ต้องซื้อเกินเพดานของ Tier ทำให้ราคานั้นใช้ไม่ได้ พร้อมบอกตัวเลขทั้งสองฝั่ง',()=>{
+  const under=capped(10,'kg',5000),over=capped(10,'kg',50000);
+  assert.equal(under.rm.lines[0].ready,true,'5 กก. อยู่ในเพดาน 10 กก. ต้องใช้ได้');
+  assert.equal(over.rm.lines[0].ready,false,'50 กก. เกินเพดาน ต้องใช้ไม่ได้');
+  assert.equal(over.rm.lines[0].overCap.capKg,10);
+  assert.ok(over.pending.some(m=>/เกินเพดาน 10/.test(m)),'ต้องบอกเพดานเป็นตัวเลข: '+over.pending.join(' | '));
+  assert.ok(over.rm.lines[0].baseTotal!==null,'ยังคำนวณให้ดูได้ แต่ใช้ไม่ได้ ไม่ใช่ซ่อนตัวเลข');
+  assert.equal(under.rm.lines[0].overCap,undefined,'อยู่ในเพดานต้องไม่ติดร่องรอย');
+  // ขอบพอดีต้องใช้ได้ "ใช้ได้ถึง 10 กก." แปลว่ารวม 10 ไม่ใช่ต่ำกว่า 10
+  const exact=capped(10,'kg',10000);
+  assert.equal(exact.rm.lines[0].purchaseKg,10);
+  assert.equal(exact.rm.lines[0].ready,true,'ซื้อเท่าเพดานพอดีต้องใช้ได้');
+});
+test('ไม่มีเพดานแปลว่าไม่จำกัด ไม่ใช่ศูนย์',()=>{
+  assert.equal(capped(undefined,null,900000).rm.lines[0].ready,true,'ไม่มีช่องเลย');
+  assert.equal(capped(null,'kg',900000).rm.lines[0].ready,true,'ช่องเป็น null');
+});
+test('เพดานที่หน่วยต่างจาก MOQ ต้องเทียบด้วยน้ำหนักจริง',()=>{
+  assert.equal(capped(8000,'g',5000).rm.lines[0].ready,true,'5 กก. ต่ำกว่า 8000 g');
+  assert.equal(capped(8000,'g',9000).rm.lines[0].ready,false,'9 กก. เกิน 8000 g');
+  assert.equal(capped(8,'kg',9000).rm.lines[0].ready,false,'8 kg เท่ากับ 8000 g ต้องได้ผลเดียวกัน');
+});
+test('เพดานที่อ่านไม่ได้ต้องไม่กลายเป็นไม่จำกัด',()=>{
+  const bad=capped('สิบ','kg',5000);
+  assert.equal(bad.rm.lines[0].ready,false,'ค่าที่อ่านไม่ได้ต้องไม่ปล่อยผ่าน');
+  assert.equal(bad.rm.lines[0].baseTotal,null);
+});

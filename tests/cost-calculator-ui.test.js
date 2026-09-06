@@ -55,3 +55,17 @@ test('รายงานการนำเข้าไม่แต่งเล�
   assert.equal(parsed.rejected[0].ref,'RD-A-001','ต้องส่งต่อรหัสที่รู้จริง');
   assert.equal(parsed.rejected[1].row,47,'ถ้าต้นทางบอกเลขแถวจริงต้องใช้เลขนั้น');
 });
+
+test('หมายเหตุยาวถูกย่อพอให้อ่านในตาราง และ link ไม่ถูกตัดจนเปิดไม่ได้',()=>{
+  const c=fixture();
+  const brief=t=>c.run(`costBrief(${JSON.stringify(t)})`);
+  assert.equal(brief('เงื่อนไขสั้น'),'เงื่อนไขสั้น','ข้อความสั้นต้องไม่ถูกแตะ');
+  const long='เงื่อนไขการใช้เครื่องหมายการค้า '.repeat(20);
+  const out=brief(long);
+  assert.ok(out.length<=95&&out.length>60,'ต้องย่อแต่ยังอ่านได้: ยาว '+out.length);
+  assert.ok(out.endsWith('…'),'ต้องบอกว่ายังมีต่อ');
+  assert.ok(long.startsWith(out.slice(0,-1).trim()),'ส่วนที่แสดงต้องเป็นต้นข้อความจริง');
+  const withLink=long+' https://example.com/spec.pdf';
+  const linked=brief(withLink);
+  assert.ok(linked.includes('https://example.com/spec.pdf'),'link ต้องอยู่ครบเส้น ไม่ถูกตัดกลาง: '+linked);
+});

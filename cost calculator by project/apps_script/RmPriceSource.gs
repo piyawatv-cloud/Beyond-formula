@@ -165,8 +165,10 @@ var RmPriceSource = (function () {
           // การเติมให้เท่ากับ MOQ ทำให้เงินซื้อและของเหลือบวมเกินจริงเมื่อ MOQ 100
           // แต่บรรจุถุงละ 25 จึงเว้นว่างไว้ให้เห็นว่ายังไม่ครบ ตามกฎห้ามเดาแทนคน
           increment: null, incrementUnit: o.moq.unit,
-          // ราคาช่วงใช้ได้เฉพาะในช่วงนั้น เก็บขอบบนไว้ให้ตัดสินใจ ไม่ทิ้ง
+          // เจ้าของระบบยืนยัน (2026-09-06): ขอบบนของช่วงคือเพดานที่ราคานี้ใช้ได้จริง
+          // เครื่องคำนวณอ่านคู่ maxOrderQuantity/maxOrderUnit จึงต้องส่งหน่วยไปด้วย
           maxOrderQuantity: o.moq.rangeUpper === undefined ? null : o.moq.rangeUpper,
+          maxOrderUnit: o.moq.rangeUpper === undefined ? '' : o.moq.unit,
           leadTimeDays: null, specApproved: null,
           validUntil: validDays && asOf ? addDays(asOf, validDays) : '',
           // เลขแถวขยับทุกครั้งที่เรียงหรือแทรกชีต จึงไม่ใช่ตัวอ้างอิงที่นิ่ง

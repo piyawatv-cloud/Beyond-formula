@@ -228,3 +228,14 @@ test('MOQ ต่างหน่วยแปลงเป็นน้ำหนั�
   assert.equal(ug(o[0].id),ug(o[1].id),'2000 g กับ 2 kg เป็นน้ำหนักเดียวกัน');
   assert.equal(ug(o[0].id)/ug(o[2].id),4000,'2 kg เป็น 4000 เท่าของ 500 mg');
 });
+
+test('ขอบบนของช่วง MOQ ส่งเป็นเพดานพร้อมหน่วย ให้เครื่องคำนวณบังคับใช้ได้จริง',()=>{
+  const o=P.build([row('สาร ก.','ผู้ขาย 1','1000','1-20 kg'),row('สาร ข.','ผู้ขาย 1','1000','500-800 g'),
+    row('สาร ค.','ผู้ขาย 1','1000','5 kg')],[],opts).offers;
+  const by=name=>o.find(x=>x.name===name);
+  assert.equal(by('สาร ก.').maxOrderQuantity,20);
+  assert.equal(by('สาร ก.').maxOrderUnit,'kg','ไม่มีหน่วยแล้วเครื่องคำนวณตีความไม่ได้');
+  assert.equal(by('สาร ข.').maxOrderUnit,'g','หน่วยต้องตามที่ผู้ขายเขียน ไม่แปลงเป็น kg');
+  assert.equal(by('สาร ค.').maxOrderQuantity,null,'MOQ ค่าเดียวไม่มีเพดาน');
+  assert.equal(by('สาร ค.').maxOrderUnit,'','ไม่มีเพดานต้องไม่มีหน่วยลอย');
+});
