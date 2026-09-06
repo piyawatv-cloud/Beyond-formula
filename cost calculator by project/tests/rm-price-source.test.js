@@ -49,7 +49,7 @@ test('แถวที่ ชื่อ+ผู้ขาย เดียวกั�
   const same=r.offers.filter(o=>o.vendor==='ผู้ขาย 1');
   assert.equal(same.length,2);
   assert.equal(same[0].materialId,same[1].materialId,'Tier ของวัสดุเดียวกันต้องใช้ตัวตนเดียวกัน');
-  assert.equal(same.map(o=>o.tierId).join(','),'T1,T2');
+  assert.equal(same.map(o=>o.tierId).join(','),'1 kg,25 kg','ชื่อ Tier ผูกกับ MOQ ไม่ใช่ลำดับ');
   assert.equal(same[0].moq,1,'Tier เรียงตาม MOQ จากน้อยไปมาก');
   assert.equal(same[1].moq,25);
 });
@@ -63,8 +63,9 @@ test('ลำดับแถวในไฟล์ไม่เปลี่ยน�
 test('ค่าที่ระบบเติมให้เองต้องถูกทำเครื่องหมายทุกครั้ง ไม่เติมเงียบ',()=>{
   const r=P.build([row('สาร ก.','ผู้ขาย 1','1000','1-10 kg')],[],opts);
   const o=r.offers[0];
-  assert.equal(o.increment,o.moq,'ขนาดสั่งเพิ่มตั้งต้นเท่ากับ MOQ');
-  assert.ok(o.notes.includes('INCREMENT_DEFAULTED_TO_MOQ'));
+  // ขนาดสั่งเพิ่มคือขนาดบรรจุ ซึ่งคนละเรื่องกับ MOQ และต้นฉบับไม่มี จึงต้องไม่เดา
+  assert.equal(o.increment,null,'ห้ามเติมขนาดสั่งเพิ่มให้เท่ากับ MOQ');
+  assert.equal(o.maxOrderQuantity,10,'ขอบบนของช่วงต้องถูกเก็บไว้ ไม่ทิ้ง');
   assert.ok(o.notes.includes('MOQ_FROM_RANGE'));
   assert.ok(o.notes.includes('VALIDITY_FROM_POLICY'));
   assert.equal(o.validUntil,'2026-12-05','90 วันนับจากวันนำเข้า');
@@ -103,7 +104,8 @@ test('ข้อเสนอที่ได้ต้องเข้าเกณ�
   const core={};
   vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../../index.html'),'utf8')
     .match(/\/\/ COST_CALCULATOR_CORE_START([\s\S]*?)\/\/ COST_CALCULATOR_CORE_END/)[1],core);
-  const filled={...o,leadTimeDays:14,specApproved:true,status:'confirmed',scope:{type:'central'}};
+  const filled={...o,leadTimeDays:14,specApproved:true,status:'confirmed',scope:{type:'central'},
+    increment:o.moq,incrementUnit:o.moqUnit,validUntil:'2999-01-01'};
   const s=core.CostCalculator.createScenario({projectId:'A00001',scenarioId:'S1',revision:1,currency:'THB',
     sellingUnits:1000,unitsPerPack:1,fillAmount:1,fillUnit:'g',pkSpecVersion:null,pkNotApplicable:true,
     rmLines:[{id:'L1',materialId:filled.materialId,alias:'x',amount:1,unit:'g',lossPercent:0,offer:filled}],

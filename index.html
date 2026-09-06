@@ -668,7 +668,7 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
   <div class="logo"><svg viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-1.73-3L9 11.35V4H8a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2h-1v7.35L19.73 19A2 2 0 0 1 18 22H6Zm5-10.11L8.31 16.5h7.38L13 11.89V4h-2v7.89Z"/></svg></div>
   <div>
     <div class="hdr-title">Formula Studio</div>
-    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-06.2-pk-authority</div>
+    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-06.3-tier-identity</div>
   </div>
   <div class="sync-chip" id="syncChip" onclick="sbManualSync()" title="สถานะการซิงก์ข้อมูลกับเซิร์ฟเวอร์กลาง"></div>
 </div>
@@ -2156,7 +2156,12 @@ async function costLocalRequest(action,payload){
 // A row missing any commercial field is REJECTED, never defaulted: a blank unit
 // or an assumed zero silently becomes a wrong cost.
 const COST_MASS_UNITS=['kg','g','mg'];
-const COST_CATALOG_REQUIRED=['id','materialId','tierId','vendorId','status','currency','price','priceUnit','moq','moqUnit','increment','incrementUnit','leadTimeDays','validUntil','evidenceRef','specApproved'];
+// ต้องมีจึงจะระบุตัวตนและอ่านราคาได้ — ขาดคือแถวเสีย ปฏิเสธไป
+const COST_CATALOG_REQUIRED=['id','materialId','tierId','vendorId','status','currency','price','priceUnit','moq','moqUnit','evidenceRef'];
+// ขาดได้ นำเข้าได้ แต่คิดต้นทุนไม่ได้จนกว่าจะเติม ตามหลัก "ข้อมูลไม่ครบใช้ไม่ได้ แต่ต้องเห็นว่ามีของ"
+// ถ้าบังคับให้มีตั้งแต่ตอนนำเข้า รายการที่รอ Lead Time และการรับรอง spec จะไม่มีวันเข้าระบบ
+// แล้ววงจร RD ร้องขอ → จัดซื้อลงราคา → RD รับรอง จะหยุดตั้งแต่ขั้นนำเข้า
+const COST_CATALOG_PENDING_OK=['increment','incrementUnit','leadTimeDays','validUntil','specApproved'];
 function costCell(row,key){
   const found=Object.keys(row).find(name=>String(name).trim().toLowerCase()===key.toLowerCase());
   return found===undefined?undefined:row[found];
@@ -2168,28 +2173,35 @@ function costParseCatalogRows(rows){
     const raw={};COST_CATALOG_REQUIRED.forEach(key=>{raw[key]=costCell(row,key);});
     const missing=COST_CATALOG_REQUIRED.filter(key=>raw[key]===undefined||String(raw[key]).trim()==='');
     if(missing.length){rejected.push({row:line,reason:'ขาดข้อมูล: '+missing.join(', ')});return;}
-    const number=value=>{const parsed=Number(String(value).replace(/,/g,'').trim());return Number.isFinite(parsed)?parsed:null;};
+    // Number('') คืน 0 ซึ่งทำให้ช่องว่างกลายเป็นศูนย์เงียบ ๆ — ว่างต้องแปลว่ายังไม่มีข้อมูล
+    const number=value=>{const t=String(value===undefined||value===null?'':value).replace(/,/g,'').trim();
+      if(t==='')return null;const parsed=Number(t);return Number.isFinite(parsed)?parsed:null;};
     const offer={id:String(raw.id).trim(),version:Number(costCell(row,'version'))||1,
       materialId:String(raw.materialId).trim(),tierId:String(raw.tierId).trim(),vendorId:String(raw.vendorId).trim(),
       name:String(costCell(row,'name')||'').trim(),group:String(costCell(row,'group')||'').trim(),
       spec:String(costCell(row,'spec')||'').trim(),vendor:String(costCell(row,'vendor')||'').trim(),
-      status:String(raw.status).trim(),specApproved:['true','yes','1','ใช่'].includes(String(raw.specApproved).trim().toLowerCase()),
+      status:String(raw.status).trim(),
+      // ว่าง = ยังไม่ได้ตรวจ (null) · มีค่าแต่ไม่ใช่คำยืนยัน = ตรวจแล้วไม่ผ่าน (false)
+      specApproved:costCell(row,'specApproved')===undefined||String(costCell(row,'specApproved')).trim()===''
+        ?null:['true','yes','1','ใช่'].includes(String(costCell(row,'specApproved')).trim().toLowerCase()),
       currency:String(raw.currency).trim(),price:number(raw.price),priceUnit:String(raw.priceUnit).trim(),
       priceBasisQuantity:costCell(row,'priceBasisQuantity')===undefined?1:number(costCell(row,'priceBasisQuantity')),
       moq:number(raw.moq),moqUnit:String(raw.moqUnit).trim(),
-      increment:number(raw.increment),incrementUnit:String(raw.incrementUnit).trim(),
-      leadTimeDays:number(raw.leadTimeDays),validUntil:String(costExcelDate(raw.validUntil)).trim(),
+      increment:number(costCell(row,'increment')),incrementUnit:String(costCell(row,'incrementUnit')||'').trim(),
+      leadTimeDays:number(costCell(row,'leadTimeDays')),
+      validUntil:String(costExcelDate(costCell(row,'validUntil')||'')).trim(),
       evidenceRef:String(raw.evidenceRef).trim(),scope:{type:'central'}};
     const bad=[];
     if(offer.price===null||offer.price<0)bad.push('price');
     if(offer.moq===null||offer.moq<0)bad.push('moq');
-    if(offer.increment===null||offer.increment<=0)bad.push('increment');
-    if(offer.leadTimeDays===null||offer.leadTimeDays<0)bad.push('leadTimeDays');
     if(offer.priceBasisQuantity===null||offer.priceBasisQuantity<=0)bad.push('priceBasisQuantity');
     if(!COST_MASS_UNITS.includes(offer.priceUnit))bad.push('priceUnit');
     if(!COST_MASS_UNITS.includes(offer.moqUnit))bad.push('moqUnit');
-    if(!COST_MASS_UNITS.includes(offer.incrementUnit))bad.push('incrementUnit');
-    if(!costDateOK(offer.validUntil))bad.push('validUntil');
+    // ช่องที่ยังไม่ต้องมี ถ้ามีมาแล้วต้องถูกต้อง แต่ค่าว่างไม่ใช่ข้อผิดพลาด
+    if(offer.increment!==null&&offer.increment<=0)bad.push('increment');
+    if(offer.incrementUnit&&!COST_MASS_UNITS.includes(offer.incrementUnit))bad.push('incrementUnit');
+    if(offer.leadTimeDays!==null&&offer.leadTimeDays<0)bad.push('leadTimeDays');
+    if(offer.validUntil&&!costDateOK(offer.validUntil))bad.push('validUntil');
     if(bad.length)rejected.push({row:line,reason:'ค่าไม่ถูกต้อง: '+bad.join(', ')});
     else offers.push(offer);
   });

@@ -39,7 +39,9 @@ var RmPriceSource = (function () {
     if (range) {
       var unit = (range[3] || 'kg').toLowerCase();
       if (!MASS[unit]) return null;
-      return {quantity:Number(range[1]), unit:unit, fromRange:true, rangeUpper:Number(range[2])};
+      var lo = Number(range[1]), hi = Number(range[2]);
+      if (!(hi > lo)) return null;                       // 10-1 หรือ 5-5 อ่านไม่ได้ ไม่เดา
+      return {quantity:lo, unit:unit, fromRange:true, rangeUpper:hi};
     }
     var one = s.match(/^(\d+(?:\.\d+)?)\s*([a-zA-Zก-๙]+)?\.?$/);
     if (!one) return null;
@@ -64,6 +66,9 @@ var RmPriceSource = (function () {
       var rawPrice = text(row['Price/kg']), rawMoq = text(row['MOQ']);
       if (!name) return;                                   // แถวว่าง ไม่ใช่ข้อผิดพลาด
       if (!rawPrice) { skipped.push({row:index + 2, reason:'ยังไม่มีราคา'}); return; }
+      // ไม่มีผู้ขาย = ระบุตัวตนไม่ได้ ถ้าเดาให้เป็น "ไม่ระบุ" สองแถวคนละเจ้าจะยุบเป็น
+      // วัสดุตัวเดียวแล้วเอาราคาสองเจ้ามาเรียงเป็นบันไดราคาเดียว ซึ่งซื้อจริงไม่ได้
+      if (!supplier) { skipped.push({row:index + 2, reason:'ไม่มีชื่อผู้ขาย ระบุตัวตนวัสดุไม่ได้'}); return; }
       var price = priceOf(rawPrice);
       if (price === null) { skipped.push({row:index + 2, reason:'อ่านราคาไม่ได้'}); return; }
       var moq = moqOf(rawMoq);
@@ -80,32 +85,43 @@ var RmPriceSource = (function () {
       materials++;
       // Tier เรียงตาม MOQ จากน้อยไปมาก เพื่อให้หมายเลข Tier คงที่ทุกรอบการนำเข้า
       g.offers.sort(function (a, b) { return a.moq.quantity - b.moq.quantity || a.price - b.price; });
-      g.offers.forEach(function (o, i) {
+      g.offers.forEach(function (o) {
         var notes = [];
         if (o.moq.fromRange) notes.push('MOQ_FROM_RANGE');
         if (o.moq.assumedUnit) notes.push('MOQ_UNIT_ASSUMED_KG');
+        // รหัสผูกกับปริมาณขั้นต่ำ ไม่ใช่ลำดับที่เรียงได้ การเติมแถวราคาแบ่งขายเข้ามา
+        // ใหม่จึงไม่ทำให้รหัสของ Tier เดิมเลื่อน ซึ่งเคยทำให้การรับรอง spec ไปเกาะราคาผิดตัว
+        var moqKg = o.moq.quantity * MASS[o.moq.unit];
+        var slug = String(Math.round(moqKg * 1000)) + 'G';
         offers.push({
-          id: key + '-T' + (i + 1), version: 1, tierId: 'T' + (i + 1),
+          id: key + '-' + slug, version: 1, tierId: o.moq.quantity + ' ' + o.moq.unit,
           materialId: key, rdCode: g.rdCode,
           name: g.name, vendor: g.supplier, vendorId: g.supplier || 'ไม่ระบุผู้ขาย',
           group: '', spec: '', currency: 'THB',
           price: o.price, priceUnit: 'kg', priceBasisQuantity: 1,
           moq: o.moq.quantity, moqUnit: o.moq.unit,
-          // ต้นฉบับไม่มีคอลัมน์ขนาดสั่งเพิ่ม ใช้ MOQ เป็นค่าตั้งต้นและทำเครื่องหมายไว้
-          increment: o.moq.quantity, incrementUnit: o.moq.unit,
+          // ขนาดสั่งเพิ่มคือ "ขนาดบรรจุ" ซึ่งเป็นคนละเรื่องกับ MOQ และต้นฉบับไม่มี
+          // การเติมให้เท่ากับ MOQ ทำให้เงินซื้อและของเหลือบวมเกินจริงเมื่อ MOQ 100
+          // แต่บรรจุถุงละ 25 จึงเว้นว่างไว้ให้เห็นว่ายังไม่ครบ ตามกฎห้ามเดาแทนคน
+          increment: null, incrementUnit: o.moq.unit,
+          // ราคาช่วงใช้ได้เฉพาะในช่วงนั้น เก็บขอบบนไว้ให้ตัดสินใจ ไม่ทิ้ง
+          maxOrderQuantity: o.moq.rangeUpper === undefined ? null : o.moq.rangeUpper,
           leadTimeDays: null, specApproved: null,
           validUntil: validDays && asOf ? addDays(asOf, validDays) : '',
-          evidenceRef: 'PriceOfRM!row' + o.sourceRow,
+          // เลขแถวขยับทุกครั้งที่เรียงหรือแทรกชีต จึงไม่ใช่ตัวอ้างอิงที่นิ่ง
+          evidenceRef: 'PriceOfRM:' + key + '-' + slug,
+          sourceRow: o.sourceRow,
           status: 'review',
           condition: o.remark,
-          notes: notes.concat(['INCREMENT_DEFAULTED_TO_MOQ'])
-            .concat(validDays && asOf ? ['VALIDITY_FROM_POLICY'] : [])
+          notes: notes.concat(validDays && asOf ? ['VALIDITY_FROM_POLICY'] : [])
         });
       });
     });
     return {offers:offers, skipped:skipped,
       summary:{rows:(rows || []).length, materials:materials, offers:offers.length,
-        skipped:skipped.length, withRdCode:offers.filter(function (o) { return !!o.rdCode; }).length}};
+        skipped:skipped.length, withRdCode:offers.filter(function (o) { return !!o.rdCode; }).length,
+        needMoqConfirm:offers.filter(function (o) { return o.notes.indexOf('MOQ_FROM_RANGE') >= 0; }).length,
+        needIncrement:offers.length}};
   }
   function addDays(iso, days) {
     var d = new Date(iso + 'T00:00:00Z');

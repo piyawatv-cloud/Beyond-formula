@@ -24,8 +24,10 @@ test('a clean file reports every row accepted and usable',()=>{
 });
 test('missing columns are named rather than reported as a row problem',()=>{
   const report=JSON.parse(run('id,name\nO1,สาร A\n',['--json']));
-  assert.ok(report.missingColumns.includes('price'));
-  assert.ok(report.missingColumns.includes('validUntil'));
+  assert.ok(report.missingColumns.includes('price'),'ราคาเป็นคอลัมน์บังคับ');
+  assert.ok(report.missingColumns.includes('moq'));
+  // วันหมดอายุและการรับรอง spec ขาดได้ตอนนำเข้า จะไปตกที่ "ยังใช้ไม่ได้" แทน
+  assert.ok(!report.missingColumns.includes('validUntil'));
   assert.equal(report.accepted,0);
 });
 test('each bad row is reported with its spreadsheet row number and reason',()=>{
@@ -109,4 +111,36 @@ test('แถวที่ยังไม่รับรอง spec ต้อง�
   const report=JSON.parse(run(`${HEADER}\n${GOOD.replace(',true,1',',false,1')}\n`,['--json']));
   assert.equal(report.accepted,1,'ยังนำเข้าได้');
   assert.equal(report.usable,0,'แต่ต้องไม่พร้อมใช้');
+});
+
+// รายการที่ยังรอ Lead Time และการรับรอง spec ต้องเข้าระบบมารอได้ ไม่ใช่ถูกตีกลับที่หน้าประตู
+// ถ้าตีกลับ วงจร RD ร้องขอ → จัดซื้อลงราคา → RD รับรอง จะหยุดตั้งแต่ขั้นนำเข้า
+test('แถวที่ยังไม่มี Lead Time หรือการรับรอง spec ต้องนำเข้าได้แต่ยังใช้ไม่ได้',()=>{
+  const {costParseCatalogRows,costOfferMissing}=require('../tools/check-rm-catalog.js').loadParser();
+  const partial={...rowObj()};
+  for(const k of ['increment','incrementUnit','leadTimeDays','validUntil','specApproved'])partial[k]='';
+  const parsed=costParseCatalogRows([partial]);
+  assert.equal(parsed.rejected.length,0,'ต้องไม่ถูกปฏิเสธ');
+  assert.equal(parsed.offers.length,1);
+  const o=parsed.offers[0];
+  assert.equal(o.leadTimeDays,null,'ว่างต้องเป็น null ไม่ใช่ 0');
+  assert.equal(o.increment,null);
+  assert.equal(o.specApproved,null,'ว่าง = ยังไม่ได้ตรวจ ต่างจาก false ที่แปลว่าตรวจแล้วไม่ผ่าน');
+  for(const m of ['Lead Time','วันหมดอายุราคา','ขนาดสั่งเพิ่ม'])
+    assert.ok(costOfferMissing(o).includes(m),m);
+});
+test('ค่าที่ยังไม่บังคับ ถ้ามีมาแล้วผิดต้องถูกปฏิเสธ',()=>{
+  const {costParseCatalogRows}=require('../tools/check-rm-catalog.js').loadParser();
+  for(const [k,v] of [['increment','0'],['increment','-1'],['incrementUnit','ชิ้น'],
+    ['leadTimeDays','-5'],['validUntil','2030-02-30']]){
+    const parsed=costParseCatalogRows([{...rowObj(),[k]:v}]);
+    assert.equal(parsed.offers.length,0,k+'='+v);
+    assert.match(parsed.rejected[0].reason,new RegExp(k));
+  }
+});
+test('ช่องว่างต้องไม่กลายเป็นศูนย์',()=>{
+  const {costParseCatalogRows}=require('../tools/check-rm-catalog.js').loadParser();
+  const o=costParseCatalogRows([{...rowObj(),increment:'',leadTimeDays:''}]).offers[0];
+  assert.notEqual(o.increment,0,'ศูนย์แปลว่าสั่งเพิ่มทีละศูนย์ ซึ่งไม่มีความหมาย');
+  assert.notEqual(o.leadTimeDays,0,'ศูนย์แปลว่าของมาทันที ซึ่งไม่จริง');
 });

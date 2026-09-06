@@ -102,7 +102,9 @@ test('costRequest routes to the local store while no API origin is configured',a
 const catalogRow=extra=>({id:'O9',materialId:'M9',tierId:'T1',vendorId:'V1',name:'สารทดสอบ',status:'confirmed',currency:'THB',price:'100',priceUnit:'kg',moq:'2',moqUnit:'kg',increment:'1',incrementUnit:'kg',leadTimeDays:'10',validUntil:'2999-01-01',evidenceRef:'E9',specApproved:'true',...extra});
 
 test('catalog import rejects rows missing a commercial field instead of defaulting',()=>{const c=fixture();
- for(const key of ['price','priceUnit','moq','moqUnit','increment','incrementUnit','leadTimeDays','validUntil','evidenceRef','status','currency','specApproved','id','materialId','tierId','vendorId']){
+ // ตัวตนและราคาบังคับ ส่วน increment/leadTimeDays/validUntil/specApproved ขาดได้
+ // แล้วไปตกที่ "นำเข้าได้แต่ยังใช้ไม่ได้" ซึ่งมีเทสต์แยกครอบไว้
+ for(const key of ['price','priceUnit','moq','moqUnit','evidenceRef','status','currency','id','materialId','tierId','vendorId']){
   const row=catalogRow();delete row[key];
   const parsed=c.costParseCatalogRows([row]);
   assert.equal(parsed.offers.length,0,key);
