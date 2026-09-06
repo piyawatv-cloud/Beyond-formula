@@ -12,12 +12,16 @@
 var RmPriceSource = (function () {
   'use strict';
   var MASS = {kg:1, g:0.001, mg:0.000001};
-  var PRICE_MAX_PER_KG = 100000;   // เพดานเดียวกับ RmSourceMap ที่เจ้าของระบบให้ไว้
+  // เกินเพดานนี้มักเกิดจากวางราคาต่อถุงลงช่องราคาต่อกิโล แต่ actives บางตัวแพงจริง
+  // จึงติดธงให้ Procurement ตรวจ ไม่ทิ้งแถว การทิ้งทำให้สารหายไปจากแคตตาล็อกเงียบ ๆ
+  var PRICE_MAX_PER_KG = 100000;
   function text(v) { return v === null || v === undefined ? '' : String(v).trim(); }
   function norm(v) {
     // ไม่ตัด % ออก เพราะ "Acid 50%" กับ "Acid 50" เป็นคนละความเข้มข้น
     // เดิมตัดทิ้งแล้วสองตัวยุบเป็นวัสดุเดียว ชื่อของตัวหลังหายไปและราคากลายเป็น Tier ของตัวแรก
-    return text(v).toLowerCase().replace(/[®™()\[\]{}.,\-_\/\\]/g, ' ').replace(/\s+/g, ' ').trim();
+    return text(v).toLowerCase().replace(/[®™()\[\]{}.,\-_\/\\]/g, ' ')
+      .replace(/\s*%/g, '%')                          // "50 %" กับ "50%" คือตัวเดียวกัน
+      .replace(/\s+/g, ' ').trim();
   }
   // ตัวตนที่คงที่ข้ามการนำเข้าแต่ละรอบ ต้องได้ค่าเดิมเสมอเมื่อชื่อและผู้ขายเดิม
   function materialKey(supplier, name) {
@@ -34,9 +38,7 @@ var RmPriceSource = (function () {
     var m = s.match(/^(?:thb\s*|฿\s*)?(\d+(?:\.\d+)?)\s*(?:(?:thb|baht|บาท)\s*)?(?:\/\s*(?:kg|kilo|กก\.?|กิโล))?\.?$/i);
     if (!m) return null;
     var n = Number(m[1]);
-    if (!isFinite(n) || n <= 0) return null;
-    // ราคาที่ทะลุเพดานมักเกิดจากวางราคาต่อถุงลงช่องราคาต่อกิโล ปฏิเสธดีกว่าปล่อยผ่าน
-    return n > PRICE_MAX_PER_KG ? null : n;
+    return isFinite(n) && n > 0 ? n : null;
   }
   function moqOf(raw) {
     var s = text(raw).replace(/,/g, '').replace(/^moq\s*/i, '').replace(/^repack\s+moq\s*/i, '');
@@ -93,7 +95,13 @@ var RmPriceSource = (function () {
       // วัสดุตัวเดียวแล้วเอาราคาสองเจ้ามาเรียงเป็นบันไดราคาเดียว ซึ่งซื้อจริงไม่ได้
       if (!supplier) { skipped.push({row:index + 2, reason:'ไม่มีชื่อผู้ขาย ระบุตัวตนวัสดุไม่ได้'}); return; }
       var price = priceOf(rawPrice);
-      if (price === null) { skipped.push({row:index + 2, reason:'อ่านราคาไม่ได้'}); return; }
+      if (price === null) {
+        // แยกให้ชัดว่าอ่านไม่ออก กับคอลัมน์สลับกันมา เพราะวิธีแก้คนละอย่าง
+        var looksMass = /^\s*\d+(?:\.\d+)?\s*(kg|g|mg|kilo|กก\.?|กิโล|กรัม)\s*\.?$/i.test(rawPrice);
+        skipped.push({row:index + 2,
+          reason:looksMass ? 'ช่องราคาเป็นหน่วยน้ำหนัก คอลัมน์อาจสลับกับ MOQ' : 'อ่านราคาไม่ได้'});
+        return;
+      }
       var moq = moqOf(rawMoq);
       if (moq === null) { skipped.push({row:index + 2, reason:rawMoq ? 'อ่าน MOQ ไม่ได้ หรือหน่วยไม่ใช่น้ำหนัก' : 'ไม่มี MOQ'}); return; }
       var key = materialKey(supplier, name);
@@ -102,25 +110,50 @@ var RmPriceSource = (function () {
       groups[key].offers.push({price:price, moq:moq, remark:text(row['Remark']),
         fn:text(row['Function']), sourceRow:index + 2});
     });
-    var offers = [], materials = 0;
+    var offers = [], materials = 0, conflicts = [];
     Object.keys(groups).forEach(function (key) {
       var g = groups[key];
       materials++;
       // Tier เรียงตาม MOQ จากน้อยไปมาก เพื่อให้หมายเลข Tier คงที่ทุกรอบการนำเข้า
       // เรียงตามน้ำหนักจริง ไม่ใช่ตัวเลขดิบ มิฉะนั้น 500 g จะไปอยู่หลัง 25 kg
-      var kg = function (m) { return m.moq.quantity * MASS[m.moq.unit]; };
-      g.offers.sort(function (a, b) { return kg(a) - kg(b) || a.price - b.price; });
+      var ug = function (m) { return Math.round(m.moq.quantity * MASS[m.moq.unit] * 1e6); };
+      g.offers.sort(function (a, b) { return ug(a) - ug(b) || a.price - b.price; });
+      // แถวที่ MOQ หนักเท่ากันคือ Tier เดียวกัน แม้เขียนคนละหน่วย ("1 kg" กับ "1000 g")
+      // ราคาเท่ากันคือแถวซ้ำ ยุบได้ · ราคาต่างกันคือต้นฉบับกำกวม ตัดสินแทนไม่ได้
+      // ทั้งสองกรณีห้ามออกเป็นสองข้อเสนอ เพราะรหัสจะชนกันแล้วตัวนำเข้าปฏิเสธทั้งไฟล์
+      var byMass = {}, order = [];
       g.offers.forEach(function (o) {
+        var k = String(ug(o));
+        if (!byMass[k]) { byMass[k] = []; order.push(k); }
+        byMass[k].push(o);
+      });
+      order.forEach(function (k) {
+        var same = byMass[k];
+        var prices = same.map(function (x) { return x.price; })
+          .filter(function (v, i, a) { return a.indexOf(v) === i; });
+        if (prices.length > 1) {
+          conflicts.push({materialId:key, name:g.name, supplier:g.supplier,
+            tierId:same[0].moq.quantity + ' ' + same[0].moq.unit,
+            // เรียงตามเลขแถวเพื่อให้ไล่เปิดชีตตามลำดับได้ ไม่ใช่ตามลำดับที่บังเอิญเรียงราคา
+            rows:same.map(function (x) { return x.sourceRow; }).sort(function (a, b) { return a - b; }),
+            reason:'MOQ น้ำหนักเท่ากันแต่ราคาไม่ตรงกัน ต้องให้ Procurement ชี้ว่าใช้แถวไหน'});
+          same.map(function (x) { return x.sourceRow; }).sort(function (a, b) { return a - b; })
+            .forEach(function (r) {
+              skipped.push({row:r, reason:'ราคาขัดแย้งกับอีกแถวที่ MOQ เท่ากัน'});
+            });
+          return;
+        }
+        var o = same[0], dupRows = same.slice(1).map(function (x) { return x.sourceRow; });
         var notes = [];
         if (o.moq.fromRange) notes.push('MOQ_FROM_RANGE');
         if (o.moq.assumedUnit) notes.push('MOQ_UNIT_ASSUMED_KG');
-        // รหัสผูกกับปริมาณขั้นต่ำ ไม่ใช่ลำดับที่เรียงได้ การเติมแถวราคาแบ่งขายเข้ามา
-        // ใหม่จึงไม่ทำให้รหัสของ Tier เดิมเลื่อน ซึ่งเคยทำให้การรับรอง spec ไปเกาะราคาผิดตัว
-        // ไมโครกรัมเพื่อไม่ให้ MOQ ที่เล็กกว่ากรัมยุบเป็น 0 เหมือนกันหมด และผูกราคาไว้ด้วย
-        // เพราะสองแถวที่ MOQ เท่ากันแต่ราคาต่างกันเป็นคนละข้อเสนอ ถ้ารหัสชนกัน
-        // ตัวนำเข้าจะปฏิเสธทั้งไฟล์ ไม่ใช่แค่แถวนั้น
-        var moqUg = Math.round(o.moq.quantity * MASS[o.moq.unit] * 1e6);
-        var slug = moqUg + 'UG-' + String(Math.round(o.price * 1000)) + 'M';
+        if (o.price > PRICE_MAX_PER_KG) notes.push('PRICE_ABOVE_PLAUSIBLE_RANGE');
+        if (dupRows.length) notes.push('DUPLICATE_ROWS:' + dupRows.join('+'));
+        // รหัสผูกกับปริมาณขั้นต่ำอย่างเดียว ไม่ผูกลำดับแถวและไม่ผูกราคา
+        // ผูกลำดับ = เติมแถวแบ่งขายแล้วรหัส Tier เดิมเลื่อน การรับรอง spec ไปเกาะผิดตัว
+        // ผูกราคา = ผู้ขายขยับราคาแล้วรหัสเปลี่ยน การรับรองที่ทำไว้หลุดทั้งชุด
+        // หน่วยไมโครกรัมเพื่อไม่ให้ MOQ ที่เล็กกว่ากรัมยุบเป็นศูนย์เหมือนกันหมด
+        var slug = k + 'UG';
         offers.push({
           id: key + '-' + slug, version: 1, tierId: o.moq.quantity + ' ' + o.moq.unit,
           materialId: key, rdCode: g.rdCode,
@@ -145,9 +178,10 @@ var RmPriceSource = (function () {
         });
       });
     });
-    return {offers:offers, skipped:skipped,
+    return {offers:offers, skipped:skipped, conflicts:conflicts,
       summary:{rows:(rows || []).length, materials:materials, offers:offers.length,
-        skipped:skipped.length, withRdCode:offers.filter(function (o) { return !!o.rdCode; }).length,
+        skipped:skipped.length, conflicts:conflicts.length,
+        pricesAboveRange:offers.filter(function (o) { return o.notes.indexOf('PRICE_ABOVE_PLAUSIBLE_RANGE') >= 0; }).length, withRdCode:offers.filter(function (o) { return !!o.rdCode; }).length,
         needMoqConfirm:offers.filter(function (o) { return o.notes.indexOf('MOQ_FROM_RANGE') >= 0; }).length,
         needIncrement:offers.length}};
   }

@@ -117,16 +117,32 @@ test('ข้อเสนอที่ได้ต้องเข้าเกณ�
 
 // ---- ข้อบกพร่องที่ตรวจพบรอบ mutation review — ล็อกไว้ไม่ให้ย้อนกลับ ----
 
-test('รหัสข้อเสนอไม่ชนกัน แม้ MOQ เขียนคนละหน่วยหรือเท่ากันแต่คนละราคา',()=>{
+test('รหัสข้อเสนอไม่ชนกัน และ MOQ ที่เล็กกว่ากรัมไม่ยุบเป็นค่าเดียวกัน',()=>{
   // รหัสซ้ำหนึ่งคู่ทำให้ตัวนำเข้าปฏิเสธทั้งไฟล์ ไม่ใช่แค่แถวนั้น
-  const ids=rows=>P.build(rows,[],opts).offers.map(o=>o.id);
-  const sameMass=ids([row('สาร ก.','ผู้ขาย 1','1000','1 kg'),row('สาร ก.','ผู้ขาย 1','950','1000 g')]);
-  assert.equal(sameMass.length,2);
-  assert.notEqual(sameMass[0],sameMass[1],'1 kg กับ 1000 g เป็นคนละข้อเสนอ');
-  const samePrice=ids([row('สาร ก.','ผู้ขาย 1','1000','5 kg'),row('สาร ก.','ผู้ขาย 1','1100','5 kg')]);
-  assert.notEqual(samePrice[0],samePrice[1],'MOQ เท่ากันแต่ราคาต่างกันก็ยังคนละข้อเสนอ');
-  const sub=ids([row('สาร ก.','ผู้ขาย 1','1000','1 mg'),row('สาร ก.','ผู้ขาย 1','900','400 mg')]);
-  assert.notEqual(sub[0],sub[1],'MOQ เล็กกว่ากรัมต้องไม่ยุบเป็นค่าเดียวกัน');
+  const r=P.build([row('สาร ก.','ผู้ขาย 1','1000','1 mg'),row('สาร ก.','ผู้ขาย 1','900','400 mg'),
+    row('สาร ก.','ผู้ขาย 1','800','1 kg')],[],opts);
+  const ids=r.offers.map(o=>o.id);
+  assert.equal(new Set(ids).size,3,'สามข้อเสนอต้องได้สามรหัส: '+ids.join(','));
+  assert.equal(r.conflicts.length,0);
+});
+test('รหัสข้อเสนอไม่เปลี่ยนเมื่อผู้ขายขยับราคา',()=>{
+  // การรับรอง spec และ Lead Time ที่ Procurement ยืนยันไว้เกาะอยู่กับรหัสนี้
+  // ถ้ารหัสเปลี่ยนตามราคา ทุกครั้งที่ผู้ขายส่งราคาใหม่ การยืนยันจะหลุดทั้งชุด
+  const at=price=>P.build([row('สาร ก.','ผู้ขาย 1',price,'5 kg')],[],opts).offers[0];
+  assert.equal(at('1000').id,at('1050').id,'ราคาเปลี่ยนแต่เป็นข้อเสนอเดิม');
+  assert.notEqual(at('1000').price,at('1050').price,'ราคาต้องอัปเดตจริง ไม่ใช่ค้างค่าเก่า');
+  assert.equal(at('1000').id,at('1000').evidenceRef.replace('PriceOfRM:',''));
+});
+test('MOQ น้ำหนักเท่ากันแต่เขียนคนละหน่วย เป็น Tier เดียวกัน ไม่ใช่สองรหัสที่ชนกัน',()=>{
+  const same=P.build([row('สาร ก.','ผู้ขาย 1','1000','1 kg'),row('สาร ก.','ผู้ขาย 1','1000','1000 g')],[],opts);
+  assert.equal(same.offers.length,1,'ราคาตรงกันคือแถวซ้ำ ยุบเป็นข้อเสนอเดียว');
+  assert.ok(same.offers[0].notes.some(n=>n.startsWith('DUPLICATE_ROWS:')),'ต้องบอกว่ายุบมาจากแถวไหน');
+  assert.equal(same.conflicts.length,0);
+  const clash=P.build([row('สาร ก.','ผู้ขาย 1','1000','1 kg'),row('สาร ก.','ผู้ขาย 1','950','1000 g')],[],opts);
+  assert.equal(clash.offers.length,0,'ราคาไม่ตรงกันคือต้นฉบับกำกวม ห้ามเลือกแทน Procurement');
+  assert.equal(clash.conflicts.length,1);
+  assert.equal(clash.conflicts[0].rows.join(','),'2,3','ต้องชี้ได้ว่าต้องไปแก้แถวไหน');
+  assert.equal(clash.skipped.length,2,'ทั้งสองแถวต้องนับว่าไม่ได้เข้าแคตตาล็อก');
 });
 test('รหัสข้อเสนอผูกกับเนื้อข้อเสนอ ไม่ใช่ตำแหน่งแถว',()=>{
   const a=row('สาร ก.','ผู้ขาย 1','1000','1 kg'),b=row('สาร ก.','ผู้ขาย 1','950','25 kg');
@@ -137,19 +153,31 @@ test('รหัสข้อเสนอผูกกับเนื้อข้�
   assert.equal(find(before,'25 kg').id,find(after,'25 kg').id);
   assert.equal(find(after,'1 kg').evidenceRef,'PriceOfRM:'+find(after,'1 kg').id,'หลักฐานต้องชี้กลับที่ข้อเสนอเดิม');
 });
-test('หน่วยน้ำหนักลอย ๆ ไม่ใช่ราคา และราคาที่เกินความเป็นจริงถูกปฏิเสธ',()=>{
+test('หน่วยน้ำหนักลอย ๆ ไม่ใช่ราคา และรายงานชี้ว่าคอลัมน์อาจสลับกัน',()=>{
   // คอลัมน์ MOQ ที่ไหลมาอยู่ช่องราคา เคยอ่านเป็น 25 บาท/กก. ต่ำกว่าจริงหลายสิบเท่า
   for(const raw of ['25 kg','500 g','25 กก.','1 กิโล'])
     assert.equal(P.priceOf(raw),null,raw);
   assert.equal(P.priceOf('1250/kg'),1250,'ราคาต่อกิโลที่เขียนถูกต้องยังต้องอ่านได้');
   assert.equal(P.priceOf('1250 thb/kg'),1250);
-  assert.equal(P.priceOf('100000'),100000,'เพดานเป็นค่าที่ยอมรับได้ ไม่ใช่ค่าที่ถูกตัด');
-  assert.equal(P.priceOf('100001'),null,'เกินเพดานต้องให้คนตรวจ ไม่เดาแทน');
-  assert.equal(P.priceOf('999999999999'),null);
+  const r=P.build([row('สาร ก.','ผู้ขาย 1','25 kg','1 kg'),row('สาร ข.','ผู้ขาย 1','ราคาโทรถาม','1 kg')],[],opts);
+  assert.match(r.skipped[0].reason,/คอลัมน์อาจสลับ/,'ต้องชี้ต้นเหตุ ไม่ใช่บอกแค่ว่าอ่านไม่ได้');
+  assert.match(r.skipped[1].reason,/อ่านราคาไม่ได้/,'อ่านไม่ออกจริงต้องไม่ถูกกล่าวหาว่าสลับคอลัมน์');
+});
+test('ราคาที่สูงผิดปกติถูกติดธงไว้ให้ตรวจ ไม่ถูกทิ้งเงียบ',()=>{
+  // ทิ้งแถวทำให้สารหายจากแคตตาล็อกโดยไม่มีใครรู้ แต่ actives บางตัวแพงจริง
+  const r=P.build([row('สาร ก.','ผู้ขาย 1','999999999','1 kg'),row('สาร ข.','ผู้ขาย 1','100000','1 kg')],[],opts);
+  assert.equal(r.offers.length,2,'ไม่ทิ้งแถว');
+  assert.ok(r.offers.find(o=>o.name==='สาร ก.').notes.includes('PRICE_ABOVE_PLAUSIBLE_RANGE'));
+  assert.ok(!r.offers.find(o=>o.name==='สาร ข.').notes.includes('PRICE_ABOVE_PLAUSIBLE_RANGE'),
+    'ค่าที่เท่าเพดานพอดียังปกติ');
+  assert.equal(r.summary.pricesAboveRange,1);
+  assert.equal(r.offers.find(o=>o.name==='สาร ก.').status,'review','ยังต้องผ่านการยืนยันก่อนใช้คิดราคา');
 });
 test('ความเข้มข้นที่ต่างกันเป็นคนละวัสดุ แม้ต่างกันแค่เครื่องหมายเปอร์เซ็นต์',()=>{
   assert.notEqual(P.materialKey('ผู้ขาย ก.','Acid 50%'),P.materialKey('ผู้ขาย ก.','Acid 50'),
     'ถ้าคีย์ชนกัน ราคาของตัวหลังจะกลายเป็น Tier ของตัวแรกและชื่อจริงหายไป');
+  assert.equal(P.materialKey('ผู้ขาย ก.','Acid 50%'),P.materialKey('ผู้ขาย ก.','Acid 50 %'),
+    'ช่องว่างหน้าเปอร์เซ็นต์เป็นการพิมพ์ ไม่ใช่คนละสาร ถ้าแตกตัวตนจะเกิดวัสดุซ้ำในแคตตาล็อก');
 });
 test('MOQ ที่เป็นช่วงและไม่มีหน่วย ถูกทำเครื่องหมายว่าเดาหน่วยให้ทั้งสองอย่าง',()=>{
   const bare=P.moqOf('1-10');
@@ -196,7 +224,7 @@ test('MOQ ต่างหน่วยแปลงเป็นน้ำหนั�
   const o=P.build([row('สาร ก.','ผู้ขาย 1','1000','2000 g'),row('สาร ข.','ผู้ขาย 1','1000','2 kg'),
     row('สาร ค.','ผู้ขาย 1','1000','500 mg')],[],opts).offers;
   assert.equal(o.map(x=>x.moq+' '+x.moqUnit).join(','),'2000 g,2 kg,500 mg','เก็บค่าตามที่ผู้ขายเขียน');
-  const ug=id=>Number(id.match(/-(\d+)UG-/)[1]);
+  const ug=id=>Number(id.match(/-(\d+)UG$/)[1]);
   assert.equal(ug(o[0].id),ug(o[1].id),'2000 g กับ 2 kg เป็นน้ำหนักเดียวกัน');
   assert.equal(ug(o[0].id)/ug(o[2].id),4000,'2 kg เป็น 4000 เท่าของ 500 mg');
 });
