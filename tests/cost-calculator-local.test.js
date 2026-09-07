@@ -923,3 +923,56 @@ test('costPricingJobs ให้เฉพาะใบที่ผูกแล้�
   assert.equal(jobs[0].rule.factor,2.2);assert.equal(jobs[0].rule.allowancePercent,10);assert.equal(jobs[0].rule.pkMode,'notApplicable');assert.equal(jobs[0].rule.format.id,'CAP-GEL-0');assert.equal(jobs[0].revision,4,'บันทึกกฎ = revision ใหม่');
   assert.equal(f.costCapabilities().open,false,'Finance ยังเปิดเครื่องคำนวณไม่ได้');
 });
+
+// ---- E5-01 เอกสารทั้งฉบับสำหรับ CEO + ลิงก์ในแชท ----
+test('costDocument ให้เฉพาะ CEO/RD/Admin ชี้ revision คงที่ ไม่ fallback และมีรายละเอียดเต็มรวมผู้ขาย',async()=>{
+  const c=fixture('rd','RD-ก');c.records=[{id:'A00001',customer:'ลูกค้า ก',brand:'B',form:'แคปซูล'}];
+  await readyScenario(c);seedRates(c);setRule(c,RULE);
+  const job=c.loadCostStore().jobs[0];
+  const doc=c.run(`costDocument('${job.id}',3)`);
+  assert.equal(doc.revision,3);assert.equal(doc.projectId,'A00001');assert.equal(doc.customer,'ลูกค้า ก');assert.equal(doc.preVat,true);
+  assert.equal(doc.rm.lines.length,1);assert.equal(doc.rm.lines[0].vendor,'SYNTHETIC VENDOR','CEO เห็นผู้ขาย');
+  assert.equal(doc.pricingRule,null,'revision 3 ยังไม่มีกฎ');assert.equal(doc.complete,false);
+  const latest=c.run(`costDocument('${job.id}',4)`);
+  assert.equal(latest.pricingRule.factor,2.2);assert.equal(latest.complete,true);assert.ok(latest.finalPerSellingUnit>0);
+  assert.throws(()=>c.run(`costDocument('${job.id}',99)`),/ไม่พบ revision 99/,'ห้าม fallback ไป revision อื่น');
+  assert.throws(()=>c.run(`costDocument('CJ-999999',1)`),/ไม่พบใบงานต้นทุน/);
+  const ceo=fixture('sales','Synthetic CEO');ceo.backing.fs_cost=c.backing.fs_cost;ceo.records=c.records;ceo.loadCostStore().caps['Synthetic CEO']=['CEO'];
+  assert.equal(ceo.costCapabilities().viewDocument,true);assert.equal(ceo.costCapabilities().open,false,'CEO เปิดเครื่องคำนวณไม่ได้แต่อ่านเอกสารได้');
+  assert.equal(ceo.run(`costDocument('${job.id}',4)`).rm.lines[0].vendor,'SYNTHETIC VENDOR');
+  for(const [role,name] of [['sales','Synthetic Sales'],['purchasing','Synthetic Buyer'],['opc','Synthetic OPC']]){
+    const u=fixture(role,name);u.backing.fs_cost=c.backing.fs_cost;u.records=c.records;
+    assert.equal(u.costCapabilities().viewDocument,false,name);
+    assert.throws(()=>u.run(`costDocument('${job.id}',4)`),/CEO, RD และ Admin/,name);
+  }
+});
+test('sendDocument โพสต์ข้อความเดียวที่พกอ้างอิง revision คงที่ กันส่งซ้ำ และงานลอยส่งไม่ได้',async()=>{
+  const c=fixture('rd','RD-ก');c.records=[{id:'A00001'}];
+  await readyScenario(c);
+  const base={projectId:'A00001',scenarioId:'S1',expectedRevision:3};
+  const sent=await c.costLocalRequest('sendDocument',{...base,idempotencyKey:'A00001:S1:3:doc'});
+  assert.equal(sent.sendState,'sent');
+  assert.equal(c.chats.length,1);const msg=c.chats[0].messages.filter(m=>m.costDocRef);
+  assert.equal(msg.length,1);assert.deepEqual({...msg[0].costDocRef},{jobId:'CJ-000001',revision:3});
+  assert.equal(msg[0].type,'sys');assert.match(msg[0].text,/revision 3/);assert.match(msg[0].text,/ไม่รวม VAT/);
+  assert.ok(!msg[0].text.includes('SYNTHETIC VENDOR'),'ข้อความในแชทต้องไม่มีผู้ขาย — เห็นได้เฉพาะในเอกสาร');
+  await c.costLocalRequest('sendDocument',{...base,idempotencyKey:'A00001:S1:3:doc'});
+  assert.equal(c.chats[0].messages.filter(m=>m.costDocRef).length,1,'ส่งซ้ำด้วยคีย์เดิมต้องไม่โพสต์เพิ่ม');
+  await c.costLocalRequest('save',{...base,patch:{sellingUnits:1}});
+  await assert.rejects(c.costLocalRequest('sendDocument',{projectId:'A00001',scenarioId:'S1',expectedRevision:4,idempotencyKey:'A00001:S1:3:doc'}),/เนื้อหาเปลี่ยนแล้ว/);
+  const doc=c.run(`costDocument('CJ-000001',3)`);assert.equal(doc.sentBy,'RD-ก','เอกสารรู้ว่าใครส่ง');
+  assert.equal(c.run(`costDocument('CJ-000001',4)`).sentBy,null,'revision ที่ไม่ได้ส่งต้องไม่อ้างว่าส่งแล้ว');
+  const job=c.run(`costStartJob({mode:'float',title:'ลอย'})`);
+  await assert.rejects(c.costLocalRequest('sendDocument',{projectId:job.id,scenarioId:'S1',expectedRevision:1,idempotencyKey:'x:doc'}),/งานลอยส่งเอกสาร/);
+  const p=fixture('purchasing','Synthetic Buyer');p.backing.fs_cost=c.backing.fs_cost;p.chats=c.chats;
+  await assert.rejects(p.costLocalRequest('sendDocument',{...base,idempotencyKey:'A00001:S1:3:doc2'}),/ไม่มีสิทธิ์ส่งเอกสาร/);
+});
+test('sendDocument: outbox หายแต่ข้อความยังอยู่ในแชท ต้องจับจากคีย์ในแชท ไม่โพสต์ซ้ำ',async()=>{
+  const c=fixture('rd','RD-ก');c.records=[{id:'A00001'}];
+  await readyScenario(c);
+  const req={projectId:'A00001',scenarioId:'S1',expectedRevision:3,idempotencyKey:'A00001:S1:3:doc'};
+  await c.costLocalRequest('sendDocument',req);
+  c.loadCostStore().outbox.length=0;c.saveCostStore(); // จำลอง store ถูกกู้คืนจาก backup ที่เก่ากว่าแชท
+  await c.costLocalRequest('sendDocument',req);
+  assert.equal(c.chats[0].messages.filter(m=>m.costDocRef).length,1,'ห้องแชทเป็นความจริง ห้ามโพสต์ซ้ำ');
+});

@@ -318,3 +318,24 @@ test('เครื่องคำนวณไม่วาดส่วนตั�
   assert.ok(!c.panel.innerHTML.includes('id="costAllowance"')&&!c.panel.innerHTML.includes('costPricingSaveRates'));
   assert.ok(c.panel.innerHTML.includes('เมนู <b>กฎราคา</b>')&&c.panel.innerHTML.includes('กฎเวอร์ชัน 3'));
 });
+
+// ---- E5-01 หน้าเอกสาร ----
+test('เอกสารเปิดได้เฉพาะผู้มี viewDocument อ่านอย่างเดียว และ revision ที่ไม่มีต้องบอกว่าไม่พบ ไม่แสดงอันอื่น',()=>{
+  const c=fixture();
+  const view={innerHTML:'',classList:{contains:()=>true,add(){},remove(){}}};c.elements.costDocView=view;
+  c.run(`var costCapabilities=()=>({viewDocument:false});`);
+  c.openCostDocument('CJ-000003',5);assert.equal(view.innerHTML,'','ไม่มีสิทธิ์ต้องไม่วาดอะไร');
+  c.run(`costCapabilities=()=>({viewDocument:true});
+    var costDocument=(id,rev)=>{if(rev!==5)throw Error('ไม่พบ revision '+rev+' ของ '+id);return {jobId:id,projectId:'A00587',revision:5,title:'',owner:'RD-ก',createdAt:'2026-09-05T09:30:00Z',createdBy:'RD-ก',sentBy:'RD-ก',sentAt:'x',customer:'ลูกค้า ก',brand:'GLOW',form:'แคปซูล',sellingUnits:5000,unitsPerPack:60,fillAmount:0.5,fillUnit:'g',productionUnits:300000,
+      rm:{baseTotal:3680,adjustedTotal:4416,purchaseCash:41500,ready:true,lines:[{alias:'สาร A',name:'สารสกัดตัวอย่าง A',vendor:'ผู้ขายตัวอย่าง 1',tierId:'25 kg',price:980,priceUnit:'kg',amount:250,unit:'mg',lossPercent:2,requiredKg:76.5,purchaseKg:100,baseTotal:2450,purchaseCash:24500,ready:true}]},
+      pk:{notApplicable:false,baseTotal:6200,adjustedTotal:7130,ready:true,specVersion:'v2',evidenceRef:'PK-0912',recordedBy:'PU-ก'},operation:{baseTotal:4150,adjustedTotal:4150,ready:true,format:{id:'CAP-GEL-0',label:'แคปซูล',version:3}},
+      pricingRule:{version:4,allowancePercent:10,factor:2.2,owner:'Finance-ก',validUntil:'2999-01-01'},finalPerSellingUnit:4.12,finalTotal:20600,complete:true,pending:[],preVat:true};};`);
+  c.openCostDocument('CJ-000003',5);
+  const h=view.innerHTML;
+  for(const t of ['ผู้ขายตัวอย่าง 1','25 kg','สารสกัดตัวอย่าง A','PK-0912','กฎเวอร์ชัน 4','4.12','ไม่รวม VAT','Revision 5 (คงที่)','อ่านอย่างเดียว'])assert.ok(h.includes(t),'ขาด '+t);
+  assert.ok(!/<input|<select|<textarea/.test(h),'เอกสารต้องไม่มีช่องกรอก');
+  c.openCostDocument('CJ-000003',6);
+  assert.ok(view.innerHTML.includes('ไม่พบ revision 6')&&!view.innerHTML.includes('4.12'),'revision ที่ไม่มีต้องไม่แสดงของอันอื่น');
+  assert.deepEqual({...c.costDocRoute('#costdoc=CJ-000003&revision=5')},{jobId:'CJ-000003',revision:5});
+  for(const bad of ['#costdoc=A00001&revision=5','#costdoc=CJ-000003&revision=0','#costdoc=CJ-000003','#project=A00001&scenario=S1&revision=1'])assert.equal(c.costDocRoute(bad),null,bad);
+});

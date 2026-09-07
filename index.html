@@ -643,6 +643,7 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
 .cost-pill-float{background:var(--tint);color:var(--ontint)}.cost-pill-wait{background:#FEF7E0;color:#B06000}
 .cost-pill-ready{background:#E6F4EA;color:#1E8E3E}.cost-pill-draft{background:var(--card2);color:var(--muted)}
 .cost-ok{background:#E6F4EA;color:#1E8E3E;border-radius:8px;padding:8px 12px}
+.cost-doc .rec-tbl{min-width:900px}
 .cost-dash-row{cursor:pointer}.cost-dash-row:hover td{background:var(--tint)}
 .cost-dash-row.cost-dash-locked{cursor:default}.cost-dash-row.cost-dash-locked:hover td{background:transparent}
 .cost-who{display:block;color:var(--muted);font-size:12px}
@@ -695,7 +696,7 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
   <div class="logo"><svg viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-1.73-3L9 11.35V4H8a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2h-1v7.35L19.73 19A2 2 0 0 1 18 22H6Zm5-10.11L8.31 16.5h7.38L13 11.89V4h-2v7.89Z"/></svg></div>
   <div>
     <div class="hdr-title">Formula Studio</div>
-    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-07.6-pricing-page</div>
+    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-07.7-ceo-document</div>
   </div>
   <div class="sync-chip" id="syncChip" onclick="sbManualSync()" title="สถานะการซิงก์ข้อมูลกับเซิร์ฟเวอร์กลาง"></div>
 </div>
@@ -1161,6 +1162,7 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
 <!-- ======= MODIFY DATA VIEW ======= -->
 <div id="costDashView" class="view"></div>
 <div id="costPricingView" class="view"></div>
+<div id="costDocView" class="view"></div>
 <div id="modifyView" class="view">
   <div id="modEmpty" class="empty">
     <div class="empty-ic"><svg viewBox="0 0 24 24" width="56" height="56" fill="#BDC1C6"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25ZM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83Z"/></svg></div>
@@ -1887,6 +1889,8 @@ function costLinkRoute(hash){
 async function costResolveLink(){
   costCheckSession();
   if(!costAuthenticated()){if(costState.projectId)costReset();costRouteState.handledKey='';return;}
+  const doc=costDocRoute(window.location && window.location.hash);
+  if(doc){const key=costIdentity()+'|doc|'+doc.jobId+'|'+doc.revision;if(costRouteState.handledKey===key)return;costRouteState.handledKey=key;openCostDocument(doc.jobId,doc.revision);return;}
   const route=costLinkRoute(window.location && window.location.hash);
   if(!route || !costAllowed(route.projectId))return;
   const key=costIdentity()+'|'+route.projectId+'|'+route.scenarioId+'|'+route.revision;
@@ -1905,7 +1909,7 @@ function costAllowed(projectId){
   return canSeeRecord(records.find(r=>r.id===projectId));
 }
 async function costRequest(action,payload){
-  const actions=['open','save','selectRM','changeTier','removeRM','requestMaterial','adoptPK','sendSummary'];
+  const actions=['open','save','selectRM','changeTier','removeRM','requestMaterial','adoptPK','sendSummary','sendDocument'];
   if(!actions.includes(action) || !costAllowed(payload.projectId))throw Error('ไม่มีสิทธิ์ทำงานกับโครงการนี้');
   if(window.__FS_TEST__ && typeof window.__costTestRequest==='function')return window.__costTestRequest(action,payload);
   // Local-first is the configured mode (ADR 0002). The network path below stays
@@ -2069,7 +2073,8 @@ function renderCostCalculator(){
     <div class="fg4">${costField('ยอด PK หลังบวก (บาท/ล็อต)','costPkAdjusted',null,'เว้นว่างได้ถ้ายังไม่มีนโยบายราคา')}${costField('ยอด PK ต้นทุนใช้จริง (บาท/ล็อต)','costPkBase',null,'เว้นว่างได้ถ้ายังไม่ทราบ')}${costTextField('ราคามีผลถึง','costPkValidUntil',null,'YYYY-MM-DD')}${costTextField('เลขอ้างอิงหลักฐาน','costPkEvidence',null,'เช่น เลข Req-PK')}</div>
     <button class="btn btn-s" ${disabled} onclick="costSavePk()">บันทึกผล PK ที่ยืนยันแล้ว</button>`:''}
     ${data.capabilities&&data.capabilities.setPricing?`<p class="hint">กฎการบวกราคาและอัตรามาตรฐานตั้งที่เมนู <b>กฎราคา</b> ไม่ใช่ที่นี่${data.pricingRule?` · ใช้อยู่: กฎเวอร์ชัน ${esc(data.pricingRule.version)} ตัวคูณ ${esc(data.pricingRule.factor)} ค่าเผื่อ ${esc(data.pricingRule.allowancePercent)}%`:' · ยังไม่มีกฎสำหรับใบนี้'}</p>`:''}
-    <h3>สรุปเข้าแชทโครงการ</h3><p>ส่งเฉพาะยอดหลังบวกที่ผู้รับเห็นได้ พร้อม revision และรายการค้าง</p><button class="btn btn-p" ${disabled||!data.capabilities||!data.capabilities.sendSummary?'disabled':''} onclick="costSendSummary()">ส่งสรุป revision นี้เข้า Formula chat</button><p role="status">${esc(data.sendState==='sent'?'ส่งสำเร็จ':data.sendState==='pending'?'รอส่ง':data.sendState==='failed'?'ส่งไม่สำเร็จ':'ยังไม่ได้ส่ง')}</p>
+    <h3>สรุปเข้าแชทโครงการ</h3><p>ส่งเฉพาะยอดหลังบวกที่ผู้รับเห็นได้ พร้อม revision และรายการค้าง</p>
+    ${data.capabilities&&data.capabilities.sendSummary&&data.job&&data.job.bound?`<div class="btn-row"><button class="btn btn-s" ${disabled} onclick="costSendDocument()">ส่งให้ CEO ดูทั้งเอกสาร (revision ${esc(data.revision)})</button><span class="hint">ลิงก์ชี้ revision นี้คงที่ · CEO/RD/Admin เปิดได้ Sales เปิดไม่ได้</span></div>`:''}<button class="btn btn-p" ${disabled||!data.capabilities||!data.capabilities.sendSummary?'disabled':''} onclick="costSendSummary()">ส่งสรุป revision นี้เข้า Formula chat</button><p role="status">${esc(data.sendState==='sent'?'ส่งสำเร็จ':data.sendState==='pending'?'รอส่ง':data.sendState==='failed'?'ส่งไม่สำเร็จ':'ยังไม่ได้ส่ง')}</p>
     <h3>คัดลอกสรุปไปส่งต่อ</h3><p class="hint">ข้อความเดียวกับที่ส่งเข้าแชท — มีเฉพาะยอดหลังบวก ไม่มีต้นทุนดิบหรือชื่อผู้ขาย</p>
     <textarea id="costSummaryText" class="fi" rows="7" readonly onclick="this.select()">${esc(data.summaryText||'')}</textarea>
     <div class="btn-row"><button class="btn btn-s" onclick="costCopySummary()">คัดลอกข้อความสรุป</button><span id="costCopyState" class="hint" role="status"></span></div>`}
@@ -2158,6 +2163,54 @@ function costSavePk(){
   return costAction('open',{});
 }
 function costAdoptPK(){const data=costState.response;if(data&&data.pkCandidate&&data.capabilities.adoptPK)return costAction('adoptPK',{snapshotRef:data.pkCandidate.snapshotRef});}
+function costSendDocument(){
+  const data=costState.response;if(!data||!data.capabilities.sendSummary||!data.job||!data.job.bound)return;
+  if(!confirm('ส่งลิงก์เอกสารต้นทุนทั้งฉบับ revision '+data.revision+' เข้าแชท '+costState.projectId+' ให้ CEO?'))return;
+  return costAction('sendDocument',{revision:data.revision,idempotencyKey:costState.projectId+':'+data.scenarioId+':'+data.revision+':doc'}).then(()=>{if(costState.response&&costState.response.revision===data.revision){costState.notice='ส่งลิงก์เอกสาร revision '+data.revision+' เข้าแชทแล้ว';renderCostCalculator();}});
+}
+// ---- เอกสารต้นทุนอ่านอย่างเดียว (E5-01) ----
+function costDocAllowed(){
+  if(!currentUser || impersonator) return false;
+  if(typeof costCapabilities!=='function') return false;
+  return !!costCapabilities().viewDocument;
+}
+function costDocRoute(hash){
+  const m=typeof hash==='string'?hash.match(/^#costdoc=(CJ-\d{6})&revision=([1-9]\d*)$/):null;
+  return m?{jobId:m[1],revision:Number(m[2])}:null;
+}
+function openCostDocument(jobId,revision){
+  if(!costDocAllowed())return;
+  const panel=document.getElementById('costDocView'); if(!panel) return;
+  let doc=null,error='';
+  try{doc=costDocument(jobId,revision);}catch(e){error=String(e.message);}
+  document.querySelectorAll('.view').forEach(el=>el.classList.remove('on'));panel.classList.add('on');
+  panel.innerHTML=error?`<div class="sec-card cost-workspace"><h2>เอกสารต้นทุน</h2><p class="cost-warning">${esc(error)}</p><button class="btn btn-s" onclick="switchView('chat')">กลับหน้าแชท</button></div>`:renderCostDocument(doc);
+}
+function renderCostDocument(d){
+  const n=v=>costNumber(v),cell=v=>v==null?'<span class="hint">รอ</span>':n(v);
+  return `<div class="sec-card cost-workspace cost-doc">
+    <div class="cost-dash-top"><div><h2>เอกสารต้นทุน · <span class="mono">${esc(d.jobId)}</span>${d.projectId?' · '+esc(d.projectId):''}</h2>
+      <p class="hint">${esc(d.customer)}${d.brand?' · '+esc(d.brand):''}${d.form?' · '+esc(d.form):''} · Revision ${esc(d.revision)} (คงที่) · บันทึกโดย ${esc(d.createdBy)} ${esc(String(d.createdAt||'').slice(0,16).replace('T',' '))}${d.sentBy?' · ส่งโดย '+esc(d.sentBy):''} · เจ้าของสูตร ${esc(d.owner)}</p></div>
+      <span class="cost-pill ${d.complete?'cost-pill-ready':'cost-pill-wait'}">${d.complete?'คำนวณครบ':'ยังไม่ครบ'}</span></div>
+    <p class="cost-warning">อ่านอย่างเดียว · ลิงก์นี้ชี้ revision ${esc(d.revision)} เท่านั้น การแก้หลังจากนี้ไม่เปลี่ยนเอกสารนี้ · <b>ทุกยอดเป็นราคาไม่รวม VAT</b></p>
+    <p>จำนวนหน่วยขาย ${cell(d.sellingUnits)} · หน่วยย่อยต่อแพ็ก ${cell(d.unitsPerPack)} · หน่วยผลิตรวม ${cell(d.productionUnits)} · น้ำหนักต่อหน่วยย่อย ${cell(d.fillAmount)} ${esc(d.fillUnit||'')}</p>
+    <h3>RM</h3>
+    <div class="rec-wrap"><table class="rec-tbl"><thead><tr><th>วัสดุ</th><th>Vendor · Tier</th><th>ราคา</th><th>ปริมาณ/หน่วย</th><th>Loss %</th><th>ต้องใช้ (kg)</th><th>ต้องซื้อ (kg)</th><th>ต้นทุนใช้จริง</th><th>เงินซื้อ</th></tr></thead><tbody>
+      ${d.rm.lines.map(l=>`<tr><td><b>${esc(l.alias)}</b>${l.name?`<span class="cost-who">${esc(l.name)}</span>`:''}</td><td>${esc(l.vendor)}<span class="cost-who">${esc(l.tierId)}</span></td><td>${l.price==null?'<span class="hint">รอ</span>':n(l.price)+' / '+esc(l.priceUnit)}</td><td>${cell(l.amount)} ${esc(l.unit||'')}</td><td>${cell(l.lossPercent)}</td><td>${cell(l.requiredKg)}</td><td>${cell(l.purchaseKg)}</td><td>${cell(l.baseTotal)}</td><td>${cell(l.purchaseCash)}</td></tr>`).join('')||'<tr><td colspan="9" class="hint">ยังไม่มี RM</td></tr>'}
+      </tbody></table></div>
+    <p>RM ต้นทุนก่อนบวก ${cell(d.rm.baseTotal)} บาท/ล็อต · หลังบวก ${cell(d.rm.adjustedTotal)} บาท/ล็อต · เงินซื้อก่อนตรวจสต็อก ${cell(d.rm.purchaseCash)} บาท</p>
+    <h3>PK</h3>
+    <p>${d.pk.notApplicable?'ไม่มีหมวด PK — รวมอยู่ในค่าดำเนินการต่อหน่วย':`ก่อนบวก ${cell(d.pk.baseTotal)} · หลังบวก ${cell(d.pk.adjustedTotal)} บาท/ล็อต${d.pk.specVersion?' · spec '+esc(d.pk.specVersion):''}${d.pk.evidenceRef?' · หลักฐาน '+esc(d.pk.evidenceRef):''}${d.pk.recordedBy?' · โดย '+esc(d.pk.recordedBy):''}`}</p>
+    <h3>Operation</h3>
+    <p>ก่อนบวก ${cell(d.operation.baseTotal)} · หลังบวก ${cell(d.operation.adjustedTotal)} บาท/ล็อต${d.operation.format?' · '+esc(d.operation.format.label)+' v'+esc(d.operation.format.version):''}</p>
+    <h3>กฎการบวกราคา</h3>
+    <p>${d.pricingRule?`กฎเวอร์ชัน ${esc(d.pricingRule.version)} · ค่าเผื่อขั้นต้น ${esc(d.pricingRule.allowancePercent)}% · ตัวคูณ ${esc(d.pricingRule.factor)} · ผู้รับผิดชอบ ${esc(d.pricingRule.owner)} · ใช้ได้ถึง ${esc(d.pricingRule.validUntil)}`:'ยังไม่กำหนดกฎ'}</p>
+    <div class="cost-ok" style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px"><span>ราคาต่อหน่วยขาย (ไม่รวม VAT)</span><b>${d.complete&&d.finalPerSellingUnit!=null?n(d.finalPerSellingUnit)+' บาท':'รอกำหนดราคา'}</b></div>
+    ${d.pending.length?`<p class="hint">รายการค้าง: ${d.pending.map(esc).join(' · ')}</p>`:''}
+    <p class="hint">การอนุมัติทำนอกระบบ — CEO แจ้งผลกลับในแชทโครงการ</p>
+    <div class="btn-row"><button class="btn btn-s" onclick="switchView('chat')">กลับหน้าแชท</button></div>
+  </div>`;
+}
 function costSendSummary(){const data=costState.response;if(!data||!data.capabilities.sendSummary)return;if(!confirm('ส่งสรุป revision '+data.revision+' เข้าแชท '+costState.projectId+'?'))return;return costAction('sendSummary',{revision:data.revision,idempotencyKey:costState.projectId+':'+data.scenarioId+':'+data.revision+':summary'});}
 // COST_CALCULATOR_UI_END
 // COST_CALCULATOR_LOCAL_START
@@ -2361,7 +2414,9 @@ function costCapabilities(){
     sendSummary:rd,approveCEO:false, // freezeQuotation stays disabled without a server authority
     // ตั้งกฎการบวกราคาและอัตรามาตรฐาน เป็นคนละสิทธิ์กับการแก้สูตร
     setPricing:admin||roles.some(function(r){return COST_PRICING_ROLES.indexOf(r)>=0;}),
-    viewRevision:rd}; // ADR 0002 decision 4: historical revisions are RD and Admin only
+    viewRevision:rd, // ADR 0002 decision 4: historical revisions are RD and Admin only
+    // เอกสารทั้งฉบับ: CEO อ่านจากลิงก์ที่ RD ส่งเข้าแชท (คำตัดสิน 2026-09-06) · RD/Admin ก็เปิดได้
+    viewDocument:admin||rd||roles.indexOf('CEO')>=0};
 }
 function costToday(){return new Date().toISOString().slice(0,10);}
 function costEntries(projectId,scenarioId){
@@ -2495,6 +2550,46 @@ function costSummaryText(view){
 // Appends the summary into the project chat exactly once. The idempotency key is
 // stored on the message, so a retry after a failed store write finds the posted
 // message instead of posting a second one.
+// ข้อความ sys ในห้องแชทที่พกอ้างอิงเอกสาร (costDocRef เป็นฟิลด์เสริม ตัวอ่านเก่ามองข้ามได้)
+function costPostDocumentLink(projectId,key,ref){
+  if(!Array.isArray(chats))throw Error('ห้องแชทยังโหลดไม่เสร็จ');
+  // ใบที่ผูกแล้วมีใบงาน Formula จริง สร้างห้องได้เหมือนทางส่งสรุป (งานลอยถูกกันไว้ก่อนถึงตรงนี้)
+  const chat=getChat(projectId)||createChat(projectId);
+  if(!chat)throw Error('ไม่พบห้องแชทของโครงการนี้');
+  const posted=chat.messages.find(message=>message&&message.costKey===key);
+  if(posted)return {receiptId:'chat:'+chat.jobId+':'+posted.ts,duplicate:true};
+  const ts=Date.now();
+  const message={type:'sys',user:currentUser||'',text:chatClamp('เอกสารต้นทุน '+ref.jobId+' revision '+ref.revision+' ส่งให้ CEO ตรวจ (เปิดได้เฉพาะผู้มีสิทธิ์) · ทุกยอดไม่รวม VAT',CHAT_SYS_MAX),ts,costKey:key,costDocRef:{jobId:ref.jobId,revision:ref.revision}};
+  chat.messages.push(message);
+  try{if(saveChats(true)===false)throw Error('บันทึกแชทไม่ได้');}
+  catch(error){const at=chat.messages.indexOf(message);if(at>=0)chat.messages.splice(at,1);throw error;}
+  return {receiptId:'chat:'+chat.jobId+':'+ts,duplicate:false};
+}
+// เอกสารต้นทุนทั้งฉบับของ revision ที่ระบุ — ไม่ fallback ไป revision อื่น (E5-01)
+function costDocument(jobId,revision){
+  const caps=costCapabilities();
+  if(!caps.viewDocument)throw Error('เอกสารทั้งฉบับเปิดได้เฉพาะ CEO, RD และ Admin');
+  const job=costJobById(String(jobId||''));
+  if(!job)throw Error('ไม่พบใบงานต้นทุน');
+  const entry=costJobEntries(job.id).find(row=>row.revision===revision);
+  if(!entry)throw Error('ไม่พบ revision '+revision+' ของ '+job.id);
+  const sc=entry.scenario,result=CostCalculator.calculate(sc,costToday());
+  const list=typeof records!=='undefined'&&Array.isArray(records)?records:[];
+  const record=list.find(r=>r&&r.id===job.projectId)||null,rm=sc.policies&&sc.policies.RM;
+  const sent=loadCostStore().outbox.find(row=>row.status==='sent'&&row.body&&row.body.document&&row.body.jobId===job.id&&row.body.revision===revision)||null;
+  return {jobId:job.id,projectId:job.projectId,revision,title:job.title||'',owner:job.owner||'',
+    createdAt:entry.createdAt,createdBy:entry.createdBy,sentBy:sent?sent.createdBy:null,sentAt:sent?sent.sentAt:null,
+    customer:record?record.customer||'':'',brand:record?record.brand||'':'',form:record?record.form||'':job.form||'',
+    sellingUnits:sc.sellingUnits,unitsPerPack:sc.unitsPerPack,fillAmount:sc.fillAmount,fillUnit:sc.fillUnit,productionUnits:result.productionUnits,
+    rm:{baseTotal:result.rm.baseTotal,adjustedTotal:result.rm.adjustedTotal,purchaseCash:result.rm.purchaseCash,ready:result.rm.ready,
+      lines:(sc.rmLines||[]).map((line,i)=>{const o=line.offer||{},r=result.rm.lines[i]||{};return {alias:line.alias||'',name:o.name||'',vendor:o.vendor||o.vendorId||'',tierId:o.tierId||'',price:o.price??null,priceUnit:o.priceUnit||'',
+        amount:line.amount,unit:line.unit,lossPercent:line.lossPercent,requiredKg:r.requiredKg??null,purchaseKg:r.purchaseKg??null,baseTotal:r.baseTotal??null,purchaseCash:r.purchaseCash??null,ready:!!r.ready};})},
+    pk:{notApplicable:!!result.pk.notApplicable,baseTotal:result.pk.baseTotal,adjustedTotal:result.pk.adjustedTotal,ready:result.pk.ready,
+      specVersion:sc.pk&&sc.pk.specVersion||sc.pkSpecVersion||null,evidenceRef:sc.pk&&sc.pk.evidenceRef||null,recordedBy:sc.pk&&sc.pk.recordedBy||null},
+    operation:{baseTotal:result.operation.baseTotal,adjustedTotal:result.operation.adjustedTotal,ready:result.operation.ready,format:sc.operationFormat||null},
+    pricingRule:rm?{version:rm.version,allowancePercent:(rm.allowanceRate||0)*100,factor:rm.rate,owner:rm.owner,validUntil:rm.validUntil}:null,
+    finalPerSellingUnit:result.finalPerSellingUnit,finalTotal:result.finalTotal,complete:!!result.complete,pending:(result.pending||[]).slice(),preVat:true};
+}
 function costPostSummary(projectId,key,view){
   if(!Array.isArray(chats))throw Error('ห้องแชทยังโหลดไม่เสร็จ');
   const chat=getChat(projectId)||createChat(projectId);
@@ -2551,7 +2646,8 @@ async function costLocalRequest(action,payload){
   if(!entry)throw Error('ยังไม่มีข้อมูลต้นทุนของโครงการนี้');
   if(costJobLocked(projectId))throw Error('ใบงาน Formula '+projectId+' ปิดงานแล้ว ใบงานต้นทุนอ่านอย่างเดียว โคลนไปทำใบใหม่ได้');
   const latest=costLatestEntry(projectId,scenarioId);
-  if(action!=='sendSummary'&&latest&&entry.revision!==latest.revision)throw Error('มี revision ใหม่กว่าแล้ว กรุณาเปิดใหม่ก่อนแก้ไข');
+  // ส่งสรุป/ส่งเอกสารของ revision เก่าได้ (ลิงก์ชี้ revision คงที่) แต่การแก้ต้องทำบน revision ล่าสุดเท่านั้น
+  if(!['sendSummary','sendDocument'].includes(action)&&latest&&entry.revision!==latest.revision)throw Error('มี revision ใหม่กว่าแล้ว กรุณาเปิดใหม่ก่อนแก้ไข');
   if(action==='sendSummary'){
     if(!caps.sendSummary)throw Error('ไม่มีสิทธิ์ส่งสรุป');
     if(COST_JOB_ID.test(String(projectId)))throw Error('งานลอยส่งสรุปเข้าแชทไม่ได้ ผูกใบงาน Formula ก่อน');
@@ -2567,6 +2663,24 @@ async function costLocalRequest(action,payload){
     catch(error){row.status='pending';saveCostStore();throw error;}
     // Chat write succeeded, so the receipt is real. If this store write fails the
     // retry finds the posted message by key and still resolves to sent.
+    row.status='sent';row.receiptId=receipt.receiptId;row.sentAt=new Date().toISOString();
+    saveCostStore();
+    return costEnvelope(entry,'sent');
+  }
+  if(action==='sendDocument'){
+    // ลิงก์เอกสารทั้งฉบับสำหรับ CEO — ชี้ revision คงที่ การแก้หลังจากนี้ไม่เปลี่ยนเอกสารที่ส่งไป
+    if(!caps.sendSummary)throw Error('ไม่มีสิทธิ์ส่งเอกสาร');
+    if(COST_JOB_ID.test(String(projectId)))throw Error('งานลอยส่งเอกสารเข้าแชทไม่ได้ ผูกใบงาน Formula ก่อน');
+    const store=loadCostStore(),key=payload.idempotencyKey;
+    if(typeof key!=='string'||!/^[A-Za-z0-9:_-]{1,160}$/.test(key))throw Error('รหัสกันส่งซ้ำไม่ถูกต้อง');
+    const body={document:true,jobId:entry.jobId,revision:entry.revision},existing=store.outbox.find(row=>row.idempotencyKey===key);
+    if(existing&&JSON.stringify(existing.body)!==JSON.stringify(body))throw Error('เนื้อหาเปลี่ยนแล้วแต่ใช้รหัสกันส่งซ้ำเดิม');
+    if(existing&&existing.status==='sent')return costEnvelope(entry,'sent');
+    const row=existing||{idempotencyKey:key,projectId,scenarioId,revision:entry.revision,body,status:'pending',createdAt:new Date().toISOString(),createdBy:currentUser,receiptId:null};
+    if(!existing)store.outbox.push(row);
+    let receipt=null;
+    try{receipt=costPostDocumentLink(projectId,key,body);}
+    catch(error){row.status='pending';saveCostStore();throw error;}
     row.status='sent';row.receiptId=receipt.receiptId;row.sentAt=new Date().toISOString();
     saveCostStore();
     return costEnvelope(entry,'sent');
@@ -6720,7 +6834,7 @@ function openJobEditLog(jobId){
 
 function chatRoomHTML(c, r){
   const msgs = c.messages.length ? c.messages.map(m=>{
-    if(m.type==='sys') return `<div class="chat-sys">${esc(m.text)} · ${esc(chatTime(m.ts))}</div>`;
+    if(m.type==='sys') return `<div class="chat-sys">${esc(m.text)} · ${esc(chatTime(m.ts))}${m.costDocRef&&typeof costDocAllowed==='function'&&costDocAllowed()&&/^CJ-\d{6}$/.test(String(m.costDocRef.jobId))&&Number.isInteger(m.costDocRef.revision)?` <button class="btn btn-s btn-sm" onclick="openCostDocument('${esc(m.costDocRef.jobId)}',${Number(m.costDocRef.revision)})">เปิดเอกสารต้นทุน</button>`:''}</div>`;
     const me = m.user && m.user===currentUser;
     return `<div class="chat-msg${me?' me':''}">
       <div class="chat-who">${esc(m.user||'ไม่ระบุชื่อ')}</div>

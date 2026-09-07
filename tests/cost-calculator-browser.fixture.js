@@ -76,6 +76,19 @@
  check('closed Formula job renders read-only with clone',document.getElementById('costView').textContent.includes('ปิดงานแล้ว · อ่านอย่างเดียว')&&document.getElementById('costSellingUnits').disabled);
  delete records.find(r=>r.id==='A00002').closed;
  switchView('cost');costDashSearchChanged('');check('dashboard shows the bound job once with its Formula id',document.getElementById('costDashBody').textContent.split(floatingId).length===2&&document.getElementById('costDashBody').textContent.includes('A00002'));
+ // E5: RD ส่งลิงก์เอกสาร → ปุ่มในแชทเห็นเฉพาะผู้มีสิทธิ์ → เปิดเอกสาร revision คงที่
+ await openCostCalculator('A00001');const docRev=costState.response.revision;
+ window.confirm=()=>true;await costSendDocument();
+ check('sending the document posts one chat message carrying the revision ref',getChat('A00001').messages.filter(m=>m.costDocRef).length===1&&getChat('A00001').messages.find(m=>m.costDocRef).costDocRef.revision===docRev&&document.getElementById('costView').textContent.includes('ส่งลิงก์เอกสาร'));
+ await costSendDocument();check('sending twice does not post twice',getChat('A00001').messages.filter(m=>m.costDocRef).length===1);
+ openChatRoom('A00001');
+ check('RD sees the open-document button in chat',!!document.querySelector('#chatView button[onclick^="openCostDocument"]'));
+ document.querySelector('#chatView button[onclick^="openCostDocument"]').click();
+ check('document view shows vendor detail and fixed revision',document.getElementById('costDocView').classList.contains('on')&&document.getElementById('costDocView').textContent.includes('V1')&&document.getElementById('costDocView').textContent.includes('T1')&&document.getElementById('costDocView').textContent.includes('Revision '+docRev+' (คงที่)')&&!document.querySelector('#costDocView input'));
+ userList=[{name:currentUser,role:'sales'}];renderUserUI();openChatRoom('A00001');
+ check('Sales sees the chat line but no document button',document.getElementById('chatView').textContent.includes('เอกสารต้นทุน')&&!document.querySelector('#chatView button[onclick^="openCostDocument"]'));
+ document.getElementById('costDocView').innerHTML='';document.getElementById('costDocView').classList.remove('on');openCostDocument('CJ-000001',docRev);
+ check('Sales cannot open the document directly',!document.getElementById('costDocView').classList.contains('on')&&document.getElementById('costDocView').innerHTML==='');
  // E6: หน้ากฎราคา (Admin ถือ Finance/CEO) — ตั้งอัตราและกฎโดยไม่ผ่านเครื่องคำนวณ
  userList=[{name:currentUser,role:'admin'}];renderUserUI();
  check('Admin sees the pricing menu',document.getElementById('sidePricing').style.display==='flex');
