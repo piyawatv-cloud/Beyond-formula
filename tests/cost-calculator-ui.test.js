@@ -143,3 +143,43 @@ test('หน้าที่วาดออกมาเรียงตามล�
   assert.ok(html.includes('รอ PU-PK'),'รายการที่ต้องรอคนอื่นต้องบอกว่ารอใคร');
   assert.ok(html.indexOf('คุณทำต่อได้เลย')<html.indexOf('รอ PU-PK'),'สิ่งที่ทำเองได้ต้องอยู่บนสุด');
 });
+
+// ---- E2 เมนูและ dashboard ----
+test('เมนู Cost Calculation เปิดเฉพาะเมื่อชั้นข้อมูลบอกว่าเปิดได้ และปิดไว้เมื่อไม่มีชั้นข้อมูล',()=>{
+  const c=fixture();
+  assert.equal(c.costMenuAllowed(),false,'ไม่มี costCapabilities = ปิด');
+  c.run('var costCapabilities=()=>({open:true,editRM:true});');
+  assert.equal(c.costMenuAllowed(),true);
+  c.run('costCapabilities=()=>({open:false});');assert.equal(c.costMenuAllowed(),false);
+  c.run('costCapabilities=()=>({open:true});');c.impersonator='ใครสักคน';assert.equal(c.costMenuAllowed(),false,'สวมบทบาทอยู่ห้ามเปิด');
+  c.impersonator=null;c.currentUser='';assert.equal(c.costMenuAllowed(),false,'ยังไม่ login');
+});
+test('dashboard วาด 9 คอลัมน์ กรองได้ และค้นหาวาดใหม่เฉพาะเนื้อตาราง',()=>{
+  const c=fixture();
+  const view={innerHTML:'',classList:{contains:()=>true,add(){},remove(){}}};c.elements.costDashView=view;
+  c.run(`var costCapabilities=()=>({open:true,editRM:true});
+    var costDashboardRows=()=>[
+      {id:'CJ-000001',projectId:'A00001',customer:'ลูกค้า ก',brand:'GLOW',form:'แคปซูล',closed:false,recordMissing:false,owner:'RD-ก',status:'ready',revisions:3,updatedAt:'2026-09-07T10:00:00Z',updatedBy:'RD-ก',pricePerUnit:4.12},
+      {id:'CJ-000002',projectId:null,title:'งานลอย',customer:'',brand:'',form:'ซอง',closed:false,recordMissing:false,owner:'RD-ข',status:'draft',revisions:1,updatedAt:'2026-09-06T10:00:00Z',updatedBy:'RD-ข',pricePerUnit:null},
+      {id:'CJ-000003',projectId:'A00009',customer:'ลูกค้า ค',brand:'X',form:'เม็ด',closed:true,recordMissing:false,owner:'RD-ก',status:'pk',revisions:2,updatedAt:'2026-09-05T10:00:00Z',updatedBy:'RD-ค',pricePerUnit:null}];`);
+  c.renderCostDashboard();
+  const html=view.innerHTML;
+  for(const h of ['รหัส','ลูกค้า / แบรนด์','รูปแบบ','สถานะใบงาน','สถานะต้นทุน','แก้ล่าสุด','เจ้าของสูตร','Rev','ราคา/หน่วย'])assert.ok(html.includes('<th>'+h+'</th>'),'ขาดคอลัมน์ '+h);
+  assert.ok(html.includes('4.12')&&html.includes('เปิดงาน')&&html.includes('ปิดงานแล้ว')&&html.includes('งานลอย')&&html.includes('รอ PK'));
+  assert.ok(html.includes(`openCostCalculator('A00001')`),'แถวที่ผูกแล้วต้องเปิดได้');
+  const floatRow=html.match(/<tr[^>]*data-job="CJ-000002"[^>]*>/)[0];
+  assert.ok(floatRow.includes('cost-dash-locked')&&!floatRow.includes('onclick'),'งานลอยยังเปิดจากที่นี่ไม่ได้จนกว่าจะมี tab (E4): '+floatRow);
+  const boundRow=html.match(/<tr[^>]*data-job="CJ-000001"[^>]*>/)[0];
+  assert.ok(boundRow.includes('onclick')&&!boundRow.includes('cost-dash-locked'));
+  assert.ok(html.includes('+ สร้างใบงานต้นทุน'));
+  const body={innerHTML:'x'};c.elements.costDashBody=body;
+  view.innerHTML='ไม่ควรถูกแตะ';
+  c.costDashSearchChanged('GLOW');
+  assert.equal(view.innerHTML,'ไม่ควรถูกแตะ','พิมพ์ค้นหาต้องไม่วาดทั้งหน้า');
+  assert.ok(body.innerHTML.includes('CJ-000001')&&!body.innerHTML.includes('CJ-000002'),'กรองด้วยแบรนด์');
+  c.costDashSearchChanged('RD-ข');assert.ok(body.innerHTML.includes('CJ-000002')&&!body.innerHTML.includes('CJ-000001'),'กรองด้วยเจ้าของสูตร');
+  c.costDashSearchChanged('ไม่มี');assert.ok(body.innerHTML.includes('ไม่พบใบงาน'));
+  c.run('costCapabilities=()=>({open:true,editRM:false});');c.renderCostDashboard();
+  assert.ok(!view.innerHTML.includes('4.12')&&!view.innerHTML.includes('สร้างใบงานต้นทุน'),'ไม่มีสิทธิ์แก้สูตร = ไม่มีราคาและปุ่มสร้าง');
+  c.run('costCapabilities=()=>({open:false});');c.renderCostDashboard();assert.equal(view.innerHTML,'','ไม่มีสิทธิ์ต้องว่างเปล่า');
+});

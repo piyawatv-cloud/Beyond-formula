@@ -751,3 +751,50 @@ test('revision ที่โค้ดรุ่นเก่าเพิ่มเ�
   assert.equal(store.scenarios[1].jobId,'CJ-000001','revision ใหม่ต้องเข้าใบงานเดิม');
   assert.equal(store.jobs[0].owner,'RD-ก','เจ้าของไม่เปลี่ยน');
 });
+
+// ---- E2-02 แถว dashboard ใบงานต้นทุน ----
+test('dashboard รวมใบงานต้นทุนกับข้อมูลอ่านอย่างเดียวจากใบงาน Formula และคำนวณสถานะจากรายการค้าง',async()=>{
+  const c=fixture('rd','RD-ก');
+  c.records=[{id:'A00001',customer:'ลูกค้าทดสอบ',brand:'แบรนด์ทดสอบ',form:'แคปซูล'},{id:'A00002',customer:'ลูกค้าปิดแล้ว',brand:'B',form:'ซอง',closed:{by:'x',at:'2026-09-01',ts:1}}];
+  await c.costLocalRequest('open',{projectId:'A00001'});
+  await c.costLocalRequest('open',{projectId:'A00002'});
+  c.run(`costCreateJob({projectId:null,title:'ทดลองลอย',form:'เม็ด'});saveCostStore();`);
+  const rows=c.run('costDashboardRows()');
+  assert.equal(rows.length,3);
+  const a=rows.find(r=>r.projectId==='A00001'),b=rows.find(r=>r.projectId==='A00002'),f=rows.find(r=>r.projectId===null);
+  assert.equal(a.customer,'ลูกค้าทดสอบ');assert.equal(a.brand,'แบรนด์ทดสอบ');assert.equal(a.form,'แคปซูล');
+  assert.equal(a.closed,false);assert.equal(b.closed,true,'สถานะใบงานมาจาก closed ของ Formula');
+  assert.equal(a.status,'draft','ยังไม่มี RM = ร่าง');assert.equal(a.revisions,1);assert.equal(a.owner,'RD-ก');
+  assert.equal(a.updatedBy,'RD-ก');assert.ok(a.updatedAt);
+  assert.equal(f.title,'ทดลองลอย');assert.equal(f.form,'เม็ด','งานลอยใช้รูปแบบที่ตั้งเอง');assert.equal(f.customer,'');
+  assert.equal(a.pricePerUnit,null,'ยังไม่ complete ห้ามมีราคา');
+});
+test('สถานะต้นทุนไล่ตามลำดับ ร่าง → รอ PK → รอกำหนดราคา → พร้อมเสนอ และราคาโผล่เฉพาะเมื่อพร้อม',async()=>{
+  const c=fixture();
+  await readyScenario(c);
+  let row=c.run('costDashboardRows()')[0];
+  assert.ok(['pk','price','wait'].includes(row.status),'มี RM แล้วต้องไม่ใช่ร่าง: '+row.status);
+  assert.equal(row.pricePerUnit,null);
+  seedRates(c);setRule(c,RULE);
+  row=c.run('costDashboardRows()')[0];
+  assert.equal(row.status,'ready');
+  assert.ok(Math.abs(row.pricePerUnit-5.4425)<1e-6,'ราคาต่อหน่วยจาก revision ล่าสุด');
+  assert.equal(c.run(`costJobStatus({complete:false,pending:['PK: รอยืนยัน']},{rmLines:[{}]})`),'pk');
+  assert.equal(c.run(`costJobStatus({complete:false,pending:['รอกำหนดราคา']},{rmLines:[{}]})`),'price');
+  assert.equal(c.run(`costJobStatus(null,{rmLines:[]})`),'draft');
+});
+test('Purchasing เห็นแถว dashboard แต่ไม่เห็นราคาต่อหน่วย และ role ที่ถูกกันได้รายการว่าง',async()=>{
+  const c=fixture();await readyScenario(c);seedRates(c);setRule(c,RULE);
+  const p=fixture('purchasing','Synthetic Buyer');p.backing.fs_cost=c.backing.fs_cost;
+  const rows=p.run('costDashboardRows()');
+  assert.equal(rows.length,1);assert.equal(rows[0].pricePerUnit,null,'ราคาเป็นของ RD/Admin');
+  assert.equal(rows[0].status,'ready','สถานะยังเห็นได้');
+  const s=fixture('sales','Synthetic Sales');s.backing.fs_cost=c.backing.fs_cost;
+  assert.deepEqual(Array.from(s.run('costDashboardRows()')),[],'Sales ไม่ได้แม้แต่รายการ');
+});
+test('ใบงานที่ผูกกับ Formula ที่หายไปจากเครื่อง ถูกทำเครื่องหมาย ไม่ล้มทั้งหน้า',async()=>{
+  const c=fixture();await c.costLocalRequest('open',{projectId:'A00001'});
+  c.records=[];
+  const row=c.run('costDashboardRows()')[0];
+  assert.equal(row.recordMissing,true);assert.equal(row.customer,'');assert.equal(row.status,'draft');
+});

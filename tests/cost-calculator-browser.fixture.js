@@ -45,6 +45,19 @@
  authSession={user:{id:'SYNTHETIC'}};authMembership={role:'rd'};await openCostCalculator('A00001','S1',2);
  check('historical form disabled with explicit latest navigation',document.getElementById('costFillAmount').disabled&&document.getElementById('costView').textContent.includes('กำลังดู revision เก่า'));
  await costOpenLatest();check('latest navigation escapes old revision',costState.response.revision===revision&&!document.getElementById('costFillAmount').disabled);
+ // E2: เมนู Cost Calculation และ dashboard ใบงานต้นทุน
+ window.alert=()=>{};
+ userList=[{name:currentUser,role:'rd'}];renderUserUI();
+ check('RD sees the Cost Calculation menu',document.getElementById('sideCost').style.display==='flex');
+ switchView('cost');
+ check('cost dashboard lists the real job with its Formula id',document.getElementById('costDashView').classList.contains('on')&&document.getElementById('costDashBody').textContent.includes('CJ-000001')&&document.getElementById('costDashBody').textContent.includes('A00001'));
+ {const box=document.getElementById('costDashSearch');box.focus();box.value='ไม่มีทาง';box.dispatchEvent(new Event('input',{bubbles:true}));
+ check('dashboard search filters in place',document.getElementById('costDashBody').textContent.includes('ไม่พบใบงาน'));
+ check('dashboard search keeps the input element (no full redraw)',document.getElementById('costDashSearch')===box);}
+ userList=[{name:currentUser,role:'sales'}];renderUserUI();
+ check('Sales menu hidden and dashboard view closed',document.getElementById('sideCost').style.display==='none'&&!document.getElementById('costDashView').classList.contains('on'));
+ switchView('cost');
+ check('Sales cannot switch to the cost dashboard',!document.getElementById('costDashView').classList.contains('on'));
  userList=[{name:currentUser,role:'rd'}];renderUserUI();await openCostCalculator('A00001');
  document.querySelector('.main').style.display='block';
  const banner=document.createElement('p');banner.textContent='ข้อมูลจำลองสำหรับตรวจ UI — ไม่ใช่ระบบเชื่อมจริง';banner.className='cost-warning';document.getElementById('costView').prepend(banner);

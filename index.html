@@ -636,6 +636,15 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
 .cost-summary>div{border:1px solid #dfe6ed;border-radius:10px;padding:16px;background:#f8fafc}
 .cost-summary p{margin:8px 0}
 .cost-sum{display:flex;flex-wrap:wrap;gap:14px;padding:9px 12px;border-radius:8px;margin-top:10px;font-size:13px}
+.cost-dash-top{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start;margin-bottom:12px}
+.cost-dash-search{display:grid;grid-template-columns:1fr;gap:10px;margin:10px 0}
+.cost-pill{display:inline-block;padding:2px 9px;border-radius:10px;font-size:11.5px;font-weight:600;white-space:nowrap}
+.cost-pill-open{background:#E6F4EA;color:#1E8E3E}.cost-pill-closed{background:var(--card2);color:var(--muted)}
+.cost-pill-float{background:var(--tint);color:var(--ontint)}.cost-pill-wait{background:#FEF7E0;color:#B06000}
+.cost-pill-ready{background:#E6F4EA;color:#1E8E3E}.cost-pill-draft{background:var(--card2);color:var(--muted)}
+.cost-dash-row{cursor:pointer}.cost-dash-row:hover td{background:var(--tint)}
+.cost-dash-row.cost-dash-locked{cursor:default}.cost-dash-row.cost-dash-locked:hover td{background:transparent}
+.cost-who{display:block;color:var(--muted);font-size:12px}
 .cost-pending{margin:8px 0}
 .cost-pending>b{display:block;font-size:12px;color:var(--muted);letter-spacing:.02em}
 .cost-pending>ul{margin:2px 0 0;padding-left:20px}
@@ -673,7 +682,7 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
   <div class="logo"><svg viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-1.73-3L9 11.35V4H8a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2h-1v7.35L19.73 19A2 2 0 0 1 18 22H6Zm5-10.11L8.31 16.5h7.38L13 11.89V4h-2v7.89Z"/></svg></div>
   <div>
     <div class="hdr-title">Formula Studio</div>
-    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-07.2-open-gate</div>
+    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-07.3-cost-dashboard</div>
   </div>
   <div class="sync-chip" id="syncChip" onclick="sbManualSync()" title="สถานะการซิงก์ข้อมูลกับเซิร์ฟเวอร์กลาง"></div>
 </div>
@@ -682,6 +691,9 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
   <div class="side-cap">เมนู</div>
   <button class="side-item on" id="sideDash" onclick="switchView('dash')">
     <svg class="side-ic" viewBox="0 0 24 24"><path d="M3 13h8V3H3v10Zm0 8h8v-6H3v6Zm10 0h8V11h-8v10Zm0-18v6h8V3h-8Z"/></svg>Dashboard</button>
+  <!-- Cost Calculation — เห็นเฉพาะ RD/Admin/PU-PK/Purchasing (SPEC Grill round 9 · E2-01) -->
+  <button class="side-item" id="sideCost" style="display:none" onclick="switchView('cost')">
+    <svg class="side-ic" viewBox="0 0 24 24"><path d="M7 2h10a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Zm0 2v4h10V4H7Zm0 6v2h2v-2H7Zm4 0v2h2v-2h-2Zm4 0v2h2v-2h-2ZM7 14v2h2v-2H7Zm4 0v2h2v-2h-2Zm4 0v6h2v-6h-2ZM7 18v2h6v-2H7Z"/></svg>Cost Calculation</button>
   <button class="side-item" id="sideData" onclick="switchView('input')">
     <svg class="side-ic" viewBox="0 0 24 24"><path d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2Zm0 16H5V5h14v14ZM7 12h2v5H7v-5Zm4-5h2v10h-2V7Zm4 7h2v3h-2v-3Z"/></svg>Customer Data</button>
   <div class="side-group open" id="chatGroup">
@@ -1131,6 +1143,7 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
 </div>
 
 <!-- ======= MODIFY DATA VIEW ======= -->
+<div id="costDashView" class="view"></div>
 <div id="modifyView" class="view">
   <div id="modEmpty" class="empty">
     <div class="empty-ic"><svg viewBox="0 0 24 24" width="56" height="56" fill="#BDC1C6"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25ZM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83Z"/></svg></div>
@@ -1620,6 +1633,59 @@ var CostCalculator = (() => {
 // COST_CALCULATOR_CORE_END
 
 // COST_CALCULATOR_UI_START
+// ---- เมนู Cost Calculation และ Dashboard ใบงานต้นทุน (E2) ----
+// เปิดได้เฉพาะผู้ที่ capabilities.open เป็นจริง · impersonation ปิดอยู่แล้วใน costAllowed จึงตรวจให้ตรงกัน
+function costMenuAllowed(){
+  if(!currentUser || impersonator) return false;
+  if(typeof costCapabilities!=='function') return false; // ไม่มีชั้นข้อมูล = ปิดไว้ก่อน
+  return !!costCapabilities().open;
+}
+const COST_JOB_STATUS_LABEL={draft:'ร่าง',pk:'รอ PK',price:'รอกำหนดราคา',ready:'พร้อมเสนอ',wait:'รอข้อมูล'};
+const COST_JOB_STATUS_CLASS={draft:'cost-pill-draft',pk:'cost-pill-wait',price:'cost-pill-wait',ready:'cost-pill-ready',wait:'cost-pill-wait'};
+function costDashboardFilter(rows,search){
+  const q=String(search||'').trim().toLocaleLowerCase();
+  if(!q) return rows;
+  return rows.filter(row=>[row.id,row.projectId,row.customer,row.brand,row.owner,row.title].join(' ').toLocaleLowerCase().includes(q));
+}
+function costDashboardBody(rows,showPrice){
+  return rows.map(row=>{
+    const jobPill=row.projectId===null?'<span class="cost-pill cost-pill-float">งานลอย</span>'
+      :row.recordMissing?'<span class="cost-pill cost-pill-closed">อ่านใบงานไม่ได้</span>'
+      :row.closed?'<span class="cost-pill cost-pill-closed">ปิดงานแล้ว</span>':'<span class="cost-pill cost-pill-open">เปิดงาน</span>';
+    const openable=row.projectId!==null&&!row.recordMissing;
+    return `<tr class="cost-dash-row${openable?'':' cost-dash-locked'}" ${openable?`onclick="openCostCalculator('${esc(row.projectId)}')"`:''} data-job="${esc(row.id)}">
+      <td><span class="mono">${esc(row.id)}</span><span class="cost-who mono">${row.projectId===null?'ยังไม่ผูก':esc(row.projectId)}</span></td>
+      <td>${esc(row.customer||row.title||'')}${row.brand?`<span class="cost-who">${esc(row.brand)}</span>`:''}</td>
+      <td>${esc(row.form||'')}</td><td>${jobPill}</td>
+      <td><span class="cost-pill ${COST_JOB_STATUS_CLASS[row.status]||'cost-pill-wait'}">${esc(COST_JOB_STATUS_LABEL[row.status]||row.status)}</span></td>
+      <td>${esc(String(row.updatedAt||'').slice(0,16).replace('T',' '))}<span class="cost-who">โดย ${esc(row.updatedBy||'')}</span></td>
+      <td>${esc(row.owner||'')}</td><td>${esc(row.revisions)}</td>
+      <td>${showPrice?(row.pricePerUnit==null?'<span class="hint">รอ</span>':costNumber(row.pricePerUnit)+' บาท'):'<span class="hint">—</span>'}</td>
+    </tr>`;}).join('')||'<tr><td colspan="9" class="hint">ไม่พบใบงานที่ตรงกับคำค้น</td></tr>';
+}
+let costDashSearch='';
+function renderCostDashboard(){
+  const panel=document.getElementById('costDashView'); if(!panel) return;
+  if(!costMenuAllowed()){ panel.innerHTML=''; return; }
+  const rows=costDashboardRows(),caps=costCapabilities(),showPrice=!!caps.editRM;
+  const visible=costDashboardFilter(rows,costDashSearch);
+  const floating=rows.filter(r=>r.projectId===null).length,waiting=rows.filter(r=>['pk','price','wait'].includes(r.status)).length,ready=rows.filter(r=>r.status==='ready').length;
+  panel.innerHTML=`<div class="sec-card cost-workspace">
+    <div class="cost-dash-top"><div><h2>Cost Calculation</h2><p class="hint">ใบงานต้นทุนทุกโครงการ · ${caps.editRM?'RD เปิดได้ทุกใบ · ':''}ราคาเป็นราคาไม่รวม VAT</p></div>
+      ${caps.editRM?'<button class="btn btn-p" onclick="costOpenCreate()">+ สร้างใบงานต้นทุน</button>':''}</div>
+    <div class="cost-summary"><div><b>${rows.length}</b><p class="hint">ใบงานทั้งหมด</p></div><div><b>${floating}</b><p class="hint">งานลอย ยังไม่ผูก</p></div><div><b>${waiting}</b><p class="hint">รอ PK / รอราคา / รอข้อมูล</p></div><div><b>${ready}</b><p class="hint">พร้อมเสนอ</p></div></div>
+    <div class="cost-dash-search"><input class="fi" id="costDashSearch" value="${esc(costDashSearch)}" placeholder="ค้นหา รหัส · ใบงาน Formula · ลูกค้า · แบรนด์ · เจ้าของสูตร" aria-label="ค้นหาใบงานต้นทุน" oninput="costDashSearchChanged(this.value)"></div>
+    <div class="rec-wrap"><table class="rec-tbl"><thead><tr><th>รหัส</th><th>ลูกค้า / แบรนด์</th><th>รูปแบบ</th><th>สถานะใบงาน</th><th>สถานะต้นทุน</th><th>แก้ล่าสุด</th><th>เจ้าของสูตร</th><th>Rev</th><th>ราคา/หน่วย</th></tr></thead><tbody id="costDashBody">${costDashboardBody(visible,showPrice)}</tbody></table></div>
+    <p class="hint">แก้ล่าสุด = revision ล่าสุดของใบงานต้นทุน ไม่ใช่การแก้ใบงาน Formula · เจ้าของสูตร = RD ที่เริ่มงานต้นทุนคนแรก${rows.length?'':' · ยังไม่มีใบงานต้นทุนในเครื่องนี้ — เปิดจากปุ่ม "คำนวณต้นทุน" ใน Dashboard หรือสร้างใหม่'}</p>
+  </div>`;
+}
+function costDashSearchChanged(value){
+  costDashSearch=value;
+  const body=document.getElementById('costDashBody'); if(!body){ renderCostDashboard(); return; }
+  // วาดใหม่เฉพาะเนื้อตาราง ช่องค้นหาไม่ถูกแตะ เคอร์เซอร์อยู่ที่เดิม (แนวเดียวกับ costCatalogBody)
+  body.innerHTML=costDashboardBody(costDashboardFilter(costDashboardRows(),value),!!costCapabilities().editRM);
+}
+function costOpenCreate(){ alert('หน้าสร้างใบงานต้นทุน (E3) ยังไม่เปิดใช้ — ตอนนี้เปิดจากปุ่ม "คำนวณต้นทุน" ใน Dashboard'); }
 // Empty by default. Enable only after the trusted service/access migration is reviewed.
 // This is the proposed cost-v1 client contract, not a claim that a live API exists.
 let COST_API_ORIGIN = '';
@@ -2012,6 +2078,33 @@ function costCreateJob(input){
   return job;
 }
 function costJobEntries(jobId){return loadCostStore().scenarios.filter(row=>row.jobId===jobId);}
+// สถานะต้นทุนคำนวณจากรายการค้างของ revision ล่าสุด ไม่เก็บซ้ำ (REGISTRY §5)
+function costJobStatus(result,scenario){
+  if(!scenario||!Array.isArray(scenario.rmLines)||!scenario.rmLines.length) return 'draft';
+  if(!result) return 'wait';
+  if(result.complete) return 'ready';
+  const pending=result.pending||[];
+  if(pending.some(m=>/^PK:/.test(m))) return 'pk';
+  if(pending.some(m=>/รอกำหนดราคา/.test(m))) return 'price';
+  return 'wait';
+}
+// แถว dashboard: ใบงานต้นทุน + ข้อมูลอ่านอย่างเดียวจากใบงาน Formula · ราคาเฉพาะผู้ที่แก้สูตรได้
+function costDashboardRows(){
+  const caps=costCapabilities(); if(!caps.open) return [];
+  const list=typeof records!=='undefined'&&Array.isArray(records)?records:[];
+  return costJobs().map(job=>{
+    const entries=costJobEntries(job.id),latest=entries.reduce((a,b)=>!a||b.revision>a.revision?b:a,null);
+    const record=job.projectId?list.find(r=>r&&r.id===job.projectId)||null:null;
+    let result=null;try{result=latest?CostCalculator.calculate(latest.scenario,costToday()):null;}catch(_){result=null;}
+    const status=costJobStatus(result,latest&&latest.scenario);
+    return {id:job.id,projectId:job.projectId,title:job.title||'',form:record?record.form||'':job.form||'',
+      customer:record?record.customer||'':'',brand:record?record.brand||'':'',
+      closed:!!(record&&record.closed),recordMissing:!!(job.projectId&&!record),
+      owner:job.owner||'',status,revisions:entries.length,
+      updatedAt:latest?latest.createdAt:job.createdAt,updatedBy:latest?latest.createdBy:job.createdBy,
+      pricePerUnit:caps.editRM&&result&&result.complete&&typeof result.finalPerSellingUnit==='number'?result.finalPerSellingUnit:null};
+  }).sort((a,b)=>String(b.updatedAt).localeCompare(String(a.updatedAt)));
+}
 function saveCostStore(){
   if(costStore===null)return false; // loader has not run; writing now would erase existing data
   try{localStorage.setItem(COST_KEY,JSON.stringify(costStore));return true;}catch(error){return false;}
@@ -3641,7 +3734,7 @@ function fmtUW(d){ return d.uw ? [d.uw, d.uwUnit || 'mg'].filter(Boolean).join('
 
 // ========== NAVIGATION ==========
 function switchView(v) {
-  const viewIds = {input:'inputView', dash:'dashView', modify:'modifyView', chat:'chatView', act:'actView'};
+  const viewIds = {input:'inputView', dash:'dashView', modify:'modifyView', chat:'chatView', act:'actView', cost:'costDashView'};
   // panel ที่ loader สร้างตอน runtime ไม่ได้อยู่ในตารางข้างบน · ถ้าไม่ดักไว้ตรงนี้
   // การกดปุ่มของมันจะตกไปที่ค่าเริ่มต้น inputView แล้วเปิดหน้าผิด
   if(v === 'pws'){
@@ -3659,6 +3752,8 @@ function switchView(v) {
     }
   }
   if(v==='act' && !can('manageUsers')){ alert('Activities log เปิดดูได้เฉพาะ Role: Admin'); return; }
+  // ชั้นที่ 2 ของกฎข้อ 8 สำหรับเมนู Cost Calculation (ชั้นที่ 3 อยู่ใน costLocalRequest)
+  if(v==='cost' && !costMenuAllowed()){ alert('Cost Calculation ใช้ได้เฉพาะ Role: RD, Admin, PU-PK, Purchasing'); return; }
   if(v==='input' && currentUser && !can('createData')){
     alert('เมนู Customer Data ใช้ได้เฉพาะ Role: Admin, Sales, OPC, MKT\nRole ของคุณ: ' + (roleLabel(currentRole())||'ไม่ระบุ'));
     return;
@@ -3669,6 +3764,8 @@ function switchView(v) {
   document.getElementById('sideDash').classList.toggle('on', v==='dash');
   document.getElementById('sideChat').classList.toggle('on', v==='chat');
   document.getElementById('sideActivities').classList.toggle('on', v==='act');
+  const sideCost=document.getElementById('sideCost'); if(sideCost) sideCost.classList.toggle('on', v==='cost');
+  if(v==='cost') renderCostDashboard();
   if(v==='input') renderSalesOwnerField();
   if(v==='modify') renderModify();
   if(v==='dash') renderRecordsList();
@@ -4618,6 +4715,10 @@ function renderUserUI(){
   const canData = !currentUser || can('createData');
   if(dataBtn) dataBtn.style.display = canData ? 'flex' : 'none';
   if(!canData && document.getElementById('inputView').classList.contains('on')) switchView('dash');
+  // เมนู Cost Calculation — ชั้นที่ 1: ซ่อนปุ่มจาก role ที่เปิดเครื่องคำนวณไม่ได้
+  const costBtn = document.getElementById('sideCost'), costOK = costMenuAllowed();
+  if(costBtn) costBtn.style.display = costOK ? 'flex' : 'none';
+  if(!costOK && document.getElementById('costDashView') && document.getElementById('costDashView').classList.contains('on')) switchView('dash');
   renderLoginView();
   const outBtn = document.getElementById('sideLogout');
   if(outBtn) outBtn.style.display = currentUser ? 'flex' : 'none';
