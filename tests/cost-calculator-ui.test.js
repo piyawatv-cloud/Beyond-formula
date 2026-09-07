@@ -168,9 +168,9 @@ test('dashboard วาด 9 คอลัมน์ กรองได้ แล�
   assert.ok(html.includes('4.12')&&html.includes('เปิดงาน')&&html.includes('ปิดงานแล้ว')&&html.includes('งานลอย')&&html.includes('รอ PK'));
   assert.ok(html.includes(`openCostCalculator('A00001')`),'แถวที่ผูกแล้วต้องเปิดได้');
   const floatRow=html.match(/<tr[^>]*data-job="CJ-000002"[^>]*>/)[0];
-  assert.ok(floatRow.includes('cost-dash-locked')&&!floatRow.includes('onclick'),'งานลอยยังเปิดจากที่นี่ไม่ได้จนกว่าจะมี tab (E4): '+floatRow);
+  assert.ok(floatRow.includes(`openCostCalculator('CJ-000002')`)&&!floatRow.includes('cost-dash-locked'),'งานลอยเปิดด้วยรหัสของตัวเอง (E3): '+floatRow);
   const boundRow=html.match(/<tr[^>]*data-job="CJ-000001"[^>]*>/)[0];
-  assert.ok(boundRow.includes('onclick')&&!boundRow.includes('cost-dash-locked'));
+  assert.ok(boundRow.includes(`openCostCalculator('A00001')`)&&!boundRow.includes('cost-dash-locked'));
   assert.ok(html.includes('+ สร้างใบงานต้นทุน'));
   const body={innerHTML:'x'};c.elements.costDashBody=body;
   view.innerHTML='ไม่ควรถูกแตะ';
@@ -182,4 +182,31 @@ test('dashboard วาด 9 คอลัมน์ กรองได้ แล�
   c.run('costCapabilities=()=>({open:true,editRM:false});');c.renderCostDashboard();
   assert.ok(!view.innerHTML.includes('4.12')&&!view.innerHTML.includes('สร้างใบงานต้นทุน'),'ไม่มีสิทธิ์แก้สูตร = ไม่มีราคาและปุ่มสร้าง');
   c.run('costCapabilities=()=>({open:false});');c.renderCostDashboard();assert.equal(view.innerHTML,'','ไม่มีสิทธิ์ต้องว่างเปล่า');
+});
+
+// ---- E3 หน้าสร้างใบงาน และกล่องผูก ----
+test('หน้าสร้างแสดงเฉพาะใบงาน Formula ที่ยังไม่มีใบงานต้นทุน และเปิดได้เฉพาะผู้แก้สูตร',()=>{
+  const c=fixture();
+  const view={innerHTML:'',classList:{contains:()=>true,add(){},remove(){}}};c.elements.costDashView=view;
+  c.records=[{id:'A00001',customer:'ลูกค้า ก',brand:'GLOW',createdBy:'x'},{id:'A00002',customer:'ลูกค้า ข',brand:'VITA',createdBy:'x'},{id:'A00003',customer:'ปิดแล้ว',closed:{by:'x'},createdBy:'x'}];
+  c.run(`var costCapabilities=()=>({open:true,editRM:true});var costJobs=()=>[{id:'CJ-000001',projectId:'A00001',owner:'RD-ก'}];
+    var costJobByProject=id=>id==='A00001'?{id:'CJ-000001'}:null;var costFormatList=()=>[{label:'แคปซูล'},{label:'ซอง'}];`);
+  c.costOpenCreate();
+  assert.ok(view.innerHTML.includes('A00002')&&view.innerHTML.includes('A00003'),'ใบที่ยังไม่มีใบงานต้นทุนต้องอยู่');
+  assert.ok(!view.innerHTML.includes('value="A00001"'),'ใบที่มีใบงานต้นทุนแล้วต้องไม่อยู่ในรายการอ้างอิง');
+  assert.ok(view.innerHTML.includes('ปิดงานแล้ว'),'ใบที่ปิดแล้วยังอ้างอิงได้แต่ต้องบอก');
+  c.costCreateMode('float');assert.ok(view.innerHTML.includes('costCreateTitle')&&view.innerHTML.includes('แคปซูล'),'งานลอยมีชื่อและรูปแบบให้เลือก');
+  c.costCreateMode('clone');assert.ok(view.innerHTML.includes('CJ-000001')&&view.innerHTML.includes('ราคาที่หมดอายุแล้วจะขึ้น'),'โคลนต้องเตือนเรื่องราคาเก่า');
+  c.run('costCapabilities=()=>({open:true,editRM:false});');view.innerHTML='เดิม';let alerted='';c.alert=m=>{alerted=m;};
+  c.costOpenCreate();assert.equal(view.innerHTML,'เดิม');assert.match(alerted,/RD และ Admin/);
+});
+test('กล่องผูกโผล่เฉพาะงานลอยของผู้แก้สูตร และไม่เสนอใบงานที่มีใบงานต้นทุนแล้ว',()=>{
+  const c=fixture();
+  c.records=[{id:'A00001',customer:'ก',createdBy:'x'},{id:'A00002',customer:'ข',createdBy:'x'}];
+  c.run(`var costJobByProject=id=>id==='A00001'?{id:'CJ-000001'}:null;`);
+  const floating={job:{id:'CJ-000007',bound:false,projectId:null,title:'ทดลอง'},capabilities:{editRM:true}};
+  const html=c.costBindBox(floating);
+  assert.ok(html.includes('CJ-000007')&&html.includes('ทดลอง')&&html.includes('value="A00002"')&&!html.includes('value="A00001"'));
+  assert.equal(c.costBindBox({job:{id:'CJ-000001',bound:true,projectId:'A00001'},capabilities:{editRM:true}}),'','ผูกแล้วไม่ต้องมีกล่อง');
+  assert.equal(c.costBindBox({...floating,capabilities:{editRM:false}}),'','PU-PK/Purchasing ผูกไม่ได้');
 });

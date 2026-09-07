@@ -798,3 +798,87 @@ test('ใบงานที่ผูกกับ Formula ที่หายไ�
   const row=c.run('costDashboardRows()')[0];
   assert.equal(row.recordMissing,true);assert.equal(row.customer,'');assert.equal(row.status,'draft');
 });
+
+// ---- E3-01/E3-02 เริ่มใบงานสามทาง และผูกงานลอย ----
+test('สร้างแบบอ้างอิง Formula ได้ revision 1 ทันทีและเปิดด้วยรหัสโครงการ',async()=>{
+  const c=fixture('rd','RD-ก');c.records=[{id:'A00005'}];
+  const job=c.run(`costStartJob({mode:'ref',projectId:'A00005'})`);
+  assert.equal(job.projectId,'A00005');assert.equal(c.run(`costJobKey(costJobById('${job.id}'))`),'A00005');
+  const body=await c.costLocalRequest('open',{projectId:'A00005'});
+  assert.equal(body.revision,1);assert.equal(body.job.id,job.id);assert.equal(body.job.bound,true);
+  assert.throws(()=>c.run(`costStartJob({mode:'ref',projectId:'A00005'})`),/มีใบงานต้นทุน .* อยู่แล้ว เจ้าของสูตร: RD-ก/);
+  assert.throws(()=>c.run(`costStartJob({mode:'ref',projectId:'A00099'})`),/ไม่พบใบงาน Formula/);
+  assert.equal(c.loadCostStore().jobs.length,1,'สร้างล้มต้องไม่ทิ้งใบงานผี');
+});
+test('งานลอยเปิดด้วยรหัสของตัวเอง แก้สูตรได้ แต่ส่งสรุปเข้าแชทไม่ได้และไม่สร้างห้องแชท',async()=>{
+  const c=fixture('rd','RD-ก');
+  const job=c.run(`costStartJob({mode:'float',title:'ทดลอง',form:'แคปซูล'})`);
+  assert.equal(job.projectId,null);assert.match(job.id,/^CJ-\d{6}$/);
+  const body=await c.costLocalRequest('open',{projectId:job.id});
+  assert.equal(body.projectId,job.id);assert.equal(body.job.bound,false);assert.equal(body.job.title,'ทดลอง');
+  await c.costLocalRequest('save',{projectId:job.id,scenarioId:'S1',expectedRevision:1,patch:{sellingUnits:1000,unitsPerPack:1,fillAmount:1,fillUnit:'g',lines:[]}});
+  assert.equal((await c.costLocalRequest('open',{projectId:job.id})).revision,2);
+  await assert.rejects(c.costLocalRequest('sendSummary',{projectId:job.id,scenarioId:'S1',expectedRevision:2,idempotencyKey:'x:1'}),/งานลอยส่งสรุป/);
+  assert.equal(c.chats.length,0,'ห้ามสร้างห้องแชทให้งานลอย');
+  assert.equal(c.loadCostStore().jobs.length,1,'เปิดด้วยคีย์ CJ ต้องไม่สร้างใบงานซ้อน');
+});
+test('โคลนติดสูตร ราคา RM และ PK มาทั้งหมด เจ้าของคือผู้โคลน และราคาหมดอายุในต้นแบบขึ้น "รอ" ในใบใหม่',async()=>{
+  const c=fixture('rd','RD-ก');
+  await readyScenario(c);seedRates(c);setRule(c,RULE);
+  const src=c.loadCostStore().jobs[0];
+  const stale={...c.loadCostStore().scenarios.at(-1).scenario};
+  const d=fixture('rd','RD-ข');d.backing.fs_cost=c.backing.fs_cost;
+  const job=d.run(`costStartJob({mode:'clone',from:'${src.id}',title:'สูตรสอง'})`);
+  assert.equal(job.clonedFrom,src.id);assert.equal(job.owner,'RD-ข');assert.equal(job.projectId,null);
+  const body=await d.costLocalRequest('open',{projectId:job.id});
+  assert.equal(body.revision,1);
+  assert.equal(body.lines.length,stale.rmLines.length,'สูตรติดมาครบ');
+  assert.equal(body.lines[0].offerRef,stale.rmLines[0].offer.id,'ราคาที่เลือกไว้ติดมา');
+  assert.equal(body.view.complete,true,'ต้นแบบพร้อมเสนอ ใบโคลนก็พร้อม เมื่อราคายังไม่หมดอายุ');
+  // ทำให้ราคาในต้นแบบหมดอายุ แล้วโคลนอีกใบ
+  const st=d.loadCostStore();const last=st.scenarios.filter(r=>r.jobId===src.id).at(-1);
+  const expired=JSON.parse(JSON.stringify(last.scenario));expired.rmLines[0].offer.validUntil='2000-01-01';
+  d.run('costStore=null');const raw=JSON.parse(d.backing.fs_cost);raw.scenarios.find(r=>r.jobId===src.id&&r.revision===last.revision).scenario=expired;d.backing.fs_cost=JSON.stringify(raw);
+  const job2=d.run(`costStartJob({mode:'clone',from:'${src.id}'})`);
+  const body2=await d.costLocalRequest('open',{projectId:job2.id});
+  assert.equal(body2.view.complete,false,'ราคาหมดอายุต้องไม่ผ่านเงียบ');
+  assert.ok(body2.view.pending.some(m=>/^RM 1/.test(m)),'ต้องบอกว่า RM รอยืนยัน: '+body2.view.pending.join('|'));
+  assert.throws(()=>d.run(`costStartJob({mode:'clone',from:'CJ-999999'})`),/ไม่พบใบงานต้นทุนต้นแบบ/);
+});
+test('ผูกงานลอย: รหัสไม่เปลี่ยน revision เก่ายังอยู่ ผูกซ้ำ/ผูกใบที่มีแล้ว/ใบที่ไม่มีในเครื่อง ถูกปฏิเสธ และล้มแล้วถอยกลับ',async()=>{
+  const c=fixture('rd','RD-ก');c.records=[{id:'A00001'},{id:'A00002'}];
+  await c.costLocalRequest('open',{projectId:'A00001'});
+  const job=c.run(`costStartJob({mode:'float',title:'ลอย'})`);
+  await c.costLocalRequest('save',{projectId:job.id,scenarioId:'S1',expectedRevision:1,patch:{sellingUnits:500,unitsPerPack:1,fillAmount:1,fillUnit:'g',lines:[]}});
+  assert.throws(()=>c.run(`costBindJob('${job.id}','A00001')`),/CJ-000001 อยู่แล้ว เจ้าของสูตร: RD-ก/);
+  assert.throws(()=>c.run(`costBindJob('${job.id}','A00077')`),/ไม่พบใบงาน Formula/);
+  assert.throws(()=>c.run(`costBindJob('CJ-000001','A00002')`),/ผูกกับ A00001 อยู่แล้ว/);
+  // ล้มตอนบันทึก → ต้องถอย projectId กลับ
+  const setItem=c.localStorage.setItem;c.localStorage.setItem=()=>{throw Error('เต็ม');};
+  assert.throws(()=>c.run(`costBindJob('${job.id}','A00002')`),/บันทึก revision ไม่ได้/);
+  c.localStorage.setItem=setItem;
+  assert.equal(c.run(`costJobById('${job.id}').projectId`),null,'ล้มแล้วต้องยังเป็นงานลอย');
+  const bound=c.run(`costBindJob('${job.id}','A00002')`);
+  assert.equal(bound.id,job.id,'รหัสไม่เปลี่ยน');assert.equal(bound.projectId,'A00002');
+  const body=await c.costLocalRequest('open',{projectId:'A00002'});
+  assert.equal(body.revision,3,'ผูก = revision ใหม่ต่อจากของเดิม');assert.equal(body.inputs.sellingUnits,500,'ค่าที่กรอกไว้ตอนลอยติดมา');
+  assert.equal(body.job.id,job.id);assert.equal(body.job.bound,true);
+  assert.equal(c.run(`costJobEntries('${job.id}').length`),3,'revision เก่าสองอันยังอยู่ใต้ใบงานเดิม');
+  assert.equal(c.run(`costDashboardRows().filter(r=>r.id==='${job.id}').length`),1,'dashboard เห็นใบเดียว ไม่แตกเป็นสอง');
+  assert.equal(c.run(`costDashboardRows().find(r=>r.id==='${job.id}').revisions`),3);
+  const p=fixture('purchasing','Synthetic Buyer');p.backing.fs_cost=c.backing.fs_cost;p.records=[{id:'A00002'}];
+  assert.throws(()=>p.run(`costStartJob({mode:'float'})`),/เฉพาะ RD และ Admin/);
+});
+test('สร้างใบงานแล้วบันทึก revision แรกล้ม ต้องไม่เหลือใบงานผีทั้งสามทาง และตัวนับคืนเดิม',async()=>{
+  const c=fixture('rd','RD-ก');c.records=[{id:'A00005'}];
+  await readyScenario(c);
+  const before=JSON.stringify(c.loadCostStore().jobs),counter=c.loadCostStore().jobCounter;
+  const setItem=c.localStorage.setItem;c.localStorage.setItem=()=>{throw Error('เต็ม');};
+  for(const call of [`costStartJob({mode:'ref',projectId:'A00005'})`,`costStartJob({mode:'float',title:'x'})`,`costStartJob({mode:'clone',from:'CJ-000001'})`]){
+    assert.throws(()=>c.run(call),/บันทึก revision ไม่ได้/,call);
+    assert.equal(JSON.stringify(c.loadCostStore().jobs),before,'ใบงานผีจาก '+call);
+    assert.equal(c.loadCostStore().jobCounter,counter,'ตัวนับต้องคืน: '+call);
+  }
+  c.localStorage.setItem=setItem;
+  assert.equal(c.run(`costStartJob({mode:'float',title:'ok'}).id`),'CJ-00000'+(counter+1),'รหัสถัดไปต้องต่อจากเดิม ไม่กระโดด');
+});

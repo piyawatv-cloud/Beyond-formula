@@ -54,6 +54,15 @@
  {const box=document.getElementById('costDashSearch');box.focus();box.value='ไม่มีทาง';box.dispatchEvent(new Event('input',{bubbles:true}));
  check('dashboard search filters in place',document.getElementById('costDashBody').textContent.includes('ไม่พบใบงาน'));
  check('dashboard search keeps the input element (no full redraw)',document.getElementById('costDashSearch')===box);}
+ // E3: สร้างลอยจากหน้าสร้าง → เปิด → ผูกจากในหน้าเครื่องคำนวณ → เปิดใบที่ผูก
+ records.push({id:'A00002',customer:'ลูกค้าสังเคราะห์ ข',brand:'SYN-B',createdBy:currentUser});
+ costOpenCreate();check('create page opens on reference mode listing only unbound records',document.getElementById('costCreateRefList').textContent.includes('A00002')&&!document.getElementById('costCreateRefList').innerHTML.includes('value="A00001"'));
+ costCreateMode('float');document.getElementById('costCreateTitle').value='งานลอยสังเคราะห์';await costCreateSubmit();
+ check('floating job opens in the calculator under its own key',costState.response&&costState.response.job&&costState.response.job.bound===false&&/^CJ-\d{6}$/.test(costState.projectId)&&document.getElementById('costBindSelect')!==null);
+ const floatingId=costState.projectId;
+ document.getElementById('costBindSelect').value='A00002';await costBindFromView();
+ check('binding reopens the job under the Formula id with the same job id',costState.projectId==='A00002'&&costState.response.job.id===floatingId&&costState.response.job.bound===true&&!document.getElementById('costBindSelect'));
+ switchView('cost');costDashSearchChanged('');check('dashboard shows the bound job once with its Formula id',document.getElementById('costDashBody').textContent.split(floatingId).length===2&&document.getElementById('costDashBody').textContent.includes('A00002'));
  userList=[{name:currentUser,role:'sales'}];renderUserUI();
  check('Sales menu hidden and dashboard view closed',document.getElementById('sideCost').style.display==='none'&&!document.getElementById('costDashView').classList.contains('on'));
  switchView('cost');

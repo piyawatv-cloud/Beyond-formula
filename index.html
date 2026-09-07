@@ -645,6 +645,10 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
 .cost-dash-row{cursor:pointer}.cost-dash-row:hover td{background:var(--tint)}
 .cost-dash-row.cost-dash-locked{cursor:default}.cost-dash-row.cost-dash-locked:hover td{background:transparent}
 .cost-who{display:block;color:var(--muted);font-size:12px}
+.cost-pick{border:1px solid var(--line);border-radius:8px;max-height:260px;overflow:auto;margin:8px 0}
+.cost-pick-row{display:flex;align-items:center;gap:8px;padding:9px 12px;border-top:1px solid var(--line);cursor:pointer;min-height:44px}
+.cost-pick-row:first-child{border-top:none}.cost-pick-row:hover{background:var(--tint)}
+.cost-bind{border:1px solid var(--or);background:var(--tint);border-radius:10px;padding:12px 14px;margin:10px 0}
 .cost-pending{margin:8px 0}
 .cost-pending>b{display:block;font-size:12px;color:var(--muted);letter-spacing:.02em}
 .cost-pending>ul{margin:2px 0 0;padding-left:20px}
@@ -682,7 +686,7 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
   <div class="logo"><svg viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-1.73-3L9 11.35V4H8a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2h-1v7.35L19.73 19A2 2 0 0 1 18 22H6Zm5-10.11L8.31 16.5h7.38L13 11.89V4h-2v7.89Z"/></svg></div>
   <div>
     <div class="hdr-title">Formula Studio</div>
-    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-07.3-cost-dashboard</div>
+    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-07.4-create-bind</div>
   </div>
   <div class="sync-chip" id="syncChip" onclick="sbManualSync()" title="สถานะการซิงก์ข้อมูลกับเซิร์ฟเวอร์กลาง"></div>
 </div>
@@ -1652,8 +1656,8 @@ function costDashboardBody(rows,showPrice){
     const jobPill=row.projectId===null?'<span class="cost-pill cost-pill-float">งานลอย</span>'
       :row.recordMissing?'<span class="cost-pill cost-pill-closed">อ่านใบงานไม่ได้</span>'
       :row.closed?'<span class="cost-pill cost-pill-closed">ปิดงานแล้ว</span>':'<span class="cost-pill cost-pill-open">เปิดงาน</span>';
-    const openable=row.projectId!==null&&!row.recordMissing;
-    return `<tr class="cost-dash-row${openable?'':' cost-dash-locked'}" ${openable?`onclick="openCostCalculator('${esc(row.projectId)}')"`:''} data-job="${esc(row.id)}">
+    const openable=!row.recordMissing,key=row.projectId===null?row.id:row.projectId;
+    return `<tr class="cost-dash-row${openable?'':' cost-dash-locked'}" ${openable?`onclick="openCostCalculator('${esc(key)}')"`:''} data-job="${esc(row.id)}">
       <td><span class="mono">${esc(row.id)}</span><span class="cost-who mono">${row.projectId===null?'ยังไม่ผูก':esc(row.projectId)}</span></td>
       <td>${esc(row.customer||row.title||'')}${row.brand?`<span class="cost-who">${esc(row.brand)}</span>`:''}</td>
       <td>${esc(row.form||'')}</td><td>${jobPill}</td>
@@ -1685,7 +1689,68 @@ function costDashSearchChanged(value){
   // วาดใหม่เฉพาะเนื้อตาราง ช่องค้นหาไม่ถูกแตะ เคอร์เซอร์อยู่ที่เดิม (แนวเดียวกับ costCatalogBody)
   body.innerHTML=costDashboardBody(costDashboardFilter(costDashboardRows(),value),!!costCapabilities().editRM);
 }
-function costOpenCreate(){ alert('หน้าสร้างใบงานต้นทุน (E3) ยังไม่เปิดใช้ — ตอนนี้เปิดจากปุ่ม "คำนวณต้นทุน" ใน Dashboard'); }
+// ---- หน้าสร้างใบงานต้นทุน (E3-01) ----
+let costCreateState={mode:'ref',search:''};
+function costUnboundRecords(){
+  const list=typeof records!=='undefined'&&Array.isArray(records)?records:[];
+  return list.filter(r=>r&&/^[A-Z]\d{5}$/.test(r.id)&&canSeeRecord(r)&&!costJobByProject(r.id));
+}
+function costOpenCreate(){
+  if(!costMenuAllowed()||!costCapabilities().editRM){alert('สร้างใบงานต้นทุนได้เฉพาะ RD และ Admin');return;}
+  costCreateState={mode:'ref',search:''};
+  renderCostCreate();
+}
+function costCreateMode(mode){costCreateState.mode=mode;renderCostCreate();}
+function costCreateSearchChanged(value){costCreateState.search=value;const box=document.getElementById('costCreateRefList');if(box)box.innerHTML=costCreateRefList();}
+function costCreateRefList(){
+  const q=String(costCreateState.search||'').trim().toLocaleLowerCase();
+  const rows=costUnboundRecords().filter(r=>!q||[r.id,r.customer,r.brand].join(' ').toLocaleLowerCase().includes(q));
+  return rows.map(r=>`<label class="cost-pick-row"><input type="radio" name="costCreateRef" value="${esc(r.id)}"> <span class="mono">${esc(r.id)}</span> · ${esc(r.customer||'')}${r.brand?' · '+esc(r.brand):''}${r.closed?' <span class="cost-pill cost-pill-closed">ปิดงานแล้ว</span>':''}</label>`).join('')
+    ||'<p class="hint">ไม่มีใบงาน Formula ที่ยังไม่มีใบงานต้นทุน — ใบที่มีแล้วเปิดจาก Dashboard</p>';
+}
+function renderCostCreate(){
+  const panel=document.getElementById('costDashView'); if(!panel) return;
+  const mode=costCreateState.mode,jobs=costJobs(),formats=typeof costFormatList==='function'?costFormatList():[];
+  const tab=(m,label)=>`<button class="btn ${mode===m?'btn-p':''}" onclick="costCreateMode('${m}')">${label}</button>`;
+  panel.innerHTML=`<div class="sec-card cost-workspace">
+    <div class="cost-dash-top"><div><h2>สร้างใบงานต้นทุน</h2><p class="hint">เลือกทางเดียว · เปิดเป็นหน้าเครื่องคำนวณทันที</p></div><button class="btn btn-s" onclick="renderCostDashboard()">ยกเลิก</button></div>
+    <div class="btn-row">${tab('ref','อ้างอิงใบงาน Formula')}${tab('float','สร้างลอย')}${tab('clone','โคลนจากใบงานต้นทุนเดิม')}</div>
+    ${mode==='ref'?`<h3>ใบงาน Formula ที่ยังไม่มีใบงานต้นทุน</h3><input class="fi" id="costCreateSearch" value="${esc(costCreateState.search)}" placeholder="ค้นหารหัส · ลูกค้า · แบรนด์" aria-label="ค้นหาใบงาน Formula" oninput="costCreateSearchChanged(this.value)"><div id="costCreateRefList" class="cost-pick">${costCreateRefList()}</div><p class="hint">ผูกทันที ดึงลูกค้า แบรนด์ รูปแบบสินค้า มาให้</p>`:''}
+    ${mode==='float'?`<h3>งานลอย</h3><div class="fg4"><label class="fgrp"><span class="flbl">ชื่องานชั่วคราว</span><input class="fi" id="costCreateTitle" placeholder="เช่น ทดลองสูตรใหม่ให้ลูกค้ารายใหม่"></label><label class="fgrp"><span class="flbl">รูปแบบสินค้า</span><select class="fi" id="costCreateForm"><option value="">— ยังไม่ระบุ —</option>${formats.map(f=>`<option value="${esc(f.label)}">${esc(f.label)}</option>`).join('')}</select></label></div><p class="hint">ยังไม่ผูกใบงาน ได้รหัสภายในทันที ผูกทีหลังได้จากในหน้าเครื่องคำนวณ · ส่งสรุปเข้าแชทไม่ได้จนกว่าจะผูก</p>`:''}
+    ${mode==='clone'?`<h3>เลือกใบงานต้นทุนต้นแบบ</h3><div class="cost-pick">${jobs.map(j=>`<label class="cost-pick-row"><input type="radio" name="costCreateClone" value="${esc(j.id)}"> <span class="mono">${esc(j.id)}</span>${j.projectId?' · <span class="mono">'+esc(j.projectId)+'</span>':' · งานลอย'}${j.title?' · '+esc(j.title):''} · เจ้าของ ${esc(j.owner||'')}</label>`).join('')||'<p class="hint">ยังไม่มีใบงานต้นทุนให้โคลน</p>'}</div><label class="fgrp"><span class="flbl">ชื่องานใหม่ (ไม่บังคับ)</span><input class="fi" id="costCreateTitle" placeholder="เว้นว่าง = ใช้ชื่อเดิม"></label><p class="cost-warning">โคลนติดสูตร ราคา RM ที่เลือก และ PK มาทั้งหมด · ราคาที่หมดอายุแล้วจะขึ้น "รอ" ในใบใหม่จนกว่าจัดซื้อยืนยัน · เจ้าของสูตรของใบใหม่คือคุณ</p>`:''}
+    <div class="btn-row"><button class="btn btn-p" onclick="costCreateSubmit()">เปิดเป็นหน้าเครื่องคำนวณ</button><span class="hint" id="costCreateMsg" role="status"></span></div>
+  </div>`;
+}
+function costCreateSubmit(){
+  const msg=document.getElementById('costCreateMsg'),val=id=>{const el=document.getElementById(id);return el?el.value.trim():'';};
+  const picked=name=>{const el=document.querySelector(`input[name="${name}"]:checked`);return el?el.value:'';};
+  try{
+    let job;
+    if(costCreateState.mode==='ref'){const projectId=picked('costCreateRef');if(!projectId)throw Error('เลือกใบงาน Formula ก่อน');job=costStartJob({mode:'ref',projectId});}
+    else if(costCreateState.mode==='float'){job=costStartJob({mode:'float',title:val('costCreateTitle'),form:val('costCreateForm')});}
+    else{const from=picked('costCreateClone');if(!from)throw Error('เลือกใบงานต้นแบบก่อน');job=costStartJob({mode:'clone',from,title:val('costCreateTitle')});}
+    renderCostDashboard();
+    return openCostCalculator(costJobKey(job));
+  }catch(error){if(msg)msg.textContent=String(error.message);}
+}
+// ---- ผูกงานลอยจากในหน้าเครื่องคำนวณ (E3-02) ----
+function costBindFromView(){
+  const data=costState.response,sel=document.getElementById('costBindSelect'),msg=document.getElementById('costBindMsg');
+  if(!data||!data.job||data.job.bound||!sel)return;
+  try{
+    if(!sel.value)throw Error('เลือกใบงาน Formula ก่อน');
+    const job=costBindJob(data.job.id,sel.value);
+    return openCostCalculator(job.projectId);
+  }catch(error){if(msg)msg.textContent=String(error.message);}
+}
+function costBindBox(data){
+  if(!data||!data.job||data.job.bound||!data.capabilities.editRM)return '';
+  const options=costUnboundRecords().map(r=>`<option value="${esc(r.id)}">${esc(r.id)} · ${esc(r.customer||'')}${r.brand?' · '+esc(r.brand):''}</option>`).join('');
+  return `<div class="cost-bind"><b>งานลอย <span class="mono">${esc(data.job.id)}</span>${data.job.title?' · '+esc(data.job.title):''}</b> — ยังไม่ผูกใบงาน Formula · ส่งสรุปเข้าแชทยังไม่ได้
+    <div class="btn-row"><select class="fi" id="costBindSelect" aria-label="เลือกใบงาน Formula ที่จะผูก"><option value="">เลือกใบงาน Formula ที่จะผูก…</option>${options}</select><button class="btn btn-s btn-p" onclick="costBindFromView()">ผูก</button><span class="hint" id="costBindMsg" role="status"></span></div>
+    <p class="hint">ผูกแล้วรหัส ${esc(data.job.id)} ไม่เปลี่ยน · ใบงาน Formula ที่มีใบงานต้นทุนแล้วจะไม่อยู่ในรายการ</p></div>`;
+}
+
 // Empty by default. Enable only after the trusted service/access migration is reviewed.
 // This is the proposed cost-v1 client contract, not a claim that a live API exists.
 let COST_API_ORIGIN = '';
@@ -1703,7 +1768,7 @@ function costLinkRoute(hash){
   const params=new URL('https://formula.invalid/?'+hash.slice(1)).searchParams;
   if([...params.keys()].length!==3 || ['project','scenario','revision'].some(key=>params.getAll(key).length!==1))return null;
   const projectId=params.get('project'),scenarioId=params.get('scenario'),text=params.get('revision');
-  if(!/^[A-Z]\d{5}$/.test(projectId) || !/^[A-Za-z0-9_-]{1,80}$/.test(scenarioId) || !/^[1-9]\d*$/.test(text) || !Number.isSafeInteger(Number(text)))return null;
+  if(!(/^[A-Z]\d{5}$/.test(projectId) || /^CJ-\d{6}$/.test(projectId)) || !/^[A-Za-z0-9_-]{1,80}$/.test(scenarioId) || !/^[1-9]\d*$/.test(text) || !Number.isSafeInteger(Number(text)))return null;
   return {projectId,scenarioId,revision:Number(text)};
 }
 async function costResolveLink(){
@@ -1721,7 +1786,10 @@ if(typeof window.addEventListener==='function')window.addEventListener('hashchan
 function costAllowed(projectId){
   const gate=typeof costCapabilities==='function'?costCapabilities():null;
   if(gate&&!gate.open)return false;
-  return !!(currentUser && can('chat') && !impersonator && canSeeRecord(records.find(r=>r.id===projectId)));
+  if(!currentUser || impersonator || !can('chat'))return false;
+  // งานลอยใช้รหัสใบงานต้นทุน CJ-… เป็นคีย์แทนใบงาน Formula ที่ยังไม่มี (SPEC Grill round 9)
+  if(/^CJ-\d{6}$/.test(String(projectId)))return typeof costJobById==='function' && !!costJobById(projectId);
+  return canSeeRecord(records.find(r=>r.id===projectId));
 }
 async function costRequest(action,payload){
   const actions=['open','save','selectRM','changeTier','removeRM','requestMaterial','adoptPK','sendSummary'];
@@ -1845,7 +1913,8 @@ function renderCostCalculator(){
   // ถ้า response ยังไม่ส่งกลุ่มมา costCatalogVisible จะแสดงเป็นกลุ่มเดียว contract เดิมจึงยังใช้ได้
   const groups=data?costCatalogVisible(data,costState.search):[];
   panel.innerHTML=`<div class="sec-card cost-workspace">
-    <div class="cost-top"><div><h2>Cost Calculator · ${esc(costState.projectId)}</h2><p class="hint">${data?'Revision '+esc(data.revision):'กำลังเปิดโครงการ'} · สูตรและ RM ทำต่อได้ระหว่างรอ PK</p></div><button class="btn btn-s" onclick="switchView('chat')">กลับหน้ารายการแชท</button></div>
+    <div class="cost-top"><div><h2>Cost Calculator · ${esc(data&&data.job?data.job.id:costState.projectId)}${data&&data.job&&data.job.bound?' · '+esc(data.job.projectId):''}</h2><p class="hint">${data?'Revision '+esc(data.revision):'กำลังเปิดโครงการ'} · สูตรและ RM ทำต่อได้ระหว่างรอ PK</p></div><button class="btn btn-s" onclick="switchView('cost')">กลับ Dashboard ต้นทุน</button></div>
+    ${costBindBox(data)}
     ${data?.historical?`<p class="cost-warning">กำลังดู revision เก่า ${esc(data.revision)} · อ่านอย่างเดียว <button class="btn btn-s" onclick="costOpenLatest()">เปิด revision ล่าสุด ${esc(data.latestRevision)}</button></p>`:''}
     <div role="status" aria-live="polite">${costState.notice?`<p>${esc(costState.notice)}</p>`:''}${costState.busy?'<p>กำลังตรวจและบันทึกข้อมูล…</p>':''}${costState.error?`<p class="cost-warning">${esc(costState.error)}</p>${!data?`<button class="btn btn-s" onclick="costAction('open',{})">ลองเปิดอีกครั้ง</button>`:`<button class="btn btn-s" onclick="costOpenLatest()">เปิด revision ล่าสุด</button>`}`:''}</div>
     ${!view?'':`<p class="cost-warning">${esc(view.label||'รอข้อมูล')} · ตัวเลขแสดงตามสิทธิ์ของคุณ</p>
@@ -2078,6 +2147,60 @@ function costCreateJob(input){
   return job;
 }
 function costJobEntries(jobId){return loadCostStore().scenarios.filter(row=>row.jobId===jobId);}
+// คีย์ที่ใช้เปิดใบงาน: ใบงาน Formula ถ้าผูกแล้ว มิฉะนั้นรหัสใบงานต้นทุนเอง (งานลอย)
+function costJobKey(job){return job.projectId||job.id;}
+// เริ่มใบงานต้นทุนจากหน้า "สร้าง" (E3-01): อ้างอิง Formula · สร้างลอย · โคลน
+// ทุกทางได้ revision 1 ทันที ใบงานที่ไม่มี revision จะไม่มีวันเกิด
+function costStartJob(input){
+  const caps=costCapabilities();
+  if(!caps.editRM)throw Error('สร้างใบงานต้นทุนได้เฉพาะ RD และ Admin');
+  const mode=input&&input.mode,store=loadCostStore();
+  const rollback=()=>{store.jobs.pop();store.jobCounter--;};
+  if(mode==='ref'){
+    const projectId=String(input.projectId||'');
+    const list=typeof records!=='undefined'&&Array.isArray(records)?records:null;
+    if(list&&!list.some(r=>r&&r.id===projectId))throw Error('ไม่พบใบงาน Formula '+projectId+' ในเครื่องนี้');
+    const job=costCreateJob({projectId});
+    try{costAppendEntry(projectId,'S1',costNewScenario(projectId,'S1'),job.id);}catch(e){rollback();throw e;}
+    return job;
+  }
+  if(mode==='float'){
+    const job=costCreateJob({projectId:null,title:input.title,form:input.form});
+    try{costAppendEntry(job.id,'S1',costNewScenario(job.id,'S1'),job.id);}catch(e){rollback();throw e;}
+    return job;
+  }
+  if(mode==='clone'){
+    const source=costJobById(String(input.from||''));
+    if(!source)throw Error('ไม่พบใบงานต้นทุนต้นแบบ');
+    const latest=costJobEntries(source.id).reduce((a,b)=>!a||b.revision>a.revision?b:a,null);
+    if(!latest)throw Error('ใบงานต้นแบบยังไม่มี revision');
+    const job=costCreateJob({projectId:null,title:input.title||source.title,form:input.form||source.form,clonedFrom:source.id});
+    // เจ้าของระบบตัดสิน 2026-09-06: โคลนติดทุกอย่างรวมราคาและ PK · ตัวคำนวณตรวจอายุราคาใหม่ทุกครั้งอยู่แล้ว
+    const scenario=CostCalculator.createScenario({...JSON.parse(JSON.stringify(latest.scenario)),projectId:job.id,scenarioId:'S1',revision:1});
+    try{costAppendEntry(job.id,'S1',scenario,job.id);}catch(e){rollback();throw e;}
+    return job;
+  }
+  throw Error('ไม่รู้จักวิธีสร้างใบงาน');
+}
+// ผูกงานลอยเข้ากับใบงาน Formula (E3-02): รหัสใบงานต้นทุนไม่เปลี่ยน · โครงการละใบเดียว
+// สร้าง revision ใหม่ใต้ใบงาน Formula เพราะ core ล็อกตัวตน scenario ไว้ที่ projectId · revision เก่ายังอยู่ใต้ jobId เดิม
+function costBindJob(jobId,projectId){
+  if(!costCapabilities().editRM)throw Error('ผูกใบงานได้เฉพาะ RD และ Admin');
+  const job=costJobById(jobId);
+  if(!job)throw Error('ไม่พบใบงานต้นทุน');
+  if(job.projectId)throw Error('ใบงาน '+job.id+' ผูกกับ '+job.projectId+' อยู่แล้ว');
+  if(!/^[A-Z]\d{5}$/.test(String(projectId)))throw Error('รหัสใบงาน Formula ไม่ถูกต้อง');
+  const list=typeof records!=='undefined'&&Array.isArray(records)?records:null;
+  if(list&&!list.some(r=>r&&r.id===projectId))throw Error('ไม่พบใบงาน Formula '+projectId+' ในเครื่องนี้');
+  const taken=costJobByProject(projectId);
+  if(taken)throw Error(`ใบงาน ${projectId} มีใบงานต้นทุน ${taken.id} อยู่แล้ว เจ้าของสูตร: ${taken.owner||'ไม่ระบุ'}`);
+  const latest=costJobEntries(job.id).reduce((a,b)=>!a||b.revision>a.revision?b:a,null);
+  if(!latest)throw Error('ใบงานยังไม่มี revision');
+  const scenario=CostCalculator.createScenario({...JSON.parse(JSON.stringify(latest.scenario)),projectId,revision:latest.revision+1});
+  job.projectId=projectId;
+  try{costAppendEntry(projectId,latest.scenarioId,scenario,job.id);}catch(e){job.projectId=null;throw e;}
+  return job;
+}
 // สถานะต้นทุนคำนวณจากรายการค้างของ revision ล่าสุด ไม่เก็บซ้ำ (REGISTRY §5)
 function costJobStatus(result,scenario){
   if(!scenario||!Array.isArray(scenario.rmLines)||!scenario.rmLines.length) return 'draft';
@@ -2210,6 +2333,8 @@ function costEnvelope(entry,sendState){
     requests:(detail||costBusinessRoles(currentUser).includes('Procurement RM'))?store.requests.filter(r=>r.projectId===entry.projectId&&r.scenarioId===entry.scenarioId).map(r=>({...r})):undefined,
     formula:detail?result.formula:null,
     summaryText:costSummaryText(CostCalculator.project(result,'Sales')),
+    job:(function(){const j=costJobById(entry.jobId)||costJobById(entry.projectId)||costJobByProject(entry.projectId);
+      return j?{id:j.id,projectId:j.projectId,bound:!!j.projectId,title:j.title||'',form:j.form||'',owner:j.owner||'',clonedFrom:j.clonedFrom||null}:null;})(),
     inputs:detail?{sellingUnits:scenario.sellingUnits,unitsPerPack:scenario.unitsPerPack,fillAmount:scenario.fillAmount,fillUnit:scenario.fillUnit,pkSpecVersion:scenario.pkSpecVersion}:{},
     pricingRule:(detail||caps.setPricing)&&scenario.policies&&scenario.policies.RM?{
       allowancePercent:(scenario.policies.RM.allowanceRate||0)*100,factor:scenario.policies.RM.rate,
@@ -2283,7 +2408,7 @@ function costPostSummary(projectId,key,view){
 function costAppendEntry(projectId,scenarioId,scenario,jobId){
   const store=loadCostStore();
   // ทุก revision ต้องอยู่ใต้ใบงานเสมอ ใบงานที่ผูกโครงการนี้มีได้ใบเดียว
-  let job=jobId?costJobById(jobId):costJobByProject(projectId),createdJob=false;
+  let job=jobId?costJobById(jobId):(costJobById(projectId)||costJobByProject(projectId)),createdJob=false;
   if(!job){job=costCreateJob({projectId});createdJob=true;}
   store.scenarios.push({projectId,scenarioId,revision:scenario.revision,scenario,createdAt:new Date().toISOString(),createdBy:currentUser,jobId:job.id});
   if(!saveCostStore()){
@@ -2318,6 +2443,7 @@ async function costLocalRequest(action,payload){
   if(action!=='sendSummary'&&latest&&entry.revision!==latest.revision)throw Error('มี revision ใหม่กว่าแล้ว กรุณาเปิดใหม่ก่อนแก้ไข');
   if(action==='sendSummary'){
     if(!caps.sendSummary)throw Error('ไม่มีสิทธิ์ส่งสรุป');
+    if(COST_JOB_ID.test(String(projectId)))throw Error('งานลอยส่งสรุปเข้าแชทไม่ได้ ผูกใบงาน Formula ก่อน');
     const store=loadCostStore(),key=payload.idempotencyKey;
     if(typeof key!=='string'||!/^[A-Za-z0-9:_-]{1,160}$/.test(key))throw Error('รหัสกันส่งซ้ำไม่ถูกต้อง');
     const body=costSalesView(entry),existing=store.outbox.find(row=>row.idempotencyKey===key);
