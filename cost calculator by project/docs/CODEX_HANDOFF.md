@@ -1,5 +1,11 @@
 # Prompt สำหรับ Codex — Cost Calculator
 
+> **อ่าน [IMPLEMENTATION_REPORT_2026-09-08.md](IMPLEMENTATION_REPORT_2026-09-08.md) ก่อนทุกอย่างในไฟล์นี้**
+> รายงานฉบับนั้นเป็นสถานะล่าสุด (HEAD `adf4995` · module 392 / calculator browser 54 / parent 37 / SQL 33 รันสด 2026-09-08)
+> อธิบายสิ่งที่คาดหวังเทียบกับที่ได้ · workflow ปัจจุบัน · แผนที่โค้ด · สิ่งที่จงใจไม่ทำ · และงานที่เหลือซึ่งรอคนภายนอกทั้งหมด
+> ตัวเลขและสถานะในส่วนล่างของไฟล์นี้เป็นของรอบก่อน (commit d6b73f5) เก็บไว้เป็นประวัติ ถ้าขัดกันให้ยึดรายงานฉบับใหม่
+
+
 ## Status clarification — 2026-09-06
 
 The previous combined label is split below. **LOCAL_VERIFIED is a completed verification result, not a blocker.** Integration cannot be marked passed without the listed evidence. Missing per-material data and pricing inputs block only affected calculations/quotation readiness, not all draft Formula/RM work.
