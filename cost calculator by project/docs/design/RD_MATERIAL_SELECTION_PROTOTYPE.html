@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="th"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RD เลือกวัสดุ — แบบทดลอง</title>
+<style>
+:root{font-family:system-ui,sans-serif;color:#243b39;background:#f3f5f2}*{box-sizing:border-box}body{margin:0}header{background:#153e36;color:white;padding:22px 32px}header p{color:#c4d7cf;margin-bottom:0}h1{font-size:25px;margin:0}h2{font-size:20px;margin:0 0 12px}h3{font-size:17px;margin:4px 0}p{line-height:1.6}nav{padding:16px 32px;display:flex;gap:10px}.layout{display:grid;grid-template-columns:260px 1fr;gap:20px;padding:0 32px 28px}aside,.panel{background:white;border:1px solid #d7e1db;border-radius:14px;padding:20px}aside{align-self:start;position:sticky;top:16px}.line{padding:14px;border:1px solid #d7e1db;border-radius:9px;margin:12px 0}.active{border:2px solid #258067;background:#eff9f3}.muted{color:#5e7169;font-size:13px}button,input,select{font:inherit;border:1px solid #b7c8be;border-radius:7px;padding:10px}button{cursor:pointer;background:white;color:#243b39}button:hover{background:#e8f3ec}button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #db9b43;outline-offset:2px}button:disabled{cursor:not-allowed;color:#68766c;background:#f2f2ef}.primary{background:#246e58;color:white}.primary:hover{background:#184b3d}.bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.bar input{flex:1;min-width:210px}.tag{display:inline-block;font-size:12px;padding:4px 8px;border-radius:5px;background:#e5f2e9;color:#236040}.wait{background:#fff0d9;color:#875518}.group{margin:20px 0;border:1px solid #d7e1db;border-radius:10px;overflow:hidden}.grouphead{padding:14px 16px;background:#f0f4ef}table{width:100%;border-collapse:collapse;text-align:left;font-size:14px}th,td{padding:13px;border-bottom:1px solid #e4e9e3;vertical-align:top}th{font-size:12px;color:#52675d;background:#f9faf7}.scroll{overflow:auto}details{margin-top:9px;font-size:13px}summary{cursor:pointer}#compare{margin-top:20px;border-top:2px solid #258067;padding-top:16px}#notice{padding:12px 0;color:#22624c}label{display:block}.banner{padding:12px 32px;background:#fff0d9;font-size:13px}.hidden{display:none!important}.count{margin-top:14px}footer{padding:18px 32px;color:#5e7169;font-size:13px}@media(max-width:850px){.layout{grid-template-columns:1fr;padding:0 12px}aside{position:static}header,nav{padding:16px}.banner{padding:12px}table{min-width:650px}}
+</style>
+<header><h1>เลือกวัสดุโดยไม่ออกจากสูตร</h1><p>เห็นความต่างของ spec ก่อนเทียบผู้ขายและเงื่อนไขซื้อ</p></header>
+<div class="banner">แบบทดลอง solution design · ข้อมูลทั้งหมดสังเคราะห์ · ไม่เชื่อมระบบ ไม่บันทึก revision ไม่คำนวณต้นทุนจริง</div>
+<nav aria-label="มุมมอง"><button id="rdTab" class="primary">RD เลือกวัสดุ</button><button id="sourceTab">มุมมองดูแลข้อมูลต้นทาง</button></nav>
+<main class="layout">
+<aside><span class="muted">ใบงานตัวอย่าง · revision 3</span><h2>สูตรที่กำลังทำ</h2>
+<div class="line active"><b>1. สารตัวอย่าง A</b><p class="muted" id="selection">ยังไม่ได้เลือกข้อเสนอ</p><label>ปริมาณต่อหน่วยผลิต<input id="amount" type="number" min="0" placeholder="RD กรอกเอง" style="width:100%;margin-top:8px"></label><p class="muted">หน่วย mg · ไม่ดึงปริมาณจาก Formula</p></div>
+<div class="line muted">2. สารตัวอย่าง B<br>รอเลือก</div><p class="muted">เลือกวัสดุเป็น draft ในตัวอย่างนี้เท่านั้น ปริมาณที่กรอกไม่หายเมื่อค้นหรือเทียบ</p>
+</aside>
+<section class="panel" id="rd">
+<h2>เลือกให้แถว 1 · สารตัวอย่าง A</h2>
+<div class="bar"><input id="search" aria-label="ค้นหาวัสดุ" placeholder="ชื่อ / ชื่อเรียก / spec / ผู้ขาย"><select id="filter" aria-label="สถานะข้อเสนอ"><option value="all">ทุกสถานะ</option><option value="ready">พร้อมเลือก</option><option value="pending">ต้องดำเนินการ</option></select></div>
+<p class="muted">ต้นทาง: ไฟล์ตัวอย่าง รุ่น DEMO-01 · แคตตาล็อกของเครื่องนี้ · ประวัติการเลือกไม่ใช่การรับรอง spec</p>
+<div class="count" id="count" role="status"></div><div id="results"></div>
+<div class="bar"><button id="more">ดูผลทั้งหมด</button><button id="request">ไม่พบวัสดุที่ต้องการ → ขอจัดหา</button></div>
+<div id="compare"><h2>เทียบข้อเสนอ <span id="compareCount">0</span>/3</h2><p class="muted">เลือก “เทียบ” ที่ข้อเสนอเพื่ออ่านความต่างพร้อมกัน ราคาและ MOQ เป็นคู่เดียวกันเสมอ</p><div class="scroll" id="comparison"></div></div>
+<div id="notice" role="status" aria-live="polite"></div>
+</section>
+<section class="panel hidden" id="source"><h2>ข้อมูลที่ต้องทำต่อ · มุมมองต้นทางที่เสนอ</h2>
+<p>ใช้รายการเดิม แยกงานที่ต้องแก้ตามผู้รับผิดชอบ ก่อนเปลี่ยนหน้า RD Data Center จริงต้องตรวจหน้าที่ RD ใช้อยู่ก่อน</p>
+<div class="scroll"><table><thead><tr><th>รายการ</th><th>สิ่งที่ขาด</th><th>ผู้รับผิดชอบ</th><th>สิ่งที่ผู้ใช้ควรทำได้</th></tr></thead><tbody>
+<tr><td>ข้อเสนอตัวอย่าง E</td><td>วันหมดอายุราคา</td><td>จัดซื้อ</td><td>เปิดหลักฐาน → เติมวัน → ยืนยันเงื่อนไข</td></tr>
+<tr><td>ข้อเสนอตัวอย่าง F</td><td>รับรอง spec</td><td>RD</td><td>อ่าน spec และหลักฐาน → รับรองโดย RD</td></tr>
+<tr><td>แถวตัวอย่าง 12</td><td>ผู้ขายไม่ระบุ</td><td>จัดซื้อ</td><td>กลับแถวต้นทางเพื่อแก้ ไม่เดาผู้ขาย</td></tr>
+</tbody></table></div>
+<h3 style="margin-top:24px">สิ่งที่แยกออกจากหน้าค้นของ RD</h3><p>รายละเอียด mapping, warnings จากตัวอ่าน, source row และประวัตินำเข้า ให้เปิดดูเมื่อจำเป็น ส่วนชื่อ / spec / Tier / MOQ / LT / สถานะต้องเห็นในหน้าค้นได้ทันที</p>
+<p class="muted">ไม่เพิ่มทะเบียนราคา ไม่ใช้ Max Tier เป็นราคาของงาน ไม่แก้สิทธิ์ ไม่ sync ข้ามเครื่องในต้นแบบนี้</p>
+</section></main><footer>ทดลอง: ค้น → เปิดรายละเอียด → เทียบ 2–3 ข้อเสนอ → เลือก → ใส่ปริมาณ · การรับรองและคำขอเป็นข้อความจำลอง ไม่มีการส่งจริง</footer>
+<script>
+'use strict';
+const offers=[
+{id:'A',name:'สารตัวอย่าง A',spec:'Grade X · ผง',vendor:'ผู้ขายตัวอย่าง 1',price:1000,moq:1,step:1,lt:7,ready:true,reason:'จัดซื้อยืนยัน · RD รับรอง',condition:'Tier ตัวอย่างสำหรับ 1–9 kg'},
+{id:'B',name:'สารตัวอย่าง A',spec:'Grade X · ผง',vendor:'ผู้ขายตัวอย่าง 1',price:900,moq:10,step:5,lt:7,ready:true,reason:'จัดซื้อยืนยัน · RD รับรอง',condition:'Tier ตัวอย่าง 10 kg ขึ้นไป'},
+{id:'C',name:'สารตัวอย่าง A',spec:'Grade X · ผง',vendor:'ผู้ขายตัวอย่าง 2',price:950,moq:5,step:5,lt:21,ready:true,reason:'จัดซื้อยืนยัน · RD รับรอง',condition:'เงื่อนไขตัวอย่าง: ต้องแจ้งก่อนผลิต'},
+{id:'D',name:'สารตัวอย่าง A',spec:'Grade Y · เม็ดละเอียด',vendor:'ผู้ขายตัวอย่าง 3',price:800,moq:20,step:10,lt:14,ready:true,reason:'จัดซื้อยืนยัน · RD รับรอง',condition:'Grade ต่างจาก X ห้ามถือว่าใช้แทนกันได้'},
+{id:'E',name:'สารตัวอย่าง A',spec:'Grade Z · ผง',vendor:'ผู้ขายตัวอย่าง 4',price:850,moq:5,step:5,lt:14,ready:false,reason:'รอจัดซื้อระบุวันหมดอายุ',condition:'ตรวจรายละเอียดได้ แต่ยังเลือกไม่ได้'},
+{id:'F',name:'สารตัวอย่าง A',spec:'Grade W · ผง',vendor:'ผู้ขายตัวอย่าง 5',price:1100,moq:1,step:1,lt:7,ready:false,reason:'รอ RD รับรอง spec',condition:'ต้องอ่านหลักฐานก่อนรับรอง'}
+];
+const $=id=>document.getElementById(id), picked=new Set();let expanded=false;
+const esc=v=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function render(){
+ const q=$('search').value.toLowerCase().trim().split(/\s+/).filter(Boolean);
+ const hits=offers.filter(o=>q.every(w=>[o.name,o.spec,o.vendor].join(' ').toLowerCase().includes(w))&&($('filter').value==='all'||o.ready===($('filter').value==='ready')));
+ const groups=[...new Set(hits.map(o=>o.spec))],shown=expanded?groups:groups.slice(0,2);
+ $('count').textContent=groups.length+' กลุ่ม spec / '+hits.length+' ข้อเสนอ · กลุ่มแสดงผลไม่ใช่รหัสวัสดุใหม่';
+ $('more').hidden=expanded||groups.length<=2;
+ $('results').innerHTML=shown.map(spec=>'<div class="group"><div class="grouphead"><h3>'+esc(spec)+'</h3><span class="muted">ตรวจว่า spec ตรงโจทย์ ก่อนดูราคา</span></div><div class="scroll"><table><thead><tr><th>ผู้ขาย / เงื่อนไข</th><th>ราคา/kg</th><th>MOQ / สั่งเพิ่ม</th><th>LT</th><th>สถานะ / เลือก</th></tr></thead><tbody>'+hits.filter(o=>o.spec===spec).map(o=>'<tr><td>'+esc(o.vendor)+'<details><summary>รายละเอียดและที่มา</summary><p>'+esc(o.condition)+'</p><p>ไฟล์ DEMO-01 · ข้อเสนอ '+o.id+' · '+(o.id==='E'?'ยังไม่มีวันหมดอายุ':'วันหมดอายุเป็นข้อมูลจำลอง ต้องยืนยันในระบบจริง')+'</p></details></td><td>'+o.price.toLocaleString()+' บาท</td><td>'+o.moq+' kg<br><span class="muted">เพิ่มทีละ '+o.step+' kg</span></td><td>'+o.lt+' วัน</td><td><span class="tag '+(o.ready?'':'wait')+'">'+esc(o.reason)+'</span><div class="bar" style="margin-top:8px"><button data-compare="'+o.id+'" aria-pressed="'+picked.has(o.id)+'">'+(picked.has(o.id)?'เลิกเทียบ':'เทียบ')+'</button><button class="primary" data-use="'+o.id+'" '+(o.ready?'':'disabled')+'>ใช้ข้อเสนอนี้</button></div></td></tr>').join('')+'</tbody></table></div></div>').join('')||'<p>ไม่พบผลตรงคำค้น ลองลดคำหรือขอจัดหา</p>';
+ renderCompare();
+}
+function renderCompare(){
+ const list=offers.filter(o=>picked.has(o.id));$('compareCount').textContent=list.length;
+ const rows=[['Spec',o=>o.spec],['ผู้ขาย',o=>o.vendor],['ราคา / kg',o=>o.price+' บาท'],['MOQ',o=>o.moq+' kg'],['สั่งเพิ่ม',o=>o.step+' kg'],['LT',o=>o.lt+' วัน'],['สถานะ',o=>o.reason],['เงื่อนไข',o=>o.condition]];
+ $('comparison').innerHTML=list.length?'<table><thead><tr><th>ข้อมูล</th>'+list.map(o=>'<th>ข้อเสนอ '+o.id+'</th>').join('')+'</tr></thead><tbody>'+rows.map(([name,fn])=>'<tr><th>'+name+'</th>'+list.map(o=>'<td>'+esc(fn(o))+'</td>').join('')+'</tr>').join('')+'</tbody></table>':'';
+}
+$('search').addEventListener('input',()=>{expanded=false;render();});$('filter').addEventListener('change',()=>{expanded=false;render();});
+$('more').onclick=()=>{expanded=true;render();};
+$('results').onclick=e=>{
+ const b=e.target.closest('button');if(!b)return;
+ if(b.dataset.compare){const id=b.dataset.compare;if(picked.has(id))picked.delete(id);else if(picked.size<3)picked.add(id);else{$('notice').textContent='เทียบได้ครั้งละ 3 ข้อเสนอ เลิกเทียบหนึ่งรายการก่อน';return;}render();}
+ if(b.dataset.use){const o=offers.find(x=>x.id===b.dataset.use);if(!o?.ready)return;$('selection').textContent=o.spec+' · '+o.vendor+' · ข้อเสนอ '+o.id;$('notice').textContent='เลือกในต้นแบบแล้ว ปริมาณเดิมยังอยู่ ยังไม่บันทึกหรือเปลี่ยน revision จริง';}
+};
+$('request').onclick=()=>{$('notice').textContent='ตัวอย่างคำขอ: สารตัวอย่าง A / แถว 1 / ใบงานตัวอย่าง — ไม่มีการส่งข้อความจริง';};
+function page(source){$('rd').classList.toggle('hidden',source);$('source').classList.toggle('hidden',!source);$('rdTab').classList.toggle('primary',!source);$('sourceTab').classList.toggle('primary',source);}
+$('rdTab').onclick=()=>page(false);$('sourceTab').onclick=()=>page(true);render();
+</script></html>

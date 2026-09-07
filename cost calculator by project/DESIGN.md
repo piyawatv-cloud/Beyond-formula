@@ -1,5 +1,7 @@
 # Calculator design contract
 
+> Historical contract: server-gateway and memory-only descriptions below are superseded by IMPLEMENTATION_REPORT_2026-09-08.md. Current proposed selection UX: [RD material selection design](docs/design/RD_MATERIAL_SELECTION_DESIGN.md) and [interactive synthetic prototype](docs/design/RD_MATERIAL_SELECTION_PROTOTYPE.html). Proposal only; application behavior has not changed.
+
 Local implementation; live gateway disabled. Reuse Formula Studio `sec-card`, form controls, table and navigation. No new frontend dependency or build step.
 
 Primary job: RD chooses the correct governed RM among similar names, compares spec/Tier/MOQ/LT, edits a formula revision, and continues while PK is pending. Project identity belongs to Formula. PK selection/negotiation belongs to PU-PK.
