@@ -107,3 +107,65 @@ test('source snapshot retires disappeared tiers without changing stored scenario
  assert.equal(c.loadCostStore().catalog.find(x=>x.id===current.id).status,'confirmed');
  assert.equal(JSON.stringify(c.loadCostStore().scenarios),frozen);
 });
+
+// ---- 2026-09-07 อ่านชีตราคา RM ต้นฉบับโดยตรงผ่านปุ่มนำเข้า (เลิกผ่าน Data Center) ----
+function priceSheetWorkbook(c,extraCols){
+  const grid=[['ตารางราคา RM','','','','','',''],['','','','','','',''],
+    ['','Name','Supplier','Price/kg','MOQ','Remark','Function',...(extraCols||[])],
+    ['','สารสังเคราะห์ A (Extract)','ผู้ขายสังเคราะห์ 1','1,250','1-20 kg','เงื่อนไข','',...(extraCols?['ชื่อย่อเอ','25 kg','2027-01-31','ใช่','14']:[])],
+    ['','สารสังเคราะห์ A (Extract)','ผู้ขายสังเคราะห์ 1','980','25 kg','','',...(extraCols?['','','','','']:[])],
+    ['','สารสังเคราะห์ B','ผู้ขายสังเคราะห์ 2','','1 kg','ยังไม่มีราคา','',...(extraCols?['','','','','']:[])],
+    ['','สารสังเคราะห์ C','ผู้ขายสังเคราะห์ 2','25 kg','450','คอลัมน์สลับ','',...(extraCols?['','','','','']:[])]];
+  const codes=[['หมวด','RD-Code','Ingredients Name','Supplier','Remark',''],['A','RD-A-001','สารสังเคราะห์ A (Extract)','ผู้ขายสังเคราะห์ 1','','']];
+  c.run(`var XLSX={utils:{sheet_to_json:(sheet,o)=>sheet}};`);
+  return {SheetNames:['PriceOfRM','RD-Code'],Sheets:{PriceOfRM:grid,'RD-Code':codes}};
+}
+test('ปุ่มนำเข้าตรวจจับชีตราคาต้นฉบับเอง: หาแถวหัวจากชื่อคอลัมน์ รายงานเลขแถวจริง และทุกรายการรอยืนยัน',async()=>{
+  const c=fixture();await c.openCostCalculator('A00001');
+  const parsed=c.costParseCatalogWorkbook(priceSheetWorkbook(c));
+  assert.equal(parsed.sourceSummary.kind,'priceSheet');assert.equal(parsed.sourceSummary.sheet,'PriceOfRM');
+  assert.equal(parsed.offers.length,2,'สาร A สอง Tier');assert.equal(parsed.sourceSummary.materials,1);
+  assert.ok(parsed.offers.every(o=>o.status==='review'&&o.specApproved===null),'ไม่มีอะไรคิดต้นทุนได้จนกว่าจัดซื้อยืนยัน');
+  assert.equal(parsed.offers[0].rdCode,'RD-A-001','จับคู่ RD-Code จากตารางที่สองในไฟล์เดียวกัน');
+  assert.equal(parsed.offers[0].maxOrderQuantity,20,'ช่วง 1-20 kg คือเพดาน');
+  const rows=parsed.rejected.map(r=>r.row).sort().join(',');assert.equal(rows,'6,7','เลขแถวจริงของชีต (หัวตารางแถว 3)');
+  assert.match(parsed.rejected.find(r=>r.row===7).reason,/คอลัมน์อาจสลับ/);
+  const applied=c.costApplyCatalog(parsed,'PriceOfRM.xlsx');assert.equal(applied.added,2);assert.equal(applied.rejected.length,2);
+  const body=await c.costLocalRequest('open',{projectId:'A00001'});
+  assert.equal(body.catalogGroups.length,1);assert.ok(body.catalogGroups[0].offers.every(o=>o.eligible===false));
+  assert.ok(body.catalogGroups[0].offers[0].missing.includes('การรับรอง spec'));
+});
+test('เมื่อจัดซื้อเติมคอลัมน์เสริมครบ ข้อเสนอนั้นกลายเป็นเลือกได้ และชื่อเรียกค้นเจอ',async()=>{
+  const c=fixture();await c.openCostCalculator('A00001');
+  const parsed=c.costParseCatalogWorkbook(priceSheetWorkbook(c,['ชื่อเรียก','ขนาดสั่งเพิ่ม','วันหมดอายุราคา','การรับรอง spec','Lead Time']));
+  const full=parsed.offers.find(o=>o.tierId==='1 kg');
+  assert.equal(full.specApproved,true);assert.equal(full.increment,25);assert.equal(full.validUntil,'2027-01-31');assert.equal(full.leadTimeDays,14);
+  assert.deepEqual([...full.aliases],['ชื่อย่อเอ']);
+  c.costApplyCatalog(parsed,'PriceOfRM.xlsx');
+  // สถานะยังเป็น review — จัดซื้อต้องยืนยันราคาผ่านการนำเข้าที่ระบุ status confirmed (ทางเดิม) หรือหน้าแยกในอนาคต
+  const body=await c.costLocalRequest('open',{projectId:'A00001'});
+  const o=body.catalogGroups[0].offers.find(x=>x.tierLabel==='1 kg');
+  assert.ok(o.tokens.includes('ชื่อย่อเอ'),'ชื่อเรียกจากชีตเข้าดัชนีค้นหา');
+  assert.ok(!o.missing.includes('การรับรอง spec')&&!o.missing.includes('ขนาดสั่งเพิ่ม')&&!o.missing.includes('Lead Time'),'เหลือเฉพาะการยืนยันเงื่อนไขซื้อ: '+o.missing.join(','));
+});
+
+test('แถวที่ MOQ เท่ากันแต่ราคาต่างกัน ไม่ถูกเลือกแทนจัดซื้อ — รายงานเป็นข้อขัดแย้งพร้อมเลขแถวทั้งคู่',()=>{
+  const c=fixture();
+  const wb=priceSheetWorkbook(c);
+  wb.Sheets.PriceOfRM.push(['','สารสังเคราะห์ A (Extract)','ผู้ขายสังเคราะห์ 1','990','25 kg','','']); // แถว 8 ชนกับแถว 5
+  const parsed=c.costParseCatalogWorkbook(wb);
+  assert.equal(parsed.offers.length,1,'เหลือเฉพาะ Tier 1-20 kg');
+  const cf=parsed.rejected.find(r=>/ขัดแย้ง|ไม่ตรงกัน/.test(r.reason)&&r.ref);
+  assert.ok(cf,'ต้องมีรายการขัดแย้ง: '+JSON.stringify(parsed.rejected));
+  assert.match(cf.reason,/แถว 5, 8/);
+  assert.equal(parsed.sourceSummary.conflicts,1);
+});
+test('ไฟล์ Data Center ที่มีคอลัมน์ Name เหมือนกัน ต้องไม่ถูกจับเป็นชีตราคา — ยังไปเส้นทาง RmCatalogBuild เดิม',()=>{
+  const c=fixture();
+  const wb=workbook(c);
+  // ใส่คอลัมน์ Name ลงตารางแคตตาล็อกของ Data Center เพื่อล่อตัวตรวจจับ
+  Object.keys(wb.Sheets).forEach(name=>{const g=wb.Sheets[name];if(Array.isArray(g)&&Array.isArray(g[0])&&!g[0].includes('Name')){g[0]=[...g[0],'Name'];for(let i=1;i<g.length;i++)g[i]=[...g[i],'ล่อ'];}});
+  const parsed=c.costParseCatalogWorkbook(wb);
+  assert.notEqual(parsed.sourceSummary&&parsed.sourceSummary.kind,'priceSheet','Data Center ไม่ใช่ชีตราคา');
+  assert.equal(parsed.offers.length,1,'เส้นทางเดิมยังได้ข้อเสนอเดิม');
+});

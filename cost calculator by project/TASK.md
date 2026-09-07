@@ -7,7 +7,7 @@ The previous combined label is split below. **LOCAL_VERIFIED is a completed veri
 | Workstream | Current status | Owner / evidence needed to close |
 |---|---|---|
 | Local implementation and automated verification | PASS — commit d6b73f5 | 292 module, 14 calculator browser, 37 parent browser tests and SQL suite passed. No local defect remains from the bounded review; this is not UAT. |
-| RM price source structure | **DECISION_REQUIRED 2026-09-06** | ตรวจต้นฉบับราคา RM แล้วพบว่ามีราคา 158 รายการ แต่ Data Center พาผ่านมา 23 (~15%) · ตารางราคาไม่มีคอลัมน์รหัสสาร และตาราง RD-Code ไม่มีราคา · ชื่อตรงกันเพียง 3 จาก 158 แม้จับคู่แบบหลวมที่สุดก็ได้ 17 จึงเป็นคนละชุดรายการ ไม่ใช่ปัญหารูปแบบชื่อ · อ่านราคา/MOQ จากต้นฉบับได้ 65.2% ตั้งแต่วันแรก · ต้องตัดสินว่ารหัสสารมาจากไหน ก่อนเขียนตัวอ่าน ดู [ราคา RM ต้องจัดระเบียบอะไร](docs/RM_PRICE_SOURCE_REORG.md) |
+| RM price source structure | **RESOLVED 2026-09-07 — implemented** · เจ้าของสั่ง "ทำตามที่แนะนำ": อ่านชีตราคาต้นฉบับโดยตรง เลิกผ่าน Data Center · ปุ่มนำเข้าตรวจจับรูปแบบชีตราคาเอง (`costFindTable` + `RmPriceSource`) · คำขอสามคอลัมน์ถึงจัดซื้ออยู่ที่ [docs/PROCUREMENT_REQUEST_2026-09-07.md](docs/PROCUREMENT_REQUEST_2026-09-07.md) · เดิม: ตรวจต้นฉบับราคา RM แล้วพบว่ามีราคา 158 รายการ แต่ Data Center พาผ่านมา 23 (~15%) · ตารางราคาไม่มีคอลัมน์รหัสสาร และตาราง RD-Code ไม่มีราคา · ชื่อตรงกันเพียง 3 จาก 158 แม้จับคู่แบบหลวมที่สุดก็ได้ 17 จึงเป็นคนละชุดรายการ ไม่ใช่ปัญหารูปแบบชื่อ · อ่านราคา/MOQ จากต้นฉบับได้ 65.2% ตั้งแต่วันแรก · ต้องตัดสินว่ารหัสสารมาจากไหน ก่อนเขียนตัวอ่าน ดู [ราคา RM ต้องจัดระเบียบอะไร](docs/RM_PRICE_SOURCE_REORG.md) |
 | Real RM import / A3 | WAITING_FOR_INPUT | Procurement/RD provide an authorized sanitized corrected export within this worktree. Run shared converter and checker, report usable count and rejection reasons, and reconcile a chosen sample calculation with owner-approved expected results. No required minimum count is invented. |
 | Ambiguous RM rows and missing LT | WAITING_FOR_DATA, affected records only | **เจ้าของยืนยันตัวเลขแล้ว 2026-09-06:** 24 แถวกำกวม และ 19 รายการที่ไม่มี LT ถูกต้อง Procurement เป็นผู้แก้ · รายการเหล่านั้นยังเลือกไม่ได้ · วัสดุที่ข้อมูลครบเดินหน้าต่อได้เอง |
 | STD and selling-price inputs | WAITING_FOR_DATA, affected cost/quote only | **เจ้าของยืนยันตัวเลขแล้ว 2026-09-06:** ต้องการ 6 ค่า Production/Finance ให้อัตรา หน่วย วันที่มีผล ฐานจัดสรร และกฎราคา · draft และสรุปบางส่วนยังใช้ได้ · ห้ามใส่ศูนย์แทน |
@@ -337,11 +337,11 @@ Status: LOCAL_VERIFIED / INTEGRATION_BLOCKED — RD Center ยังไม่ผ
 
 **ยังค้างจริง — ผมทำต่อได้เอง**
 
-- [ ] ต่อผลของ `RmCatalogBuild` เข้ากับปุ่มนำเข้าในแอปโดยตรง แทนการส่งไฟล์ให้กรอกมือ (รอให้ต้นทางมีสามคอลัมน์ก่อนจึงจะมีประโยชน์)
+- [x] **แทนที่ด้วย RmPriceSource 2026-09-07** ต่อผลของ `RmCatalogBuild` เข้ากับปุ่มนำเข้าในแอปโดยตรง แทนการส่งไฟล์ให้กรอกมือ (รอให้ต้นทางมีสามคอลัมน์ก่อนจึงจะมีประโยชน์)
 
 **ยังค้างจริง — ต้องให้เจ้าของระบบหรือกระบวนการ**
 
-- [ ] เพิ่มสามคอลัมน์ที่ต้นทาง: ขนาดสั่งเพิ่ม · วันหมดอายุราคา · การรับรอง spec — **ตัวนี้บล็อกทุกอย่าง** ไม่มีรายการใดคิดต้นทุนได้จนกว่าจะมี
+- [ ] **คำขอเขียนแล้ว 2026-09-07 รอเจ้าของส่งให้จัดซื้อ** เพิ่มสามคอลัมน์ที่ต้นทาง: ขนาดสั่งเพิ่ม · วันหมดอายุราคา · การรับรอง spec — **ตัวนี้บล็อกทุกอย่าง** ไม่มีรายการใดคิดต้นทุนได้จนกว่าจะมี
 - [ ] Lead Time ของ 19 รายการที่จับคู่ไม่ได้ — ตารางที่มี Lead Time เป็นคนละชุดกับสารที่มีราคา
 - [ ] รัน `previewSourceFix()` แล้ว `applySourceFix()` ตาม [runbook](docs/RM_SOURCE_FIX_RUNBOOK.md)
 - [ ] กรอกอัตรามาตรฐาน Operation 6 รูปแบบในแอป

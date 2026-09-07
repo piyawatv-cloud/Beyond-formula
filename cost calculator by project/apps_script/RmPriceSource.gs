@@ -64,6 +64,30 @@ var RmPriceSource = (function () {
     if (!Object.prototype.hasOwnProperty.call(MASS, u)) return null;
     return {quantity:q, unit:u};
   }
+  // คอลัมน์เสริมที่ขอให้จัดซื้อเติม: ชื่อเรียก · ขนาดสั่งเพิ่ม · วันหมดอายุราคา · การรับรอง spec · Lead Time
+  // ว่าง = ยังไม่มีข้อมูล (null) · มีค่าแต่อ่านไม่ได้ = ข้ามแถวพร้อมเหตุผล ไม่เดา
+  function pick(row, names) {
+    for (var i = 0; i < names.length; i++) { var v = text(row[names[i]]); if (v) return v; }
+    return '';
+  }
+  function readExtras(row) {
+    var out = {aliases:[], increment:null, incrementUnit:'', validUntil:'', specApproved:null, leadTimeDays:null, error:''};
+    var alias = pick(row, ['ชื่อเรียก', 'Alias', 'Aliases']);
+    out.aliases = alias ? alias.split(/[;,|]/).map(function (v) { return v.trim(); }).filter(Boolean) : [];
+    var inc = pick(row, ['ขนาดสั่งเพิ่ม', 'Order Increment', 'Increment']);
+    if (inc) { var m = moqOf(inc); if (!m || m.fromRange) { out.error = 'อ่านขนาดสั่งเพิ่มไม่ได้ ต้องเป็นน้ำหนัก เช่น 25 kg'; return out; } out.increment = m.quantity; out.incrementUnit = m.unit; }
+    var until = pick(row, ['วันหมดอายุราคา', 'Price Valid Until', 'Valid Until']);
+    if (until) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(until) || isNaN(new Date(until + 'T00:00:00Z').getTime())) { out.error = 'วันหมดอายุราคาต้องเป็น YYYY-MM-DD'; return out; }
+      out.validUntil = until;
+    }
+    var spec = pick(row, ['การรับรอง spec', 'Spec Approved', 'Spec']);
+    // มีค่าแต่ไม่ใช่คำยืนยัน = ตรวจแล้วไม่ผ่าน (false) · ว่าง = ยังไม่ตรวจ (null) ตามกติกาของตัวนำเข้า
+    if (spec) out.specApproved = /^(yes|y|true|1|ใช่|ผ่าน|อนุมัติ)$/i.test(spec);
+    var lt = pick(row, ['Lead Time', 'Lead Time (days)', 'LT']);
+    if (lt) { var d = lt.match(/^(\d+(?:\.\d+)?)\s*(?:วัน|days?|d)?$/i); if (!d) { out.error = 'Lead Time ต้องเป็นจำนวนวัน เช่น 14'; return out; } out.leadTimeDays = Number(d[1]); }
+    return out;
+  }
   // rows = ตารางราคา · codes = ตาราง RD-Code (ไม่บังคับ) · options.priceValidDays = อายุราคา
   function build(rows, codes, options) {
     var opts = options || {};
@@ -75,6 +99,10 @@ var RmPriceSource = (function () {
       && !isNaN(new Date(rawAsOf + 'T00:00:00Z').getTime());
     var validDays = validPolicy ? days : null;
     var asOf = validPolicy ? rawAsOf : '';
+    // เลขแถวจริงในชีต: หัวตารางไม่ได้อยู่แถว 1 เสมอ (ต้นฉบับอยู่แถว 3) ผู้เรียกบอกแถวข้อมูลแรกมาได้
+    var firstRow = Number(opts.firstDataRow);
+    if (!(firstRow >= 1) || firstRow !== Math.floor(firstRow)) firstRow = 2;
+    var rowNo = function (index) { return index + firstRow; };
     var codeByName = {};
     (codes || []).forEach(function (c) {
       var k = norm(c['Ingredients Name']);
@@ -84,31 +112,34 @@ var RmPriceSource = (function () {
     (rows || []).forEach(function (row, index) {
       var name = text(row['Name']), supplier = text(row['Supplier']);
       var rawPrice = text(row['Price/kg']), rawMoq = text(row['MOQ']);
+      // คอลัมน์ที่จัดซื้อจะเติมภายหลัง (คำขอ 2026-09-07) ว่างได้ทั้งหมด ระบบไม่เดาแทน
+      var extra = readExtras(row);
       // แถวว่างสนิทข้ามได้ แต่แถวที่มีราคาหรือผู้ขายแล้วไม่มีชื่อ ต้องนับไว้
       // มิฉะนั้น offers + skipped จะไม่เท่ากับจำนวนแถว แล้วไล่ตรวจไม่ได้ว่าหายไปไหน
       if (!name) {
-        if (rawPrice || supplier || rawMoq) skipped.push({row:index + 2, reason:'ไม่มีชื่อสาร'});
+        if (rawPrice || supplier || rawMoq) skipped.push({row:rowNo(index), reason:'ไม่มีชื่อสาร'});
         return;
       }
-      if (!rawPrice) { skipped.push({row:index + 2, reason:'ยังไม่มีราคา'}); return; }
+      if (!rawPrice) { skipped.push({row:rowNo(index), reason:'ยังไม่มีราคา'}); return; }
       // ไม่มีผู้ขาย = ระบุตัวตนไม่ได้ ถ้าเดาให้เป็น "ไม่ระบุ" สองแถวคนละเจ้าจะยุบเป็น
       // วัสดุตัวเดียวแล้วเอาราคาสองเจ้ามาเรียงเป็นบันไดราคาเดียว ซึ่งซื้อจริงไม่ได้
-      if (!supplier) { skipped.push({row:index + 2, reason:'ไม่มีชื่อผู้ขาย ระบุตัวตนวัสดุไม่ได้'}); return; }
+      if (!supplier) { skipped.push({row:rowNo(index), reason:'ไม่มีชื่อผู้ขาย ระบุตัวตนวัสดุไม่ได้'}); return; }
       var price = priceOf(rawPrice);
       if (price === null) {
         // แยกให้ชัดว่าอ่านไม่ออก กับคอลัมน์สลับกันมา เพราะวิธีแก้คนละอย่าง
         var looksMass = /^\s*\d+(?:\.\d+)?\s*(kg|g|mg|kilo|กก\.?|กิโล|กรัม)\s*\.?$/i.test(rawPrice);
-        skipped.push({row:index + 2,
+        skipped.push({row:rowNo(index),
           reason:looksMass ? 'ช่องราคาเป็นหน่วยน้ำหนัก คอลัมน์อาจสลับกับ MOQ' : 'อ่านราคาไม่ได้'});
         return;
       }
       var moq = moqOf(rawMoq);
-      if (moq === null) { skipped.push({row:index + 2, reason:rawMoq ? 'อ่าน MOQ ไม่ได้ หรือหน่วยไม่ใช่น้ำหนัก' : 'ไม่มี MOQ'}); return; }
+      if (moq === null) { skipped.push({row:rowNo(index), reason:rawMoq ? 'อ่าน MOQ ไม่ได้ หรือหน่วยไม่ใช่น้ำหนัก' : 'ไม่มี MOQ'}); return; }
       var key = materialKey(supplier, name);
       if (!groups[key]) groups[key] = {materialId:key, name:name, supplier:supplier,
         rdCode:codeByName[norm(name)] || null, offers:[]};
+      if (extra.error) { skipped.push({row:rowNo(index), reason:extra.error}); return; }
       groups[key].offers.push({price:price, moq:moq, remark:text(row['Remark']),
-        fn:text(row['Function']), sourceRow:index + 2});
+        fn:text(row['Function']), sourceRow:rowNo(index), extra:extra});
     });
     var offers = [], materials = 0, conflicts = [];
     Object.keys(groups).forEach(function (key) {
@@ -164,19 +195,21 @@ var RmPriceSource = (function () {
           // ขนาดสั่งเพิ่มคือ "ขนาดบรรจุ" ซึ่งเป็นคนละเรื่องกับ MOQ และต้นฉบับไม่มี
           // การเติมให้เท่ากับ MOQ ทำให้เงินซื้อและของเหลือบวมเกินจริงเมื่อ MOQ 100
           // แต่บรรจุถุงละ 25 จึงเว้นว่างไว้ให้เห็นว่ายังไม่ครบ ตามกฎห้ามเดาแทนคน
-          increment: null, incrementUnit: o.moq.unit,
+          increment: o.extra.increment, incrementUnit: o.extra.increment === null ? o.moq.unit : o.extra.incrementUnit,
+          aliases: o.extra.aliases,
           // เจ้าของระบบยืนยัน (2026-09-06): ขอบบนของช่วงคือเพดานที่ราคานี้ใช้ได้จริง
           // เครื่องคำนวณอ่านคู่ maxOrderQuantity/maxOrderUnit จึงต้องส่งหน่วยไปด้วย
           maxOrderQuantity: o.moq.rangeUpper === undefined ? null : o.moq.rangeUpper,
           maxOrderUnit: o.moq.rangeUpper === undefined ? '' : o.moq.unit,
-          leadTimeDays: null, specApproved: null,
-          validUntil: validDays && asOf ? addDays(asOf, validDays) : '',
+          leadTimeDays: o.extra.leadTimeDays, specApproved: o.extra.specApproved,
+          // วันหมดอายุที่จัดซื้อระบุมาชนะนโยบายเหมาเสมอ
+          validUntil: o.extra.validUntil || (validDays && asOf ? addDays(asOf, validDays) : ''),
           // เลขแถวขยับทุกครั้งที่เรียงหรือแทรกชีต จึงไม่ใช่ตัวอ้างอิงที่นิ่ง
           evidenceRef: 'PriceOfRM:' + key + '-' + slug,
           sourceRow: o.sourceRow,
           status: 'review',
           condition: o.remark,
-          notes: notes.concat(validDays && asOf ? ['VALIDITY_FROM_POLICY'] : [])
+          notes: notes.concat(!o.extra.validUntil && validDays && asOf ? ['VALIDITY_FROM_POLICY'] : [])
         });
       });
     });

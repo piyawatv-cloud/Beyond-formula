@@ -239,3 +239,28 @@ test('ขอบบนของช่วง MOQ ส่งเป็นเพดา
   assert.equal(by('สาร ค.').maxOrderQuantity,null,'MOQ ค่าเดียวไม่มีเพดาน');
   assert.equal(by('สาร ค.').maxOrderUnit,'','ไม่มีเพดานต้องไม่มีหน่วยลอย');
 });
+
+// ---- คอลัมน์เสริมที่ขอจัดซื้อ 2026-09-07 (ว่างได้ทั้งหมด) และเลขแถวจริงของชีต ----
+test('คอลัมน์เสริมว่างได้ · เติมแล้วเข้า offer ตรงช่อง · ค่าที่อ่านไม่ได้ข้ามแถวพร้อมเหตุผล ไม่เดา',()=>{
+  const full=Object.assign(row('สาร ก.','ผู้ขาย 1','1000','25 kg'),{'ชื่อเรียก':'ชื่อย่อ; UC-II','ขนาดสั่งเพิ่ม':'25 kg','วันหมดอายุราคา':'2027-01-31','การรับรอง spec':'ใช่','Lead Time':'14 วัน'});
+  const o=P.build([full,row('สาร ข.','ผู้ขาย 1','1000','1 kg')],[],opts).offers;
+  const a=o.find(x=>x.name==='สาร ก.'),b=o.find(x=>x.name==='สาร ข.');
+  assert.deepEqual([...a.aliases],['ชื่อย่อ','UC-II']);assert.equal(a.increment,25);assert.equal(a.incrementUnit,'kg');
+  assert.equal(a.validUntil,'2027-01-31','วันที่จัดซื้อระบุชนะนโยบายเหมา');assert.ok(!a.notes.includes('VALIDITY_FROM_POLICY'));
+  assert.equal(a.specApproved,true);assert.equal(a.leadTimeDays,14);
+  assert.deepEqual([...b.aliases],[]);assert.equal(b.increment,null);assert.equal(b.specApproved,null,'ว่าง = ยังไม่ตรวจ');assert.equal(b.leadTimeDays,null);
+  assert.equal(b.validUntil,'2026-12-05','ไม่มีวันที่ระบุจึงใช้นโยบาย');assert.ok(b.notes.includes('VALIDITY_FROM_POLICY'));
+  const no=P.build([Object.assign(row('สาร ค.','ผู้ขาย 1','1000','1 kg'),{'การรับรอง spec':'ไม่ผ่าน'})],[],opts).offers[0];
+  assert.equal(no.specApproved,false,'มีค่าแต่ไม่ใช่คำยืนยัน = ตรวจแล้วไม่ผ่าน');
+  const bad=P.build([Object.assign(row('สาร ง.','ผู้ขาย 1','1000','1 kg'),{'ขนาดสั่งเพิ่ม':'1 ลัง'}),
+    Object.assign(row('สาร จ.','ผู้ขาย 1','1000','1 kg'),{'วันหมดอายุราคา':'31/01/2027'}),
+    Object.assign(row('สาร ฉ.','ผู้ขาย 1','1000','1 kg'),{'Lead Time':'สองสัปดาห์'})],[],opts);
+  assert.equal(bad.offers.length,0);assert.equal(bad.skipped.length,3);
+  assert.match(bad.skipped[0].reason,/ขนาดสั่งเพิ่ม/);assert.match(bad.skipped[1].reason,/YYYY-MM-DD/);assert.match(bad.skipped[2].reason,/Lead Time/);
+});
+test('เลขแถวที่รายงานเป็นเลขแถวจริงของชีต เมื่อหัวตารางไม่ได้อยู่แถว 1',()=>{
+  const r=P.build([row('','ผู้ขาย 1','1000','1 kg'),row('สาร ก.','ผู้ขาย 1','1000','1 kg')],[],{...opts,firstDataRow:4});
+  assert.equal(r.skipped[0].row,4,'แถวข้อมูลแรกคือแถว 4 ของชีต');assert.equal(r.offers[0].sourceRow,5);
+  assert.equal(P.build([row('','ผู้ขาย 1','1000','1 kg')],[],opts).skipped[0].row,2,'ค่าเริ่มต้นยังเป็นหัวตารางแถว 1');
+  assert.equal(P.build([row('','ผู้ขาย 1','1000','1 kg')],[],{...opts,firstDataRow:'x'}).skipped[0].row,2,'ค่าที่ไม่ใช่ตัวเลขใช้ค่าเริ่มต้น');
+});

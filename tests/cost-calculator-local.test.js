@@ -1018,3 +1018,9 @@ test('searchTokens แตกคำจากชื่อ วงเล็บ ช�
   assert.equal(c.run(`costNorm('Acid 50 %')`),c.run(`costNorm('acid 50%')`));assert.notEqual(c.run(`costNorm('Acid 50%')`),c.run(`costNorm('Acid 50')`));
   const w=c.run(`costSearchTokens({name:'Zinc Bisglycinate 20%'})`);assert.ok(w.includes('20%'),'คง % ไว้');
 });
+test('ตัวแปลงไฟล์นำเข้า: specApproved ที่เป็น null คือยังไม่ตรวจ ไม่ใช่ตรวจแล้วไม่ผ่าน · true จริงคือผ่าน',()=>{
+  const c=fixture();
+  const base={id:'X1',materialId:'M',tierId:'T',vendorId:'V',status:'review',currency:'THB',price:10,priceUnit:'kg',moq:1,moqUnit:'kg',evidenceRef:'E'};
+  const out=c.costParseCatalogRows([{...base,specApproved:null},{...base,id:'X2',specApproved:true},{...base,id:'X3',specApproved:false},{...base,id:'X4',specApproved:'ใช่'},{...base,id:'X5'}]).offers;
+  assert.equal(out.map(o=>String(o.specApproved)).join(','),'null,true,false,true,null');
+});
