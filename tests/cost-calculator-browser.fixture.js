@@ -101,6 +101,20 @@
  check('Sales sees the chat line but no document button',document.getElementById('chatView').textContent.includes('เอกสารต้นทุน')&&!document.querySelector('#chatView button[onclick^="openCostDocument"]'));
  document.getElementById('costDocView').innerHTML='';document.getElementById('costDocView').classList.remove('on');openCostDocument('CJ-000001',docRev);
  check('Sales cannot open the document directly',!document.getElementById('costDocView').classList.contains('on')&&document.getElementById('costDocView').innerHTML==='');
+ // งานจัดซื้อ: Purchasing เห็นคำขอทุกโครงการ ยืนยันเงื่อนไขซื้อบนหน้าจอ → RD รับรอง spec → เลือกได้
+ loadCostStore().catalog.push({...offers[0],id:'OP1',materialId:'MP1',name:'สารรอยืนยันสังเคราะห์',status:'review',specApproved:null,increment:null,incrementUnit:'',leadTimeDays:null,validUntil:''});saveCostStore();
+ userList=[{name:currentUser,role:'purchasing'}];renderUserUI();switchView('cost');
+ check('Purchasing sees the procurement desk button',document.getElementById('costDashView').textContent.includes('งานจัดซื้อ'));
+ renderCostProcurement();
+ check('desk lists open requests across projects and the pending offer',document.getElementById('costProcRequests').textContent.includes('Synthetic sourcing request')&&document.getElementById('costProcPending').textContent.includes('สารรอยืนยันสังเคราะห์'));
+ document.getElementById('costProcInc-OP1').value='5';document.getElementById('costProcLt-OP1').value='14';document.getElementById('costProcUntil-OP1').value='2999-01-01';costProcConfirm('OP1');
+ check('confirming on screen records purchasing terms without touching spec',loadCostStore().catalog.find(o=>o.id==='OP1').status==='confirmed'&&loadCostStore().catalog.find(o=>o.id==='OP1').specApproved===null&&document.getElementById('costDashView').textContent.includes('ยืนยันเงื่อนไขซื้อแล้ว'));
+ {const key=costProcurementView().requests.find(r=>r.status==='open').key;document.getElementById('costProcNote-'+key).value='เพิ่มในชีตแล้ว';costProcClose(key);}
+ check('closing a request marks it done with the closer',costProcurementView().requests.every(r=>r.status==='done')&&loadCostStore().requests.every(r=>r.closedBy===currentUser));
+ userList=[{name:currentUser,role:'rd'}];renderUserUI();await openCostCalculator('A00001');
+ check('RD sees the spec approval button on the confirmed-but-unapproved offer',!!document.querySelector('button[onclick="costApproveSpecRef(\'OP1\')"]'));
+ window.confirm=()=>true;await costApproveSpecRef('OP1');
+ check('after RD approval the offer becomes selectable',costState.response.catalogGroups.flatMap(g=>g.offers).find(o=>o.offerRef==='OP1').eligible===true&&!document.querySelector('button[onclick="costApproveSpecRef(\'OP1\')"]'));
  // E6: หน้ากฎราคา (Admin ถือ Finance/CEO) — ตั้งอัตราและกฎโดยไม่ผ่านเครื่องคำนวณ
  userList=[{name:currentUser,role:'admin'}];renderUserUI();
  check('Admin sees the pricing menu',document.getElementById('sidePricing').style.display==='flex');

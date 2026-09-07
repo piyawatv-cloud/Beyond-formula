@@ -393,3 +393,39 @@ test('ราคาต่อหน่วยผลิตขึ้นทันท�
   assert.match(out.textContent,/0\.08 บาท\/หน่วยผลิต/,'250 mg × 320 บาท/kg = 0.08: '+out.textContent);
   c.elements.costAmount1={value:''};c.costUpdateFormulaPreview();assert.equal(out.textContent,'','ไม่มีปริมาณ = ไม่มีตัวเลข');
 });
+
+// ---- หน้างานจัดซื้อ ----
+test('หน้างานจัดซื้อวาดคำขอและข้อเสนอค้าง กรอกเฉพาะที่ขาด กดยืนยันเรียก recorder และข้อผิดพลาดแสดง',()=>{
+  const c=fixture();
+  const view={innerHTML:'',classList:{contains:()=>true,add(){},remove(){}}};c.elements.costDashView=view;
+  c.run(`var costCapabilities=()=>({open:true,confirmOffer:true,closeRequest:true});
+    var costProcurementView=()=>({requests:[{key:'K1',projectId:'A00001',jobId:'CJ-000001',customer:'ลูกค้า ก',brand:'B',brief:'สาร X',by:'RD-ก',at:'2026-09-08T09:00:00Z',status:'open'},{key:'K2',projectId:'A00002',jobId:null,customer:'',brand:'',brief:'สาร Y',by:'RD-ข',at:'2026-09-07T09:00:00Z',status:'done',closedBy:'จัดซื้อ',closedAt:'2026-09-08T10:00:00Z',note:'เพิ่มแล้ว'}],
+      pending:[{offerRef:'P1',name:'สาร ก',vendor:'ผ1',tierId:'25 kg',price:980,priceUnit:'kg',priceBasisQuantity:1,moq:25,moqUnit:'kg',increment:null,incrementUnit:'',leadTimeDays:14,validUntil:'',specApproved:null,status:'review',notes:['MOQ_FROM_RANGE'],condition:'',sourceRow:12,missing:['ขนาดสั่งเพิ่ม','วันหมดอายุราคา'],specPending:true}]});
+    var costConfirmOffer=(id,input)=>{globalThis.__c={id,input};};var costCloseRequest=(k,n)=>{globalThis.__x={k,n};};`);
+  c.renderCostProcurement();
+  const h=view.innerHTML;
+  assert.ok(h.includes('สาร X')&&h.includes('ลูกค้า ก')&&!h.includes('สาร Y'),'คำขอที่ปิดแล้วซ่อนไว้ก่อน');
+  assert.ok(h.includes('id="costProcInc-P1"')&&h.includes('id="costProcUntil-P1"')&&!h.includes('id="costProcLt-P1"'),'กรอกเฉพาะที่ขาด Lead Time มีแล้วไม่ต้องกรอก');
+  assert.ok(h.includes('ชีตแถว 12')&&h.includes('รอ RD รับรอง spec')&&h.includes('MOQ_FROM_RANGE'));
+  c.elements['costProcInc-P1']={value:'25'};c.elements['costProcIncUnit-P1']={value:'kg'};c.elements['costProcUntil-P1']={value:'2027-01-31'};
+  c.costProcConfirm('P1');const got=c.run('globalThis.__c');
+  assert.equal(got.id,'P1');assert.equal(got.input.increment,'25');assert.equal(got.input.validUntil,'2027-01-31');assert.equal(got.input.leadTimeDays,'');
+  assert.ok(view.innerHTML.includes('ยืนยันเงื่อนไขซื้อแล้ว · P1'));
+  c.elements['costProcNote-K1']={value:'เพิ่มในชีตแล้ว'};c.costProcClose('K1');assert.deepEqual({...c.run('globalThis.__x')},{k:'K1',n:'เพิ่มในชีตแล้ว'});
+  c.run('costConfirmOffer=()=>{throw Error("ยังขาด: ขนาดสั่งเพิ่ม");};');c.costProcConfirm('P1');
+  assert.ok(view.innerHTML.includes('ยังขาด: ขนาดสั่งเพิ่ม')&&!view.innerHTML.includes('ยืนยันเงื่อนไขซื้อแล้ว'));
+  c.run('costProcState.showClosed=true;');c.renderCostProcurement();assert.ok(view.innerHTML.includes('สาร Y')&&view.innerHTML.includes('เพิ่มแล้ว'));
+  c.run('costCapabilities=()=>({open:true});');c.renderCostProcurement();assert.equal(view.innerHTML,'','ไม่มีสิทธิ์ต้องว่าง');
+});
+test('ตารางแคตตาล็อกของ RD มีปุ่มรับรอง spec เฉพาะแถวที่ยังไม่รับรอง และเฉพาะผู้มีสิทธิ์',async()=>{
+  const c=tabFixture();
+  const inner=c.window.__costTestRequest;
+  c.window.__costTestRequest=(a,p)=>{const r=inner(a,p);r.capabilities.approveSpec=true;r.catalogGroups=[{key:'g',label:'x',count:2,offers:[
+    {offerRef:'O1',name:'สาร ก',vendor:'ผ1',tierLabel:'1 kg',price:100,priceBasisQuantity:1,priceUnit:'kg',moq:1,moqUnit:'kg',leadTimeDays:14,eligible:false,missing:['การรับรอง spec'],tokens:['สาร','ก']},
+    {offerRef:'O2',name:'สาร ข',vendor:'ผ1',tierLabel:'1 kg',price:100,priceBasisQuantity:1,priceUnit:'kg',moq:1,moqUnit:'kg',leadTimeDays:14,eligible:true,missing:[],tokens:['สาร','ข']}]}];return r;};
+  await c.openCostCalculator('A00001');
+  assert.ok(c.panel.innerHTML.includes(`costApproveSpecRef('O1')`)&&!c.panel.innerHTML.includes(`costApproveSpecRef('O2')`));
+  c.window.__costTestRequest=(a,p)=>{const r=inner(a,p);r.capabilities.approveSpec=false;r.catalogGroups=[{key:'g',label:'x',count:1,offers:[{offerRef:'O1',name:'สาร ก',vendor:'ผ1',tierLabel:'1 kg',price:100,priceBasisQuantity:1,priceUnit:'kg',moq:1,moqUnit:'kg',leadTimeDays:14,eligible:false,missing:['การรับรอง spec'],tokens:['สาร']}]}];return r;};
+  await c.openCostCalculator('A00002');
+  assert.ok(!c.panel.innerHTML.includes('costApproveSpecRef'),'ไม่มีสิทธิ์ต้องไม่มีปุ่ม');
+});

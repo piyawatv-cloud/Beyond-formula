@@ -705,7 +705,7 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
   <div class="logo"><svg viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-1.73-3L9 11.35V4H8a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2h-1v7.35L19.73 19A2 2 0 0 1 18 22H6Zm5-10.11L8.31 16.5h7.38L13 11.89V4h-2v7.89Z"/></svg></div>
   <div>
     <div class="hdr-title">Formula Studio</div>
-    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-07.9-price-sheet-import</div>
+    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-08.1-procurement-desk</div>
   </div>
   <div class="sync-chip" id="syncChip" onclick="sbManualSync()" title="สถานะการซิงก์ข้อมูลกับเซิร์ฟเวอร์กลาง"></div>
 </div>
@@ -1932,7 +1932,7 @@ function renderCostDashboard(){
   const floating=rows.filter(r=>r.projectId===null).length,waiting=rows.filter(r=>['pk','price','wait'].includes(r.status)).length,ready=rows.filter(r=>r.status==='ready').length;
   panel.innerHTML=`<div class="sec-card cost-workspace">
     <div class="cost-dash-top"><div><h2>Cost Calculation</h2><p class="hint">ใบงานต้นทุนทุกโครงการ · ${caps.editRM?'RD เปิดได้ทุกใบ · ':''}ราคาเป็นราคาไม่รวม VAT</p></div>
-      ${caps.editRM?'<button class="btn btn-p" onclick="costOpenCreate()">+ สร้างใบงานต้นทุน</button>':''}</div>
+      <div class="btn-row">${caps.confirmOffer||caps.closeRequest?'<button class="btn" onclick="renderCostProcurement()">งานจัดซื้อ</button>':''}${caps.editRM?'<button class="btn btn-p" onclick="costOpenCreate()">+ สร้างใบงานต้นทุน</button>':''}</div></div>
     <div class="cost-summary"><div><b>${rows.length}</b><p class="hint">ใบงานทั้งหมด</p></div><div><b>${floating}</b><p class="hint">งานลอย ยังไม่ผูก</p></div><div><b>${waiting}</b><p class="hint">รอ PK / รอราคา / รอข้อมูล</p></div><div><b>${ready}</b><p class="hint">พร้อมเสนอ</p></div></div>
     <div class="cost-dash-search"><input class="fi" id="costDashSearch" value="${esc(costDashSearch)}" placeholder="ค้นหา รหัส · ใบงาน Formula · ลูกค้า · แบรนด์ · เจ้าของสูตร" aria-label="ค้นหาใบงานต้นทุน" oninput="costDashSearchChanged(this.value)"></div>
     <div class="rec-wrap"><table class="rec-tbl"><thead><tr><th>รหัส</th><th>ลูกค้า / แบรนด์</th><th>รูปแบบ</th><th>สถานะใบงาน</th><th>สถานะต้นทุน</th><th>แก้ล่าสุด</th><th>เจ้าของสูตร</th><th>Rev</th><th>ราคา/หน่วย</th></tr></thead><tbody id="costDashBody">${costDashboardBody(visible,showPrice)}</tbody></table></div>
@@ -1999,6 +1999,51 @@ function costPricingSaveRule(){
     costPricingState.msg='บันทึกกฎการบวกราคาของ '+job.id+' เป็น revision ใหม่แล้ว';costPricingState.err='';
   }catch(error){costPricingState.err=String(error.message);costPricingState.msg='';}
   renderCostPricing();
+}
+// ---- หน้างานจัดซื้อ: คำขอจัดหาทุกโครงการ + ข้อเสนอที่รอยืนยัน (2026-09-08) ----
+let costProcState={msg:'',err:'',showClosed:false};
+function renderCostProcurement(){
+  const panel=document.getElementById('costDashView'); if(!panel) return;
+  const caps=costCapabilities(); if(!caps.confirmOffer&&!caps.closeRequest){panel.innerHTML='';return;}
+  const v=costProcurementView(),open=v.requests.filter(r=>r.status==='open'),closed=v.requests.filter(r=>r.status!=='open');
+  panel.innerHTML=`<div class="sec-card cost-workspace">
+    <div class="cost-dash-top"><div><h2>งานจัดซื้อ</h2><p class="hint">คำขอจัดหาจาก RD ทุกโครงการ และข้อเสนอที่รอยืนยันเงื่อนไขซื้อ · ไม่มีต้นทุนหลังบวกหรือกฎราคาที่นี่</p></div><button class="btn btn-s" onclick="renderCostDashboard()">กลับ Dashboard</button></div>
+    <div role="status" aria-live="polite">${costProcState.msg?`<p class="cost-ok">${esc(costProcState.msg)}</p>`:''}${costProcState.err?`<p class="cost-warning">${esc(costProcState.err)}</p>`:''}</div>
+    <h3>คำขอจัดหาที่เปิดอยู่ (${open.length})</h3>
+    <div class="rec-wrap"><table class="rec-tbl"><thead><tr><th>ใบงาน</th><th>ลูกค้า / แบรนด์</th><th>สิ่งที่ RD ขอ</th><th>ขอโดย</th><th>เมื่อ</th><th></th></tr></thead><tbody id="costProcRequests">${open.map(r=>`<tr><td><span class="mono">${esc(r.projectId)}</span>${r.jobId?`<span class="cost-who mono">${esc(r.jobId)}</span>`:''}</td><td>${esc(r.customer)}${r.brand?`<span class="cost-who">${esc(r.brand)}</span>`:''}</td><td>${esc(r.brief)}</td><td>${esc(r.by)}</td><td>${esc(String(r.at).slice(0,16).replace('T',' '))}</td><td>${caps.closeRequest?`<div class="btn-row"><input class="fi" id="costProcNote-${esc(r.key)}" placeholder="หมายเหตุ เช่น เพิ่มในชีตแถว 120 แล้ว" style="min-width:220px"><button class="btn btn-s" onclick="costProcClose('${esc(r.key)}')">ปิดคำขอ</button></div>`:''}</td></tr>`).join('')||'<tr><td colspan="6" class="hint">ไม่มีคำขอค้าง</td></tr>'}</tbody></table></div>
+    ${closed.length?`<p class="hint"><button class="btn btn-s" onclick="costProcState.showClosed=!costProcState.showClosed;renderCostProcurement()">${costProcState.showClosed?'ซ่อน':'แสดง'}คำขอที่ปิดแล้ว (${closed.length})</button></p>${costProcState.showClosed?`<ul>${closed.map(r=>`<li><span class="mono">${esc(r.projectId)}</span> · ${esc(r.brief)} · ปิดโดย ${esc(r.closedBy||'')} ${esc(String(r.closedAt||'').slice(0,16).replace('T',' '))}${r.note?' · '+esc(r.note):''}</li>`).join('')}</ul>`:''}`:''}
+    <h3>ข้อเสนอที่รอยืนยันเงื่อนไขซื้อ (${v.pending.length})</h3>
+    <p class="hint">กรอกเฉพาะที่ยังขาดแล้วกดยืนยัน · ระบบไม่เดาค่าให้ · การรับรอง spec เป็นของ RD ไม่ใช่ที่นี่ · ราคาจะใช้คิดต้นทุนได้เมื่อครบทั้งสองอย่าง</p>
+    <div class="rec-wrap"><table class="rec-tbl"><thead><tr><th>วัสดุ · Vendor · Tier</th><th>ราคา · MOQ</th><th>ขนาดสั่งเพิ่ม</th><th>Lead Time (วัน)</th><th>ใช้ได้ถึง</th><th>สถานะ</th><th></th></tr></thead><tbody id="costProcPending">${v.pending.map(o=>{const id=esc(o.offerRef);
+      return `<tr data-offer="${id}"><td><b>${esc(o.name)}</b><span class="cost-who">${esc(o.vendor)} · ${esc(o.tierId)}${o.sourceRow?' · ชีตแถว '+esc(o.sourceRow):''}</span>${o.condition?`<span class="cost-who" title="${esc(o.condition)}">${esc(costBrief(o.condition,70))}</span>`:''}</td>
+      <td>${costNumber(o.price)} / ${costNumber(o.priceBasisQuantity)} ${esc(o.priceUnit)}<span class="cost-who">MOQ ${costNumber(o.moq)} ${esc(o.moqUnit)}</span>${o.notes.filter(n=>n!=='VALIDITY_FROM_POLICY').length?`<span class="cost-who">${esc(o.notes.filter(n=>n!=='VALIDITY_FROM_POLICY').join(' · '))}</span>`:''}</td>
+      <td>${o.increment!=null?costNumber(o.increment)+' '+esc(o.incrementUnit):`<div class="btn-row"><input class="fi" id="costProcInc-${id}" type="number" min="0" step="any" style="width:90px" placeholder="เช่น 25"><select class="fi" id="costProcIncUnit-${id}">${['kg','g','mg'].map(u=>`<option value="${u}"${u===(o.moqUnit||'kg')?' selected':''}>${u}</option>`).join('')}</select></div>`}</td>
+      <td>${o.leadTimeDays!=null?costNumber(o.leadTimeDays):`<input class="fi" id="costProcLt-${id}" type="number" min="0" step="1" style="width:80px" placeholder="เช่น 14">`}</td>
+      <td>${o.validUntil?esc(o.validUntil):`<input class="fi" id="costProcUntil-${id}" placeholder="YYYY-MM-DD" style="width:130px">`}</td>
+      <td>${o.status==='confirmed'?'<span class="cost-pill cost-pill-ready">ยืนยันแล้ว</span>':'<span class="cost-pill cost-pill-wait">รอยืนยัน</span>'}${o.specPending?'<span class="cost-who">รอ RD รับรอง spec</span>':''}</td>
+      <td>${caps.confirmOffer&&o.status!=='confirmed'?`<button class="btn btn-s btn-p" onclick="costProcConfirm('${id}')">ยืนยันเงื่อนไขซื้อ</button>`:''}</td></tr>`;}).join('')||'<tr><td colspan="7" class="hint">ไม่มีข้อเสนอค้างยืนยัน</td></tr>'}</tbody></table></div>
+  </div>`;
+}
+function costProcConfirm(offerRef){
+  const val=id=>{const el=document.getElementById(id);return el?el.value.trim():'';};
+  try{
+    costConfirmOffer(offerRef,{increment:val('costProcInc-'+offerRef),incrementUnit:val('costProcIncUnit-'+offerRef),leadTimeDays:val('costProcLt-'+offerRef),validUntil:val('costProcUntil-'+offerRef)});
+    costProcState.msg='ยืนยันเงื่อนไขซื้อแล้ว · '+offerRef;costProcState.err='';
+  }catch(error){costProcState.err=String(error.message);costProcState.msg='';}
+  renderCostProcurement();
+}
+function costProcClose(key){
+  const el=document.getElementById('costProcNote-'+key);
+  try{costCloseRequest(key,el?el.value:'');costProcState.msg='ปิดคำขอแล้ว';costProcState.err='';}
+  catch(error){costProcState.err=String(error.message);costProcState.msg='';}
+  renderCostProcurement();
+}
+// RD รับรอง spec จากในตารางเลือก RM
+function costApproveSpecRef(offerRef){
+  const data=costState.response;if(!data||!data.capabilities.approveSpec)return;
+  if(!confirm('รับรองว่า spec ของสารนี้ใช้ในสูตรได้? การรับรองผูกกับสาร ไม่ใช่ราคา'))return;
+  try{costApproveSpec(offerRef,true);}catch(error){costState.error=String(error.message);renderCostCalculator();return;}
+  return costAction('open',{});
 }
 // ---- หน้าสร้างใบงานต้นทุน (E3-01) ----
 let costCreateState={mode:'ref',search:''};
@@ -2252,7 +2297,7 @@ function costRequestForLine(lineId){
   if(!line||!el)return;el.value=line.alias||'';return costRequestMaterial();
 }
 function costCatalogBody(groups,disabled){
-  return `${groups.map(g=>`<tr><td colspan="6" class="cost-group">${esc(g.label)}${g.count>1?` · ${g.count} ตัวเลือกที่ชื่อใกล้เคียงกัน`:''}</td></tr>`+g.offers.map(item=>`<tr><td>${esc(item.group||'')}<br><b>${esc(item.name||'')}</b></td><td>${esc(item.spec||'')}</td><td>${esc(item.vendor||'')}</td><td>${esc(item.tierLabel||'')}<br>${costNumber(item.price)} บาท ต่อ ${costNumber(item.priceBasisQuantity)} ${esc(item.priceUnit||'')}<br>MOQ ${costNumber(item.moq)} ${esc(item.moqUnit||'')}${item.maxOrderQuantity?` · ใช้ได้ถึง ${costNumber(item.maxOrderQuantity)} ${esc(item.maxOrderUnit||'')}`:''}${item.condition?`<br><span class="hint" title="${esc(item.condition)}">${esc(costBrief(item.condition))}</span>`:''}</td><td>${costNumber(item.leadTimeDays)} วัน</td><td><button class="btn btn-s" ${disabled||!item.eligible?'disabled':''} onclick="costSelectRef('${esc(item.offerRef)}')">${item.eligible?'เลือก Tier นี้':'ใช้ไม่ได้'}</button>${item.missing&&item.missing.length?`<br><span class="hint">ขาด ${esc(item.missing.join(' · '))}</span>`:''}</td></tr>`).join('')).join('')||'<tr><td colspan="6">ไม่พบรายการที่ตรง — ส่งคำขอจัดหาได้โดยไม่เพิ่มราคาสมมติ</td></tr>'}`;
+  return `${groups.map(g=>`<tr><td colspan="6" class="cost-group">${esc(g.label)}${g.count>1?` · ${g.count} ตัวเลือกที่ชื่อใกล้เคียงกัน`:''}</td></tr>`+g.offers.map(item=>`<tr><td>${esc(item.group||'')}<br><b>${esc(item.name||'')}</b></td><td>${esc(item.spec||'')}</td><td>${esc(item.vendor||'')}</td><td>${esc(item.tierLabel||'')}<br>${costNumber(item.price)} บาท ต่อ ${costNumber(item.priceBasisQuantity)} ${esc(item.priceUnit||'')}<br>MOQ ${costNumber(item.moq)} ${esc(item.moqUnit||'')}${item.maxOrderQuantity?` · ใช้ได้ถึง ${costNumber(item.maxOrderQuantity)} ${esc(item.maxOrderUnit||'')}`:''}${item.condition?`<br><span class="hint" title="${esc(item.condition)}">${esc(costBrief(item.condition))}</span>`:''}</td><td>${costNumber(item.leadTimeDays)} วัน</td><td><button class="btn btn-s" ${disabled||!item.eligible?'disabled':''} onclick="costSelectRef('${esc(item.offerRef)}')">${item.eligible?'เลือก Tier นี้':'ใช้ไม่ได้'}</button>${item.missing&&item.missing.includes('การรับรอง spec')&&costState.response&&costState.response.capabilities&&costState.response.capabilities.approveSpec?` <button class="btn btn-s" ${disabled} onclick="costApproveSpecRef('${esc(item.offerRef)}')">รับรอง spec</button>`:''}${item.missing&&item.missing.length?`<br><span class="hint">ขาด ${esc(item.missing.join(' · '))}</span>`:''}</td></tr>`).join('')).join('')||'<tr><td colspan="6">ไม่พบรายการที่ตรง — ส่งคำขอจัดหาได้โดยไม่เพิ่มราคาสมมติ</td></tr>'}`;
 }
 // รายการค้างเดิมกองรวมกันเป็นหัวข้อเดียว RD อ่านแล้วไม่รู้ว่าอันไหนแก้เองได้ตอนนี้
 // อันไหนต้องรอคนอื่น จึงเสียเวลาไล่ถามทีละข้อ · จัดกลุ่มที่การแสดงผลอย่างเดียว
@@ -2725,6 +2770,65 @@ function costJobStatus(result,scenario){
   if(pending.some(m=>/รอกำหนดราคา/.test(m))) return 'price';
   return 'wait';
 }
+// ---- งานจัดซื้อ (ปิดวงจร "RD ขอ → จัดซื้อตอบ" · 2026-09-08) ----
+function costRequestKey(r){return [r.projectId,r.scenarioId,r.revision,r.by,r.at].join('|');}
+// คำขอจัดหาทุกโครงการ + ข้อเสนอที่รอจัดซื้อยืนยัน — ไม่มีต้นทุนหลังบวกหรือกฎราคา
+function costProcurementView(){
+  const caps=costCapabilities(); if(!caps.confirmOffer&&!caps.closeRequest) return {requests:[],pending:[]};
+  const store=loadCostStore(),list=typeof records!=='undefined'&&Array.isArray(records)?records:[];
+  const requests=store.requests.map(r=>{const job=costJobById(r.projectId)||costJobByProject(r.projectId),record=list.find(x=>x&&x.id===r.projectId)||null;
+    return {key:costRequestKey(r),projectId:r.projectId,jobId:job?job.id:null,customer:record?record.customer||'':'',brand:record?record.brand||'':'',
+      brief:r.brief,by:r.by,at:r.at,status:r.status,closedBy:r.closedBy||null,closedAt:r.closedAt||null,note:r.note||''};})
+    .sort((a,b)=>(a.status==='open'?0:1)-(b.status==='open'?0:1)||String(b.at).localeCompare(String(a.at)));
+  const pending=store.catalog.filter(o=>o.status!=='confirmed'||costOfferMissing(o).length).map(o=>({offerRef:o.id,materialId:o.materialId,name:o.name||'',vendor:o.vendor||o.vendorId||'',tierId:o.tierId||'',
+    price:o.price,priceUnit:o.priceUnit||'',priceBasisQuantity:o.priceBasisQuantity??1,moq:o.moq,moqUnit:o.moqUnit||'',increment:o.increment??null,incrementUnit:o.incrementUnit||'',leadTimeDays:o.leadTimeDays??null,
+    validUntil:o.validUntil||'',specApproved:o.specApproved??null,status:o.status,notes:Array.isArray(o.notes)?o.notes.slice():[],condition:o.condition||'',sourceRow:o.sourceRow??null,
+    missing:costOfferMissing(o).filter(m=>m!=='การรับรอง spec'&&m!=='การยืนยันเงื่อนไขซื้อ'&&m!=='การยืนยันราคาใหม่'),specPending:o.specApproved!==true}))
+    .sort((a,b)=>String(a.name).localeCompare(String(b.name),'th')||(a.moq??0)-(b.moq??0));
+  return {requests,pending};
+}
+// จัดซื้อยืนยันเงื่อนไขซื้อ: ต้องครบ ขนาดสั่งเพิ่ม · Lead Time · วันหมดอายุ ก่อน ไม่มีค่าเดา
+function costConfirmOffer(offerRef,input){
+  if(!costCapabilities().confirmOffer)throw Error('ยืนยันเงื่อนไขซื้อได้เฉพาะจัดซื้อ');
+  const store=loadCostStore(),offer=store.catalog.find(o=>o.id===offerRef);
+  if(!offer)throw Error('ไม่พบข้อเสนอในแคตตาล็อกของเครื่องนี้');
+  const patch={},give=(k,v)=>{if(v!==undefined&&v!==null&&String(v).trim()!=='')patch[k]=v;};
+  const inc=input&&input.increment,incUnit=String(input&&input.incrementUnit||offer.incrementUnit||offer.moqUnit||'').trim();
+  if(inc!==undefined&&inc!==null&&String(inc).trim()!==''){const n=Number(inc);if(!Number.isFinite(n)||n<=0)throw Error('ขนาดสั่งเพิ่มต้องมากกว่า 0');if(!COST_MASS_UNITS.includes(incUnit))throw Error('หน่วยขนาดสั่งเพิ่มต้องเป็น kg/g/mg');patch.increment=n;patch.incrementUnit=incUnit;}
+  const lt=input&&input.leadTimeDays;
+  if(lt!==undefined&&lt!==null&&String(lt).trim()!==''){const n=Number(lt);if(!Number.isInteger(n)||n<0)throw Error('Lead Time ต้องเป็นจำนวนวันเต็ม');patch.leadTimeDays=n;}
+  const until=input&&input.validUntil;
+  if(until!==undefined&&until!==null&&String(until).trim()!==''){if(!costDateOK(String(until).trim()))throw Error('วันหมดอายุราคาต้องเป็น YYYY-MM-DD ที่มีอยู่จริง');if(String(until).trim()<costToday())throw Error('วันหมดอายุราคาผ่านไปแล้ว');patch.validUntil=String(until).trim();}
+  give('evidenceRef',input&&input.evidenceRef);
+  const next={...offer,...patch};
+  const still=costOfferMissing({...next,status:'confirmed',specApproved:true});
+  if(still.length)throw Error('ยังขาด: '+still.join(' · ')+' — กรอกให้ครบก่อนยืนยัน ไม่มีค่าเดา');
+  const before=store.catalog.slice();
+  store.catalog=store.catalog.map(o=>o.id===offerRef?{...next,status:'confirmed',confirmedBy:currentUser,confirmedAt:new Date().toISOString(),carriedFrom:undefined}:o);
+  if(!saveCostStore()){store.catalog=before;throw Error('บันทึกการยืนยันไม่ได้ กรุณาตรวจพื้นที่จัดเก็บแล้วลองใหม่');}
+  return store.catalog.find(o=>o.id===offerRef);
+}
+// RD รับรอง spec ของสาร — ไม่ใช่งานจัดซื้อ และไม่ทำให้ราคาใช้ได้เองถ้าจัดซื้อยังไม่ยืนยัน
+function costApproveSpec(offerRef,approved){
+  if(!costCapabilities().approveSpec)throw Error('รับรอง spec ได้เฉพาะ RD และ Admin');
+  const store=loadCostStore(),offer=store.catalog.find(o=>o.id===offerRef);
+  if(!offer)throw Error('ไม่พบข้อเสนอในแคตตาล็อกของเครื่องนี้');
+  const before=store.catalog.slice();
+  store.catalog=store.catalog.map(o=>o.id===offerRef?{...o,specApproved:approved===true,specApprovedBy:currentUser,specApprovedAt:new Date().toISOString()}:o);
+  if(!saveCostStore()){store.catalog=before;throw Error('บันทึกการรับรองไม่ได้ กรุณาตรวจพื้นที่จัดเก็บแล้วลองใหม่');}
+  return store.catalog.find(o=>o.id===offerRef);
+}
+// ปิดคำขอจัดหา: ไม่ลบ แค่ทำเครื่องหมายว่าใครปิดเมื่อไรพร้อมหมายเหตุ (audit)
+function costCloseRequest(key,note){
+  if(!costCapabilities().closeRequest)throw Error('ปิดคำขอจัดหาได้เฉพาะจัดซื้อ');
+  const store=loadCostStore(),req=store.requests.find(r=>costRequestKey(r)===key);
+  if(!req)throw Error('ไม่พบคำขอจัดหา');
+  if(req.status!=='open')throw Error('คำขอนี้ปิดแล้วโดย '+(req.closedBy||'ไม่ระบุ'));
+  const snapshot={...req};
+  Object.assign(req,{status:'done',closedBy:currentUser,closedAt:new Date().toISOString(),note:String(note||'').trim()});
+  if(!saveCostStore()){Object.assign(req,snapshot);throw Error('บันทึกการปิดคำขอไม่ได้');}
+  return {...req};
+}
 // ใบงานสำหรับหน้ากฎราคา (E6-01): เฉพาะที่ผูกใบงาน Formula แล้ว พร้อมกฎปัจจุบันจาก revision ล่าสุด
 // ไม่มีต้นทุนดิบ ชื่อผู้ขาย หรือสูตร — ผู้ตั้งราคาไม่ต้องเห็นสิ่งเหล่านั้น
 function costPricingJobs(){
@@ -2782,7 +2886,11 @@ function costCapabilities(){
     setPricing:admin||roles.some(function(r){return COST_PRICING_ROLES.indexOf(r)>=0;}),
     viewRevision:rd, // ADR 0002 decision 4: historical revisions are RD and Admin only
     // เอกสารทั้งฉบับ: CEO อ่านจากลิงก์ที่ RD ส่งเข้าแชท (คำตัดสิน 2026-09-06) · RD/Admin ก็เปิดได้
-    viewDocument:admin||rd||roles.indexOf('CEO')>=0};
+    viewDocument:admin||rd||roles.indexOf('CEO')>=0,
+    // จัดซื้อยืนยันเงื่อนไขซื้อและปิดคำขอจัดหา · RD รับรอง spec (คนละสิทธิ์ คนละคน)
+    confirmOffer:admin||roles.indexOf('Procurement RM')>=0,
+    closeRequest:admin||roles.indexOf('Procurement RM')>=0,
+    approveSpec:rd};
 }
 function costToday(){return new Date().toISOString().slice(0,10);}
 function costEntries(projectId,scenarioId){

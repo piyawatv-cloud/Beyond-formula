@@ -1024,3 +1024,62 @@ test('ตัวแปลงไฟล์นำเข้า: specApproved ที�
   const out=c.costParseCatalogRows([{...base,specApproved:null},{...base,id:'X2',specApproved:true},{...base,id:'X3',specApproved:false},{...base,id:'X4',specApproved:'ใช่'},{...base,id:'X5'}]).offers;
   assert.equal(out.map(o=>String(o.specApproved)).join(','),'null,true,false,true,null');
 });
+
+// ---- งานจัดซื้อ 2026-09-08: ยืนยันเงื่อนไขซื้อ · รับรอง spec · ปิดคำขอ ----
+test('จัดซื้อยืนยันเงื่อนไขซื้อได้เมื่อครบ ขนาดสั่งเพิ่ม/Lead Time/วันหมดอายุ · ไม่ครบปฏิเสธ ไม่เดา · บันทึกล้มถอยกลับ',()=>{
+  const c=fixture('rd','RD-ก');
+  c.loadCostStore().catalog.push({...offer,id:'P1',status:'review',increment:null,incrementUnit:'',leadTimeDays:null,validUntil:'',specApproved:null});c.saveCostStore();
+  assert.throws(()=>c.run(`costConfirmOffer('P1',{})`),/เฉพาะจัดซื้อ/,'RD ยืนยันเงื่อนไขซื้อไม่ได้');
+  const p=fixture('purchasing','Synthetic Buyer');p.backing.fs_cost=c.backing.fs_cost;
+  assert.equal(p.costCapabilities().confirmOffer,true);assert.equal(p.costCapabilities().approveSpec,false);
+  assert.throws(()=>p.run(`costConfirmOffer('P1',{})`),/ยังขาด: .*ขนาดสั่งเพิ่ม.*Lead Time.*วันหมดอายุราคา/,'ต้องบอกครบว่าขาดอะไร');
+  assert.throws(()=>p.run(`costConfirmOffer('P1',{increment:'-1',leadTimeDays:'14',validUntil:'2999-01-01'})`),/มากกว่า 0/);
+  assert.throws(()=>p.run(`costConfirmOffer('P1',{increment:'5',incrementUnit:'ลัง',leadTimeDays:'14',validUntil:'2999-01-01'})`),e=>String(e.message).includes('kg/g/mg'));
+  assert.throws(()=>p.run(`costConfirmOffer('P1',{increment:'5',leadTimeDays:'14.5',validUntil:'2999-01-01'})`),/จำนวนวันเต็ม/);
+  assert.throws(()=>p.run(`costConfirmOffer('P1',{increment:'5',leadTimeDays:'14',validUntil:'2000-01-01'})`),/ผ่านไปแล้ว/);
+  assert.throws(()=>p.run(`costConfirmOffer('P1',{increment:'5',leadTimeDays:'14',validUntil:'31/12/2999'})`),/YYYY-MM-DD/);
+  const setItem=p.localStorage.setItem;p.localStorage.setItem=()=>{throw Error('เต็ม');};
+  assert.throws(()=>p.run(`costConfirmOffer('P1',{increment:'5',leadTimeDays:'14',validUntil:'2999-01-01'})`),/บันทึกการยืนยันไม่ได้/);
+  p.localStorage.setItem=setItem;
+  assert.equal(p.loadCostStore().catalog[0].status,'review','ล้มแล้วต้องยังไม่ยืนยัน');
+  const out=p.run(`costConfirmOffer('P1',{increment:'5',leadTimeDays:'14',validUntil:'2999-01-01'})`);
+  assert.equal(out.status,'confirmed');assert.equal(out.increment,5);assert.equal(out.incrementUnit,'kg','หน่วยตาม MOQ เมื่อไม่ระบุ');assert.equal(out.leadTimeDays,14);assert.equal(out.validUntil,'2999-01-01');
+  assert.equal(out.confirmedBy,'Synthetic Buyer');assert.ok(out.confirmedAt);
+  assert.equal(out.specApproved,null,'จัดซื้อยืนยันไม่ทำให้ spec ผ่านเอง');
+  assert.ok(p.costOfferMissing(out).includes('การรับรอง spec')&&p.costOfferMissing(out).length===1,'เหลือรอ RD อย่างเดียว');
+});
+test('RD รับรอง spec ได้ จัดซื้อไม่ได้ · ครบทั้งสองอย่างแล้วข้อเสนอถึงเลือกได้ในเครื่องคำนวณ',async()=>{
+  const c=fixture('rd','RD-ก');c.records=[{id:'A00001'}];
+  c.loadCostStore().catalog.push({...offer,id:'P2',status:'review',specApproved:null});c.saveCostStore();
+  const p=fixture('purchasing','Synthetic Buyer');p.backing.fs_cost=c.backing.fs_cost;
+  assert.throws(()=>p.run(`costApproveSpec('P2',true)`),/เฉพาะ RD และ Admin/);
+  p.run(`costConfirmOffer('P2',{})`);c.backing.fs_cost=p.backing.fs_cost;c.run('costStore=null');
+  let body=await c.costLocalRequest('open',{projectId:'A00001'});
+  assert.equal(body.catalogGroups[0].offers[0].eligible,false,'จัดซื้อยืนยันแล้วแต่ RD ยังไม่รับรอง spec');
+  const o=c.run(`costApproveSpec('P2',true)`);assert.equal(o.specApproved,true);assert.equal(o.specApprovedBy,'RD-ก');
+  body=await c.costLocalRequest('open',{projectId:'A00001'});
+  assert.equal(body.catalogGroups[0].offers[0].eligible,true,'ครบสองอย่างจึงเลือกได้');
+  assert.equal(body.capabilities.approveSpec,true);
+  assert.throws(()=>c.run(`costApproveSpec('NOPE',true)`),/ไม่พบข้อเสนอ/);
+});
+test('หน้างานจัดซื้อรวมคำขอทุกโครงการ ปิดคำขอได้ครั้งเดียวพร้อมผู้ปิด และไม่มีต้นทุนหลังบวก',async()=>{
+  const c=fixture('rd','RD-ก');c.records=[{id:'A00001',customer:'ลูกค้า ก',brand:'B'},{id:'A00002',customer:'ลูกค้า ข'}];
+  await c.costLocalRequest('open',{projectId:'A00001'});await c.costLocalRequest('open',{projectId:'A00002'});
+  await c.costLocalRequest('requestMaterial',{projectId:'A00001',scenarioId:'S1',expectedRevision:1,brief:'สาร X spec 95%'});
+  await c.costLocalRequest('requestMaterial',{projectId:'A00002',scenarioId:'S1',expectedRevision:1,brief:'สาร Y'});
+  c.loadCostStore().catalog.push({...offer,id:'P3',status:'review'});c.saveCostStore();
+  assert.deepEqual(Array.from(c.run('costProcurementView().requests')),[],'RD ไม่มีสิทธิ์ดูหน้างานจัดซื้อ');
+  const p=fixture('purchasing','Synthetic Buyer');p.backing.fs_cost=c.backing.fs_cost;p.records=c.records;
+  let v=p.run('costProcurementView()');
+  assert.equal(v.requests.length,2,'เห็นคำขอทุกโครงการในที่เดียว');
+  assert.equal(v.requests.find(r=>r.projectId==='A00001').customer,'ลูกค้า ก');assert.equal(v.requests[0].status,'open');
+  assert.equal(v.pending.length,1);assert.equal(v.pending[0].offerRef,'P3');
+  assert.ok(!/adjusted|markup|policies|finalPer/i.test(JSON.stringify(v)),'ไม่มีต้นทุนหลังบวกหรือกฎราคา');
+  const key=v.requests[0].key;
+  const closed=p.run(`costCloseRequest('${key}','เพิ่มในชีตแถว 120 แล้ว')`);
+  assert.equal(closed.status,'done');assert.equal(closed.closedBy,'Synthetic Buyer');assert.equal(closed.note,'เพิ่มในชีตแถว 120 แล้ว');
+  assert.throws(()=>p.run(`costCloseRequest('${key}','')`),/ปิดแล้วโดย Synthetic Buyer/);
+  assert.throws(()=>c.run(`costCloseRequest('${key}','')`),/เฉพาะจัดซื้อ/);
+  assert.equal(p.loadCostStore().requests.length,2,'ไม่ลบ แค่ทำเครื่องหมาย');
+  v=p.run('costProcurementView()');assert.equal(v.requests.filter(r=>r.status==='open').length,1);
+});
