@@ -339,3 +339,57 @@ test('เอกสารเปิดได้เฉพาะผู้มี view
   assert.deepEqual({...c.costDocRoute('#costdoc=CJ-000003&revision=5')},{jobId:'CJ-000003',revision:5});
   for(const bad of ['#costdoc=A00001&revision=5','#costdoc=CJ-000003&revision=0','#costdoc=CJ-000003','#project=A00001&scenario=S1&revision=1'])assert.equal(c.costDocRoute(bad),null,bad);
 });
+
+// ---- 3b แถวค้นหาต่อบรรทัด ----
+function lineFixture(){
+  const c=tabFixture();
+  c.window.__costTestRequest=(action,p)=>{const r=c.response();r.projectId=p.projectId;r.view.projectId=p.projectId;r.job={id:'CJ-000001',projectId:p.projectId,bound:true};
+    r.inputs={sellingUnits:1000,unitsPerPack:1,fillAmount:1,fillUnit:'g'};
+    r.lines=[{id:'F1',alias:'Collagen Type II',amount:null,unit:'mg',lossPercent:0,hasOffer:false,fromFormula:true},{id:'L2',alias:'Vitamin C',amount:100,unit:'mg',lossPercent:0,hasOffer:true,offerRef:'O4',offerPrice:320,offerPriceBasis:1,offerPriceUnit:'kg',tierLabel:'25 kg'}];
+    r.picks=[{key:'collagen type ii',offerId:'O2',count:5}];
+    r.catalogGroups=[{key:'g',label:'x',count:4,offers:[
+      {offerRef:'O1',name:'BRANDX (Undenatured Collagen Type II)',vendor:'ผ1',tierLabel:'0.1 kg',pricePerKg:45000,moq:100,moqUnit:'g',leadTimeDays:21,eligible:true,missing:[],tokens:['brandx','undenatured','collagen','type','ii','คอลลาเจน']},
+      {offerRef:'O2',name:'Collagen Type II Powder',vendor:'ผ5',tierLabel:'1 kg',pricePerKg:3200,moq:1,moqUnit:'kg',leadTimeDays:14,eligible:true,missing:[],tokens:['collagen','type','ii','powder','chicken','คอลลาเจน']},
+      {offerRef:'O3',name:'Marine Collagen 95%',vendor:'ผ2',tierLabel:'5 kg',pricePerKg:1450,moq:5,moqUnit:'kg',leadTimeDays:10,eligible:false,missing:['การรับรอง spec'],tokens:['marine','collagen','95%','คอลลาเจน']},
+      {offerRef:'O4',name:'Ascorbic Acid 99%',vendor:'ผ3',tierLabel:'25 kg',pricePerKg:320,moq:25,moqUnit:'kg',leadTimeDays:7,eligible:true,missing:[],tokens:['ascorbic','acid','99%','vitamin','c','วิตามินซี']}]}];
+    return r;};
+  return c;
+}
+test('แถวที่ยังไม่มีข้อเสนอมีช่องค้นหาของตัวเอง ค่าเริ่มต้นค้นจากชื่อสาร เรียงตามที่เคยเลือกแล้วราคา และไม่เลือกให้เอง',async()=>{
+  const c=lineFixture();await c.openCostCalculator('A00001');
+  const h=c.panel.innerHTML;
+  assert.ok(h.includes('id="costLineSearch0"'),'แถว F1 ต้องมีช่องค้นหา');assert.ok(!h.includes('id="costLineSearch1"'),'แถวที่มีข้อเสนอแล้วไม่ต้องมี');
+  const sug=h.slice(h.indexOf('id="costLineSug0"'),h.indexOf('cost-sug-foot'));
+  const order=['O2','O1'].map(id=>sug.indexOf(`costAssignRef('F1','${id}')`));
+  assert.ok(order[0]>=0&&order[1]>=0&&order[0]<order[1],'ตัวที่เคยเลือก 5 ครั้งต้องอยู่ก่อนแม้แพงกว่าหรือถูกกว่า');
+  assert.ok(sug.includes('เคยเลือก 5 ครั้ง'));
+  // ความจำต้องชนะราคา: ให้ O1 (45,000) เป็นตัวที่เคยเลือก แล้ว O1 ต้องขึ้นก่อน O2 (3,200)
+  const d=lineFixture();d.window.__costTestRequest=((inner)=>(a,p)=>{const r=inner(a,p);r.picks=[{key:'collagen type ii',offerId:'O1',count:2}];return r;})(d.window.__costTestRequest);
+  await d.openCostCalculator('A00001');const h2=d.panel.innerHTML,sug2=h2.slice(h2.indexOf('id="costLineSug0"'),h2.indexOf('cost-sug-foot'));
+  assert.ok(sug2.indexOf(`costAssignRef('F1','O1')`)<sug2.indexOf(`costAssignRef('F1','O2')`),'ตัวที่เคยเลือกต้องขึ้นก่อนแม้แพงกว่า 14 เท่า');
+  assert.ok(!sug.includes('O3'),'Marine Collagen ไม่มีคำว่า type จึงไม่ตรงกับชื่อในสูตรทั้งสามคำ');
+  assert.ok(!sug.includes('O4'),'วิตามินซีไม่ตรงกับ Collagen');
+  assert.ok(h.includes('ระบบไม่เลือกให้ กดเองเสมอ'));
+});
+test('พิมพ์ในช่องค้นหาของแถว: ทุกคำต้องเจอไม่สนลำดับ พิมพ์ไทยได้ วาดใหม่เฉพาะกล่องตัวเลือก และกดเลือกยิง assignRM',async()=>{
+  const c=lineFixture();await c.openCostCalculator('A00001');
+  const box={innerHTML:''};c.elements.costLineSug0=box;
+  const before=c.panel.innerHTML;
+  c.costLineSearchChanged('F1',0,'type ii collagen');
+  assert.equal(c.panel.innerHTML,before,'ทั้งแผงต้องไม่ถูกวาดใหม่');
+  assert.ok(box.innerHTML.includes('O1')&&box.innerHTML.includes('O2')&&!box.innerHTML.includes('O3'),'สลับคำก็เจอ · marine ไม่มี type');
+  c.costLineSearchChanged('F1',0,'คอลลาเจน');
+  assert.ok(box.innerHTML.includes('O1')&&box.innerHTML.includes('O3'),'พิมพ์ไทยผ่าน keywords');
+  assert.ok(/costAssignRef\('F1','O3'\)"[^>]*>ใช้ไม่ได้/.test(box.innerHTML)&&/disabled onclick="costAssignRef\('F1','O3'\)/.test(box.innerHTML),'ตัวที่ขาด spec แสดงแต่กดไม่ได้');
+  c.costLineSearchChanged('F1',0,'ไม่มีแน่');assert.ok(box.innerHTML.includes('ไม่พบข้อเสนอที่ตรง'));
+  let sent=null;c.window.__costTestRequest=(a,p)=>{sent={a,p};const r=c.response();r.projectId=p.projectId;r.view.projectId=p.projectId;return r;};
+  await c.costAssignRef('F1','O3');assert.equal(sent,null,'ตัวที่ใช้ไม่ได้ต้องไม่ยิง');
+  await c.costAssignRef('F1','O2');assert.equal(sent.a,'assignRM');assert.equal(sent.p.lineId,'F1');assert.equal(sent.p.offerRef,'O2');
+});
+test('ราคาต่อหน่วยผลิตขึ้นทันทีที่พิมพ์ปริมาณ สำหรับแถวที่มีข้อเสนอ',async()=>{
+  const c=lineFixture();await c.openCostCalculator('A00001');
+  const out={textContent:''};c.elements.costLineUnit1=out;c.elements.costAmount1={value:'250'};c.elements.costFormulaPreview={innerHTML:''};
+  c.costUpdateFormulaPreview();
+  assert.match(out.textContent,/0\.08 บาท\/หน่วยผลิต/,'250 mg × 320 บาท/kg = 0.08: '+out.textContent);
+  c.elements.costAmount1={value:''};c.costUpdateFormulaPreview();assert.equal(out.textContent,'','ไม่มีปริมาณ = ไม่มีตัวเลข');
+});

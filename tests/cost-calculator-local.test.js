@@ -976,3 +976,45 @@ test('sendDocument: outbox หายแต่ข้อความยังอ�
   await c.costLocalRequest('sendDocument',req);
   assert.equal(c.chats[0].messages.filter(m=>m.costDocRef).length,1,'ห้องแชทเป็นความจริง ห้ามโพสต์ซ้ำ');
 });
+
+// ---- 3b ค้นหา→เลือก→ใส่ปริมาณ (REGISTRY §3–§6) ----
+test('เปิดใบที่ผูกครั้งแรก ดึงเฉพาะชื่อสารจาก Formula ปริมาณว่าง หน่วยตามรูปแบบ และไม่ดึงซ้ำรอบต่อไป',async()=>{
+  const c=fixture('rd','RD-ก');
+  c.records=[{id:'A00001',form:'แคปซูล',rows:[{name:'Collagen Type II',w:250},{name:'',w:0},{name:'Vitamin C',w:100}]},{id:'A00002',form:'ซอง',rows:[{name:'Fiber',w:5000}]},{id:'A00003'}];
+  const b=await c.costLocalRequest('open',{projectId:'A00001'});
+  assert.equal(b.lines.length,2,'แถวว่างไม่ดึง');
+  assert.equal(b.lines[0].alias,'Collagen Type II');assert.equal(b.lines[0].amount,null,'ปริมาณให้ RD กรอกเอง');assert.equal(b.lines[0].unit,'mg','แคปซูล = mg');
+  assert.equal(b.lines[0].hasOffer,false);assert.equal(b.lines[0].fromFormula,true);assert.equal(b.lines[0].baseTotal,null);
+  assert.equal((await c.costLocalRequest('open',{projectId:'A00002'})).lines[0].unit,'g','ซอง = g');
+  assert.equal((await c.costLocalRequest('open',{projectId:'A00003'})).lines.length,0,'ไม่มีตารางสารก็ไม่ดึง');
+  await c.costLocalRequest('removeRM',{projectId:'A00001',scenarioId:'S1',expectedRevision:1,lineId:b.lines[0].id});
+  assert.equal((await c.costLocalRequest('open',{projectId:'A00001'})).lines.length,1,'เปิดซ้ำต้องไม่ดึงกลับมา');
+  const fl=c.run(`costStartJob({mode:'float'})`);
+  assert.equal((await c.costLocalRequest('open',{projectId:fl.id})).lines.length,0,'งานลอยไม่มี Formula ให้ดึง');
+});
+test('assignRM ใส่ข้อเสนอให้แถวจาก Formula โดยคงชื่อและปริมาณ บันทึกความจำการเลือก และปฏิเสธแถวที่มีข้อเสนอแล้ว',async()=>{
+  const c=fixture('rd','RD-ก');c.records=[{id:'A00001',form:'แคปซูล',rows:[{name:'Collagen Type II'}]}];
+  c.loadCostStore().catalog.push({...offer,id:'O1',materialId:'M1',name:'BRANDX (Undenatured Collagen Type II)'});
+  let b=await c.costLocalRequest('open',{projectId:'A00001'});
+  await c.costLocalRequest('save',{projectId:'A00001',scenarioId:'S1',expectedRevision:1,patch:{lines:[{id:b.lines[0].id,alias:'Collagen Type II',amount:40,lossPercent:0}]}});
+  b=await c.costLocalRequest('assignRM',{projectId:'A00001',scenarioId:'S1',expectedRevision:2,lineId:b.lines[0].id,offerRef:'O1'});
+  assert.equal(b.lines.length,1,'ต้องไม่เพิ่มแถวใหม่');assert.equal(b.lines[0].hasOffer,true);assert.equal(b.lines[0].alias,'Collagen Type II','ชื่อจากสูตรคงอยู่');assert.equal(b.lines[0].amount,40,'ปริมาณที่กรอกไว้คงอยู่');
+  const picks=c.loadCostStore().picks;assert.equal(picks.length,1);assert.equal(picks[0].key,'collagen type ii');assert.equal(picks[0].offerId,'O1');assert.equal(picks[0].count,1);assert.equal(picks[0].by,'RD-ก');
+  assert.ok(Array.isArray(b.picks)&&b.picks[0].count===1,'envelope พกความจำไปให้จัดอันดับ');
+  await assert.rejects(c.costLocalRequest('assignRM',{projectId:'A00001',scenarioId:'S1',expectedRevision:3,lineId:b.lines[0].id,offerRef:'O1'}),/มีข้อเสนอแล้ว/);
+  await assert.rejects(c.costLocalRequest('assignRM',{projectId:'A00001',scenarioId:'S1',expectedRevision:3,lineId:'nope',offerRef:'O1'}),/ไม่พบรายการ/);
+  await c.costLocalRequest('selectRM',{projectId:'A00001',scenarioId:'S1',expectedRevision:3,offerRef:'O1'});
+  assert.equal(c.loadCostStore().picks.find(p=>p.key===c.run(`costNorm('BRANDX (Undenatured Collagen Type II)')`)).count,1,'selectRM ก็จำ ด้วยชื่อข้อเสนอ');
+});
+test('searchTokens แตกคำจากชื่อ วงเล็บ ชื่อเรียก และ keywords อย. — พิมพ์ไทยเจอชื่อการค้าอังกฤษ',()=>{
+  const c=fixture();
+  // พจนานุกรม อย. อยู่นอก LOCAL block ในไฟล์จริงแต่ประกาศในสคริปต์เดียวกันก่อนมีใครเรียก
+  // โหลดเข้าบริบทเทสต์ก่อนเรียกครั้งแรกให้เหมือน runtime (V8 cache การค้นหาตัวแปรทั่วโลกต่อสคริปต์)
+  const fdaStart=html.indexOf('const THAI_FDA_DB');const fdaEnd=html.indexOf('\n];',fdaStart)+3;c.run(html.slice(fdaStart,fdaEnd));
+  const t=c.run(`costSearchTokens({name:'BRANDX™ (Undenatured Collagen Type II)/USA',vendor:'ผู้ขาย ก',aliases:'UC-II; คอลลาเจนไก่'})`);
+  for(const w of ['brandx','undenatured','collagen','type','ii','usa','uc','คอลลาเจนไก่'])assert.ok(t.includes(w),'ขาด '+w+': '+t.join(','));
+  const v=c.run(`costSearchTokens({name:'Ascorbic Acid 99%'})`);
+  assert.ok(v.includes('วิตามินซี')&&v.includes('vitamin'),'keywords อย. ต้องติดมา: '+v.join(','));
+  assert.equal(c.run(`costNorm('Acid 50 %')`),c.run(`costNorm('acid 50%')`));assert.notEqual(c.run(`costNorm('Acid 50%')`),c.run(`costNorm('Acid 50')`));
+  const w=c.run(`costSearchTokens({name:'Zinc Bisglycinate 20%'})`);assert.ok(w.includes('20%'),'คง % ไว้');
+});

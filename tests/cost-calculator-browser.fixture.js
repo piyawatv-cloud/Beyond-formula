@@ -62,7 +62,19 @@
  const floatingId=costState.projectId;
  document.getElementById('costBindSelect').value='A00002';await costBindFromView();
  check('binding reopens the job under the Formula id with the same job id',costState.projectId==='A00002'&&costState.response.job.id===floatingId&&costState.response.job.bound===true&&!document.getElementById('costBindSelect'));
- // E4: สอง tab สลับกัน ค่าที่กรอกค้างไม่หาย ปิดต้องยืนยัน
+ // 3b: เปิดใบที่ผูกกับ Formula ที่มีตารางสาร → ชื่อถูกดึงมา → ค้นหาไทย → ใช้ตัวนี้ → ปริมาณ → ราคาต่อหน่วยผลิต
+ records.push({id:'A00003',customer:'ลูกค้าสังเคราะห์ ค',brand:'SYN-C',form:'แคปซูล',createdBy:currentUser,rows:[{name:'Vitamin C',w:100},{name:'สารที่ไม่มีในแคตตาล็อก',w:1}]});
+ loadCostStore().catalog.push({...offers[0],id:'OVC',materialId:'MVC',name:'Ascorbic Acid 99% (Vitamin C)',vendor:'ผู้ขายสังเคราะห์ 3',price:320});saveCostStore();
+ costOpenCreate();costCreateMode('ref');document.querySelector('input[name="costCreateRef"][value="A00003"]').checked=true;await costCreateSubmit();
+ check('names from the Formula sheet are pre-seeded without amounts',costState.response.lines.length===2&&costState.response.lines[0].alias==='Vitamin C'&&costState.response.lines[0].amount===null&&costState.response.lines[0].unit==='mg'&&document.getElementById('costLineSearch0')!==null);
+ {const box=document.getElementById('costLineSearch0');box.focus();box.value='วิตามินซี';box.dispatchEvent(new Event('input',{bubbles:true}));}
+ check('typing Thai finds the English trade name via FDA keywords without a full redraw',document.getElementById('costLineSug0').textContent.includes('Ascorbic Acid')&&document.activeElement===document.getElementById('costLineSearch0'));
+ document.querySelector('#costLineSug0 button[onclick^="costAssignRef"]').click();await new Promise(r=>setTimeout(r,0));await costAction('open',{});
+ check('assigning keeps the Formula name and removes the search row',costState.response.lines[0].hasOffer===true&&costState.response.lines[0].alias==='Vitamin C'&&!document.getElementById('costLineSearch0')&&document.getElementById('costLineSearch1')!==null&&loadCostStore().picks.length>=1);
+ {const amt=document.getElementById('costAmount0');amt.value='250';amt.dispatchEvent(new Event('input',{bubbles:true}));}
+ check('unit price appears while typing the amount',document.getElementById('costLineUnit0').textContent.includes('0.08'));
+ // E4: สอง tab สลับกัน ค่าที่กรอกค้างไม่หาย ปิดต้องยืนยัน — ปิด tab ของ 3b ก่อนเพื่อนับให้ตรง
+ window.confirm=()=>true;costCloseTab('A00003');
  await openCostCalculator('A00001');document.getElementById('costSellingUnits').value='4321';
  await openCostCalculator('A00002');
  check('two tabs are open and the first keeps its unsaved value',document.querySelectorAll('.cost-tab[data-tab]').length===2&&costTabFor('A00001').state.edits.costSellingUnits==='4321'&&document.querySelector('.cost-tab-dirty')!==null);
