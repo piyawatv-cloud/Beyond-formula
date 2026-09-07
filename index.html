@@ -673,7 +673,7 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
   <div class="logo"><svg viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-1.73-3L9 11.35V4H8a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2h-1v7.35L19.73 19A2 2 0 0 1 18 22H6Zm5-10.11L8.31 16.5h7.38L13 11.89V4h-2v7.89Z"/></svg></div>
   <div>
     <div class="hdr-title">Formula Studio</div>
-    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-06.7-workflow-order</div>
+    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-07.1-cost-jobs</div>
   </div>
   <div class="sync-chip" id="syncChip" onclick="sbManualSync()" title="สถานะการซิงก์ข้อมูลกับเซิร์ฟเวอร์กลาง"></div>
 </div>
@@ -1946,7 +1946,7 @@ const COST_ROLE_DEFAULTS={admin:['RD','Procurement RM','PU-PK','Production','Fin
 const COST_PRICING_ROLES=['Finance','CEO'];
 const COST_ROLE_RANK=['CEO','Finance','Production','RD','Procurement RM','PU-PK','OPC','Sales'];
 let costStore=null; // null until loadCostStore() has run — never write before then (rule 4)
-function costStoreDefault(){return {v:1,scenarios:[],outbox:[],catalog:[],caps:{},requests:[],pk:[],formats:[],catalogSource:null};}
+function costStoreDefault(){return {v:1,scenarios:[],outbox:[],catalog:[],caps:{},requests:[],pk:[],formats:[],catalogSource:null,jobs:[],jobCounter:0,picks:[]};}
 function costArray(value){return Array.isArray(value)?value:[];}
 function loadCostStore(){
   if(costStore!==null)return costStore;
@@ -1958,10 +1958,54 @@ function loadCostStore(){
     scenarios:costArray(parsed.scenarios),outbox:costArray(parsed.outbox),
     catalog:costArray(parsed.catalog),requests:costArray(parsed.requests),pk:costArray(parsed.pk),formats:costArray(parsed.formats),
     caps:parsed.caps&&typeof parsed.caps==='object'&&!Array.isArray(parsed.caps)?parsed.caps:{},
-    catalogSource:parsed.catalogSource&&typeof parsed.catalogSource==='object'&&!Array.isArray(parsed.catalogSource)?parsed.catalogSource:null
+    catalogSource:parsed.catalogSource&&typeof parsed.catalogSource==='object'&&!Array.isArray(parsed.catalogSource)?parsed.catalogSource:null,
+    jobs:costArray(parsed.jobs),picks:costArray(parsed.picks),
+    jobCounter:Number.isInteger(parsed.jobCounter)&&parsed.jobCounter>=0?parsed.jobCounter:0
   }:base;
-  return costSeedFormats(costStore);
+  // migrate ทำในหน่วยความจำหลัง parse เสร็จ ไม่เรียก saveCostStore ที่นี่ (กฎข้อ 4)
+  return costMigrateJobs(costSeedFormats(costStore));
 }
+// ---- ชั้น "ใบงานต้นทุน" ครอบ revision เดิม (SPEC Grill round 9 · TASK E1-01) ----
+// ใบงาน 1 ใบ = โครงการ Formula ไม่เกิน 1 ใบ (ผูกทีหลังได้) · รหัส CJ-000001 ถาวรตลอดอายุ
+// revision เดิมใน scenarios[] ไม่เปลี่ยนโครง แค่ประทับ jobId เพิ่ม โค้ดเก่าจึงยังอ่านได้
+const COST_JOB_ID=/^CJ-\d{6}$/;
+function costJobIdFrom(n){return 'CJ-'+String(n).padStart(6,'0');}
+function costMigrateJobs(store){
+  // ตัวนับต้องไม่ต่ำกว่ารหัสสูงสุดที่มีอยู่ มิฉะนั้นรหัสจะออกซ้ำแล้วสองใบงานปนกัน
+  const used=store.jobs.map(j=>COST_JOB_ID.test(String(j.id))?Number(String(j.id).slice(3)):0);
+  store.jobCounter=Math.max(store.jobCounter,...used,0);
+  // revision เก่าที่ยังไม่มีใบงาน: สร้างให้ใบเดียวต่อโครงการ เจ้าของ = ผู้สร้าง revision ต่ำสุด
+  const byProject=new Map(store.jobs.filter(j=>j.projectId).map(j=>[j.projectId,j]));
+  const pending=store.scenarios.filter(row=>row.projectId&&!row.jobId);
+  const projects=[...new Set(pending.map(row=>row.projectId))];
+  projects.forEach(projectId=>{
+    let job=byProject.get(projectId);
+    if(!job){
+      const first=store.scenarios.filter(row=>row.projectId===projectId).reduce((a,b)=>!a||b.revision<a.revision?b:a,null);
+      job={id:costJobIdFrom(++store.jobCounter),projectId,title:'',form:'',owner:first?first.createdBy:'',
+        createdAt:first?first.createdAt:new Date().toISOString(),createdBy:first?first.createdBy:'',clonedFrom:null,migrated:true};
+      store.jobs.push(job);byProject.set(projectId,job);
+    }
+  });
+  pending.forEach(row=>{row.jobId=byProject.get(row.projectId).id;});
+  return store;
+}
+function costJobs(){return loadCostStore().jobs;}
+function costJobById(id){return costJobs().find(j=>j.id===id)||null;}
+function costJobByProject(projectId){return projectId?costJobs().find(j=>j.projectId===projectId)||null:null;}
+// สร้างใบงานใหม่: projectId เป็น null ได้ (งานลอย) · ห้ามซ้ำโครงการ · ไม่บันทึกเอง ผู้เรียกบันทึก
+function costCreateJob(input){
+  const store=loadCostStore(),projectId=input.projectId||null;
+  if(projectId!==null&&!/^[A-Z]\d{5}$/.test(projectId))throw Error('รหัสใบงาน Formula ไม่ถูกต้อง');
+  const existing=costJobByProject(projectId);
+  if(existing)throw Error(`ใบงาน ${projectId} มีใบงานต้นทุน ${existing.id} อยู่แล้ว เจ้าของสูตร: ${existing.owner||'ไม่ระบุ'}`);
+  if(input.clonedFrom&&!costJobById(input.clonedFrom))throw Error('ไม่พบใบงานต้นทุนต้นแบบ');
+  const job={id:costJobIdFrom(++store.jobCounter),projectId,title:String(input.title||'').trim(),form:String(input.form||'').trim(),
+    owner:currentUser,createdAt:new Date().toISOString(),createdBy:currentUser,clonedFrom:input.clonedFrom||null};
+  store.jobs.push(job);
+  return job;
+}
+function costJobEntries(jobId){return loadCostStore().scenarios.filter(row=>row.jobId===jobId);}
 function saveCostStore(){
   if(costStore===null)return false; // loader has not run; writing now would erase existing data
   try{localStorage.setItem(COST_KEY,JSON.stringify(costStore));return true;}catch(error){return false;}
@@ -2135,10 +2179,17 @@ function costPostSummary(projectId,key,view){
   }
   return {receiptId:'chat:'+chat.jobId+':'+ts,duplicate:false};
 }
-function costAppendEntry(projectId,scenarioId,scenario){
+function costAppendEntry(projectId,scenarioId,scenario,jobId){
   const store=loadCostStore();
-  store.scenarios.push({projectId,scenarioId,revision:scenario.revision,scenario,createdAt:new Date().toISOString(),createdBy:currentUser});
-  if(!saveCostStore()){store.scenarios.pop();throw Error('บันทึก revision ไม่ได้ กรุณาตรวจพื้นที่จัดเก็บแล้วลองใหม่');}
+  // ทุก revision ต้องอยู่ใต้ใบงานเสมอ ใบงานที่ผูกโครงการนี้มีได้ใบเดียว
+  let job=jobId?costJobById(jobId):costJobByProject(projectId),createdJob=false;
+  if(!job){job=costCreateJob({projectId});createdJob=true;}
+  store.scenarios.push({projectId,scenarioId,revision:scenario.revision,scenario,createdAt:new Date().toISOString(),createdBy:currentUser,jobId:job.id});
+  if(!saveCostStore()){
+    store.scenarios.pop();
+    if(createdJob){store.jobs.pop();store.jobCounter--;} // ยังไม่เคยถูกใช้จริง ถอนคืนได้โดยไม่ทำให้รหัสซ้ำ
+    throw Error('บันทึก revision ไม่ได้ กรุณาตรวจพื้นที่จัดเก็บแล้วลองใหม่');
+  }
   return costEntry(projectId,scenarioId,scenario.revision);
 }
 function costNewScenario(projectId,scenarioId){

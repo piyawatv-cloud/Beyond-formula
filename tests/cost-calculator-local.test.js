@@ -655,3 +655,92 @@ test('ข้อความสรุปที่ถูกคัดลอกไ�
   const body=await c.costLocalRequest('open',{projectId:'A00001'});
   assert.match(body.summaryText,/ไม่รวม VAT/,'ผู้รับต้องไม่เข้าใจว่ารวมแล้ว: '+body.summaryText);
 });
+
+// ---- E1-01 ชั้น "ใบงานต้นทุน" ครอบ revision เดิม (SPEC Grill round 9) ----
+test('เปิดโครงการครั้งแรก สร้างใบงานต้นทุนให้ RD คนนั้นเป็นเจ้าของ และ revision ประทับ jobId',async()=>{
+  const c=fixture('rd','RD-คนแรก');
+  await c.costLocalRequest('open',{projectId:'A00001'});
+  const store=c.loadCostStore();
+  assert.equal(store.jobs.length,1);
+  assert.equal(store.jobs[0].id,'CJ-000001','รหัสใบงานต้นทุนตาม SPEC');
+  assert.equal(store.jobs[0].projectId,'A00001');
+  assert.equal(store.jobs[0].owner,'RD-คนแรก','เจ้าของสูตร = RD ที่เริ่มงานต้นทุนคนแรก');
+  assert.equal(store.scenarios[0].jobId,'CJ-000001','revision ต้องรู้ว่าอยู่ใต้ใบงานไหน');
+  assert.equal(store.jobCounter,1);
+});
+test('RD คนที่สองบันทึก revision ต่อ ไม่เปลี่ยนเจ้าของและไม่สร้างใบงานซ้ำ',async()=>{
+  const c=fixture('rd','RD-คนแรก');
+  await c.costLocalRequest('open',{projectId:'A00001'});
+  const d=fixture('rd','RD-คนที่สอง');d.backing.fs_cost=c.backing.fs_cost;
+  await d.costLocalRequest('open',{projectId:'A00001'});
+  await d.costLocalRequest('save',{projectId:'A00001',scenarioId:'S1',expectedRevision:1,patch:{lines:[]}});
+  const store=d.loadCostStore();
+  assert.equal(store.jobs.length,1,'โครงการเดียว = ใบงานเดียว');
+  assert.equal(store.jobs[0].owner,'RD-คนแรก');
+  assert.ok(store.scenarios.every(r=>r.jobId==='CJ-000001'),'ทุก revision อยู่ใต้ใบงานเดียวกัน');
+});
+test('ข้อมูล fs_cost รุ่นเก่าที่ไม่มี jobs ถูก migrate เป็นใบงานตอนโหลด โดยไม่แตะโครง revision เดิม',()=>{
+  const legacy={v:1,catalog:[],outbox:[],requests:[],pk:[],formats:[],caps:{},catalogSource:null,scenarios:[
+    {projectId:'A00010',scenarioId:'S1',revision:2,scenario:{projectId:'A00010',revision:2},createdAt:'2026-09-02T00:00:00Z',createdBy:'RD-ข'},
+    {projectId:'A00010',scenarioId:'S1',revision:1,scenario:{projectId:'A00010',revision:1},createdAt:'2026-09-01T00:00:00Z',createdBy:'RD-ก'},
+    {projectId:'A00020',scenarioId:'S1',revision:1,scenario:{projectId:'A00020',revision:1},createdAt:'2026-09-03T00:00:00Z',createdBy:'RD-ค'}]};
+  const c=fixture();c.backing.fs_cost=JSON.stringify(legacy);
+  const store=c.loadCostStore();
+  assert.equal(store.jobs.length,2,'สองโครงการ = สองใบงาน');
+  const j10=store.jobs.find(j=>j.projectId==='A00010'),j20=store.jobs.find(j=>j.projectId==='A00020');
+  assert.equal(j10.owner,'RD-ก','เจ้าของ = ผู้สร้าง revision ต่ำสุด ไม่ใช่แถวแรกในไฟล์');
+  assert.equal(j10.createdAt,'2026-09-01T00:00:00Z');
+  assert.equal(j20.owner,'RD-ค');
+  assert.equal(j10.migrated,true,'ต้องรู้ว่าใบไหนเกิดจาก migrate');
+  assert.ok(store.scenarios.every(r=>r.jobId===(r.projectId==='A00010'?j10.id:j20.id)));
+  assert.equal(store.scenarios.length,3,'ไม่มี revision หาย');
+  assert.deepEqual(Object.keys(store.scenarios[0]).sort(),['createdAt','createdBy','jobId','projectId','revision','scenario','scenarioId'],'เพิ่มได้แค่ jobId');
+  assert.equal(c.backing.fs_cost,JSON.stringify(legacy),'โหลดอย่างเดียวห้ามเขียนกลับ (กฎข้อ 4)');
+});
+test('migrate รันซ้ำได้ไม่สร้างใบงานเพิ่ม และตัวนับไม่ถอยหลัง',async()=>{
+  const c=fixture('rd','RD-ก');
+  await c.costLocalRequest('open',{projectId:'A00001'});
+  await c.costLocalRequest('open',{projectId:'A00002'});
+  const saved=c.backing.fs_cost;
+  const d=fixture('rd','RD-ก');d.backing.fs_cost=saved;
+  const s2=d.loadCostStore();
+  assert.equal(s2.jobs.length,2);assert.equal(s2.jobCounter,2);
+  assert.equal(JSON.stringify(s2.jobs),JSON.stringify(JSON.parse(saved).jobs),'โหลดซ้ำต้องได้ใบงานชุดเดิมเป๊ะ');
+  // ตัวนับที่เสียหาย (ต่ำกว่ารหัสที่มีอยู่) ต้องถูกยกขึ้น ไม่งั้นรหัสถัดไปจะซ้ำ
+  const broken=JSON.parse(saved);broken.jobCounter=0;
+  const e=fixture('rd','RD-ก');e.backing.fs_cost=JSON.stringify(broken);
+  e.loadCostStore();
+  const job=e.run(`costCreateJob({projectId:null,title:'งานลอย'})`);
+  assert.equal(job.id,'CJ-000003','ห้ามออกรหัส CJ-000001 ซ้ำ');
+});
+test('สร้างงานลอยได้ ผูกโครงการซ้ำไม่ได้พร้อมบอกเจ้าของ และงานลอยไม่โผล่เป็น revision ของโครงการใด',async()=>{
+  const c=fixture('rd','RD-ก');
+  await c.costLocalRequest('open',{projectId:'A00001'});
+  const floating=c.run(`costCreateJob({projectId:null,title:'ทดลองสูตร',form:'แคปซูล'})`);
+  assert.equal(floating.projectId,null);assert.equal(floating.owner,'RD-ก');assert.match(floating.id,/^CJ-\d{6}$/);
+  assert.throws(()=>c.run(`costCreateJob({projectId:'A00001'})`),/CJ-000001.*เจ้าของสูตร: RD-ก/,'ต้องบอกว่ามีอยู่แล้วและใครเป็นเจ้าของ');
+  assert.throws(()=>c.run(`costCreateJob({projectId:'bad'})`),/ไม่ถูกต้อง/);
+  assert.throws(()=>c.run(`costCreateJob({projectId:null,clonedFrom:'CJ-999999'})`),/ไม่พบใบงานต้นทุนต้นแบบ/);
+  assert.equal(c.costLatestEntry(null,'S1'),null,'งานลอยไม่ใช่โครงการ');
+  assert.equal(c.run(`costJobByProject(null)`),null,'null ไม่ใช่โครงการ ห้ามจับคู่กับงานลอย');
+});
+test('บันทึกไม่สำเร็จ ต้องถอนใบงานที่เพิ่งสร้างและตัวนับคืน ไม่ทิ้งใบงานผีที่ไม่มี revision',async()=>{
+  const c=fixture('rd','RD-ก');
+  c.loadCostStore();
+  c.localStorage.setItem=()=>{throw Error('เต็ม');};
+  await assert.rejects(c.costLocalRequest('open',{projectId:'A00001'}),/บันทึก revision ไม่ได้/);
+  const store=c.loadCostStore();
+  assert.equal(store.jobs.length,0);assert.equal(store.jobCounter,0);assert.equal(store.scenarios.length,0);
+});
+test('revision ที่โค้ดรุ่นเก่าเพิ่มเข้ามาหลังมีใบงานแล้ว ถูกผูกกับใบงานเดิม ไม่สร้างใบซ้ำ',()=>{
+  // เครื่องที่ยังไม่ hard refresh อาจบันทึก revision โดยไม่มี jobId ลงใน store ที่ migrate แล้ว
+  const c=fixture('rd','RD-ก');
+  c.backing.fs_cost=JSON.stringify({v:1,catalog:[],outbox:[],requests:[],pk:[],formats:[],caps:{},catalogSource:null,jobCounter:1,
+    jobs:[{id:'CJ-000001',projectId:'A00010',title:'',form:'',owner:'RD-ก',createdAt:'2026-09-01T00:00:00Z',createdBy:'RD-ก',clonedFrom:null}],
+    scenarios:[{projectId:'A00010',scenarioId:'S1',revision:1,scenario:{},createdAt:'2026-09-01T00:00:00Z',createdBy:'RD-ก',jobId:'CJ-000001'},
+      {projectId:'A00010',scenarioId:'S1',revision:2,scenario:{},createdAt:'2026-09-05T00:00:00Z',createdBy:'RD-ข'}]});
+  const store=c.loadCostStore();
+  assert.equal(store.jobs.length,1,'ห้ามสร้างใบงานที่สองให้โครงการเดิม');
+  assert.equal(store.scenarios[1].jobId,'CJ-000001','revision ใหม่ต้องเข้าใบงานเดิม');
+  assert.equal(store.jobs[0].owner,'RD-ก','เจ้าของไม่เปลี่ยน');
+});
