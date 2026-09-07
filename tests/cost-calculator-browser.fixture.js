@@ -20,8 +20,15 @@
  costSearchChanged('Spec B');check('search compares spec without unrelated item',!document.getElementById('costView').textContent.includes('Spec A · มาตรฐาน')&&document.getElementById('costView').textContent.includes('Spec B'));
  costSearchChanged('');await costAdoptPK();check('draft PK adoption preserves RM and remains incomplete',scenario.revision===3&&scenario.rmLines[0].alias==='ชื่อเปิดเผยใน revision'&&CostCalculator.calculate(scenario,date).complete===false);
  window.confirm=()=>true;await costSendSummary();check('pending receipt is not sent',costState.response.sendState==='pending'&&!document.getElementById('costView').textContent.includes('ส่งสำเร็จ'));
- userList=[{name:currentUser,role:'sales'}];renderUserUI();await openCostCalculator('A00001');
- check('Sales response and DOM omit raw catalog',!JSON.stringify(costState.response).includes('SYNTHETIC VENDOR')&&!document.getElementById('costSearch'));
+ userList=[{name:currentUser,role:'sales'}];renderUserUI();costReset();await openCostCalculator('A00001');
+ check('Sales cannot open the calculator at all',costState.response===null&&!document.getElementById('costSearch')&&!costAllowed('A00001'));
+ renderRecordsList();
+ const dashHtml=()=>document.getElementById('recordsPanel').innerHTML; // body.innerHTML รวมซอร์สใน <script> ด้วย ต้องดูเฉพาะตาราง
+ check('Sales dashboard has no cost button',!dashHtml().includes('คำนวณต้นทุน'));
+ userList=[{name:currentUser,role:'rd'}];renderRecordsList();
+ check('RD dashboard keeps the cost button',dashHtml().includes('คำนวณต้นทุน'));
+ userList=[{name:currentUser,role:'sales'}];
+ check('Sales open left storage untouched',!JSON.stringify(localStorage).includes('SYNTHETIC VENDOR'));
  check('new costs never enter legacy stores',!JSON.stringify(localStorage).includes('SYNTHETIC VENDOR'));
  // Exercise shipped local transport and actual DOM events, not just the fixture gateway.
  delete window.__costTestRequest;userList=[{name:currentUser,role:'rd'}];costStore=null;localStorage.removeItem('fs_cost');

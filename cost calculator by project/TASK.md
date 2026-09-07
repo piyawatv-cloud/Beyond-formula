@@ -31,7 +31,7 @@ This clarification changes documentation only. task_id: cost-calculator-implemen
 **เริ่มได้เลย**
 
 - [x] [E1-01] **เสร็จ 2026-09-07** (รหัส `CJ-000001` ใช้ค่าเริ่มต้นตามที่ตกลง) — เพิ่มชั้น "ใบงานต้นทุน" ใน `fs_cost` (รหัสภายใน · projectId nullable · เจ้าของสูตร · โคลนจาก) ครอบ `scenarios[]` เดิมโดยไม่เปลี่ยนโครง scenario — เสร็จเมื่อ: ข้อมูล `fs_cost` เก่าโหลดแล้ว migrate เป็นใบงานที่ผูก projectId เดิมได้ครบ รันซ้ำไม่พัง มีเทสต์ mutation — ต้องรอ: รูปแบบรหัส (เจ้าของระบบ · ถ้าไม่ตอบใช้ `CJ-000001`)
-- [ ] [E1-02] `costCapabilities().open` ปฏิเสธ Sales/OPC/Finance/CEO/PD/RA/MKT · ซ่อนปุ่ม "คำนวณต้นทุน" ในตาราง Dashboard และปฏิเสธ `#project=` สำหรับ role เหล่านั้น — เสร็จเมื่อ: เทสต์ครบทุก role ทั้ง 3 ชั้น · harness 37/37 ยังผ่าน — ต้องรอ: —
+- [x] [E1-02] **เสร็จ 2026-09-07 — Critical Change รอ CODEOWNER** `costCapabilities().open` ปฏิเสธ Sales/OPC/Finance/CEO/PD/RA/MKT · ซ่อนปุ่ม "คำนวณต้นทุน" ในตาราง Dashboard และปฏิเสธ `#project=` สำหรับ role เหล่านั้น — เสร็จเมื่อ: เทสต์ครบทุก role ทั้ง 3 ชั้น · harness 37/37 ยังผ่าน — ต้องรอ: —
 - [ ] [E2-01] ปุ่มเมนู Cost Calculation ท้ายซ้ายใกล้ Dashboard · แสดงเฉพาะ RD/Admin/PU-PK/Purchasing — เสร็จเมื่อ: `renderUserUI` ซ่อน/แสดงถูก · เทสต์ browser ตรวจว่า Sales ไม่มีปุ่มใน DOM — ต้องรอ: E1-02
 - [ ] [E2-02] Dashboard ใบงานต้นทุน 9 คอลัมน์ + ค้นหา + 4 สถานะหน้า — เสร็จเมื่อ: AC2 · ค้นหาวาดใหม่เฉพาะตาราง (ใช้แนวเดียวกับ `costCatalogBody`) — ต้องรอ: E1-01
 - [ ] [E3-01] หน้าสร้างใบงานต้นทุน: อ้างอิง Formula / สร้างลอย / โคลน — เสร็จเมื่อ: AC3 + AC4 · โคลนแล้ว `validUntil` ถูกตรวจใหม่ — ต้องรอ: E1-01

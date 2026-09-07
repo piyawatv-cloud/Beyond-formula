@@ -25,7 +25,9 @@ const cases=[
   {name:'catalog price denominator',testFile:'tests/cost-calculator-local.test.js',pattern:'A2 catalog denominator validity',source:'index.html',before:"if(offer.priceBasisQuantity===null||offer.priceBasisQuantity<=0)bad.push('priceBasisQuantity');",after:'/* removed denominator validation */'},
   {name:'two-digit comma',testFile:'cost calculator by project/tests/rm-source-map.test.js',pattern:'A2 two digits after',source:'cost calculator by project/apps_script/RmSourceMap.gs',before:String.raw`/(\d),(\d{3})(?!\d)/g`,after:String.raw`/(\d),(\d{2,3})(?!\d)/g`},
   {name:'formula tolerance',testFile:'tests/cost-calculator-core.test.js',pattern:'A2 formula tolerance',source:'index.html',before:'fillKg*1e-9',after:'fillKg*1e-1'},
-  {name:'non-RD summary permission',testFile:'tests/cost-calculator-local.test.js',pattern:'A2 non-RD direct summary',source:'index.html',before:'sendSummary:rd,approveCEO:false',after:'sendSummary:true,approveCEO:false'}
+  {name:'non-RD summary permission',testFile:'tests/cost-calculator-local.test.js',pattern:'A2 non-RD direct summary',source:'index.html',before:'sendSummary:rd,approveCEO:false',after:'sendSummary:true,approveCEO:false'},
+  // E1-02 (2026-09-07): Sales/OPC/Finance/CEO ต้องเปิดเครื่องคำนวณไม่ได้ ถ้าประตูนี้หลุด ต้นทุนดิบรั่วทันที
+  {name:'open gate lets every business role in',testFile:'tests/cost-calculator-local.test.js',pattern:'A2 open gate',source:'index.html',before:"return {open:admin||roles.some(function(r){return COST_OPEN_ROLES.indexOf(r)>=0;}),",after:'return {open:admin||roles.length>0,'}
 ];
 for(const item of cases)test('A2 mutation killed: '+item.name,()=>{
   const spec={...item,source:path.join(root,item.source),testFile:path.join(root,item.testFile)};

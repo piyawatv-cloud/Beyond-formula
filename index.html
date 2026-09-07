@@ -673,7 +673,7 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
   <div class="logo"><svg viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-1.73-3L9 11.35V4H8a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2h-1v7.35L19.73 19A2 2 0 0 1 18 22H6Zm5-10.11L8.31 16.5h7.38L13 11.89V4h-2v7.89Z"/></svg></div>
   <div>
     <div class="hdr-title">Formula Studio</div>
-    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-07.1-cost-jobs</div>
+    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-07.2-open-gate</div>
   </div>
   <div class="sync-chip" id="syncChip" onclick="sbManualSync()" title="สถานะการซิงก์ข้อมูลกับเซิร์ฟเวอร์กลาง"></div>
 </div>
@@ -1651,7 +1651,12 @@ async function costResolveLink(){
   await openCostCalculator(route.projectId,route.scenarioId,route.revision);
 }
 if(typeof window.addEventListener==='function')window.addEventListener('hashchange',()=>{void costResolveLink();});
-function costAllowed(projectId){return !!(currentUser && can('chat') && !impersonator && canSeeRecord(records.find(r=>r.id===projectId)));}
+// ชั้นที่ 1–2 ของกฎข้อ 8: ปุ่มและการเปิดหน้า · ชั้นที่ 3 อยู่ใน costLocalRequest ซึ่งเป็นผู้ตัดสินจริง
+function costAllowed(projectId){
+  const gate=typeof costCapabilities==='function'?costCapabilities():null;
+  if(gate&&!gate.open)return false;
+  return !!(currentUser && can('chat') && !impersonator && canSeeRecord(records.find(r=>r.id===projectId)));
+}
 async function costRequest(action,payload){
   const actions=['open','save','selectRM','changeTier','removeRM','requestMaterial','adoptPK','sendSummary'];
   if(!actions.includes(action) || !costAllowed(payload.projectId))throw Error('ไม่มีสิทธิ์ทำงานกับโครงการนี้');
@@ -1944,6 +1949,7 @@ const COST_ROLE_DEFAULTS={admin:['RD','Procurement RM','PU-PK','Production','Fin
 // ผู้มีอำนาจตั้งอัตราขายและอัตรามาตรฐาน แยกจากผู้แก้สูตรโดยตั้งใจ — คนทำสูตรไม่ควร
 // ตั้งตัวคูณราคาให้ตัวเอง ค่าเริ่มต้นให้เฉพาะ Finance และ CEO จนกว่าเจ้าของระบบจะกำหนดเป็นอย่างอื่น
 const COST_PRICING_ROLES=['Finance','CEO'];
+const COST_OPEN_ROLES=['RD','PU-PK','Procurement RM']; // ผู้ที่เปิดเครื่องคำนวณได้ นอกจาก Admin
 const COST_ROLE_RANK=['CEO','Finance','Production','RD','Procurement RM','PU-PK','OPC','Sales'];
 let costStore=null; // null until loadCostStore() has run — never write before then (rule 4)
 function costStoreDefault(){return {v:1,scenarios:[],outbox:[],catalog:[],caps:{},requests:[],pk:[],formats:[],catalogSource:null,jobs:[],jobCounter:0,picks:[]};}
@@ -2021,7 +2027,9 @@ function costCapabilities(){
   const roles=costBusinessRoles(currentUser),admin=currentRole()==='admin';
   const rd=admin||roles.includes('RD');
   const pupk=admin||roles.includes('PU-PK');
-  return {open:admin||roles.length>0,editRM:rd,adoptPK:rd||pupk,
+  // เจ้าของระบบตัดสิน 2026-09-06: Sales/OPC/Finance/CEO ไม่เข้าเครื่องคำนวณเลย
+  // Sales ได้ราคาสรุปจากที่ RD ส่งเข้าแชท · CEO อ่านเอกสารจากลิงก์ · Finance/CEO ตั้งกฎราคาหน้าแยก
+  return {open:admin||roles.some(function(r){return COST_OPEN_ROLES.indexOf(r)>=0;}),editRM:rd,adoptPK:rd||pupk,
     // เจ้าของระบบยืนยัน 2026-09-06: ผล PK บันทึกได้เฉพาะ PU-PK
     // ส่วนการนำผลที่ยืนยันแล้วมาใส่ scenario ยังเป็นขั้นตอนของผู้ทำสูตร
     recordPK:pupk,

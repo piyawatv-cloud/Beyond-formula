@@ -26,8 +26,16 @@ test('corrupt or foreign stored value falls back without throwing or erasing oth
 test('open creates a first draft and persists it under the additive key only',async()=>{const c=fixture();const body=await c.costLocalRequest('open',{projectId:'A00001'});assert.equal(body.contract,'cost-v1');assert.equal(body.revision,1);assert.equal(body.view.projectId,'A00001');assert.ok(Array.isArray(body.view.pending));assert.deepEqual(Object.keys(c.backing),['fs_cost']);});
 test('save appends an immutable revision and leaves the previous one untouched',async()=>{const c=fixture();await c.costLocalRequest('open',{projectId:'A00001'});await c.costLocalRequest('save',{projectId:'A00001',scenarioId:'S1',expectedRevision:1,patch:{sellingUnits:1000,unitsPerPack:1,fillAmount:1,lines:[]}});const store=c.loadCostStore();assert.equal(store.scenarios.length,2);assert.equal(store.scenarios[0].scenario.sellingUnits,null);assert.equal(store.scenarios[1].scenario.sellingUnits,1000);});
 test('editing a superseded revision is refused instead of forking history',async()=>{const c=fixture();await c.costLocalRequest('open',{projectId:'A00001'});await c.costLocalRequest('save',{projectId:'A00001',scenarioId:'S1',expectedRevision:1,patch:{lines:[]}});await assert.rejects(c.costLocalRequest('save',{projectId:'A00001',scenarioId:'S1',expectedRevision:1,patch:{lines:[]}}),/revision ใหม่กว่า/);assert.equal(c.loadCostStore().scenarios.length,2);});
-test('Sales sees adjusted totals only and never a vendor, price or RM line',async()=>{const c=fixture('rd');c.loadCostStore().catalog.push(offer);await c.costLocalRequest('open',{projectId:'A00001'});await c.costLocalRequest('selectRM',{projectId:'A00001',scenarioId:'S1',expectedRevision:1,offerRef:'O1'});const s=fixture('sales','Synthetic Sales');s.backing.fs_cost=c.backing.fs_cost;const body=await s.costLocalRequest('open',{projectId:'A00001'});const text=JSON.stringify(body);assert.ok(!text.includes('SYNTHETIC VENDOR'));assert.ok(!text.includes('สารสกัดทดสอบ'));assert.equal(body.lines.length,0);assert.equal(body.catalog.length,0);assert.equal(body.capabilities.editRM,false);});
-test('deep link to an older revision is refused for Sales and allowed for RD',async()=>{const c=fixture();await c.costLocalRequest('open',{projectId:'A00001'});await c.costLocalRequest('save',{projectId:'A00001',scenarioId:'S1',expectedRevision:1,patch:{lines:[]}});const old=await c.costLocalRequest('open',{projectId:'A00001',scenarioId:'S1',expectedRevision:1});assert.equal(old.revision,1);assert.equal(old.capabilities.viewRevision,true);const s=fixture('sales','Synthetic Sales');s.backing.fs_cost=c.backing.fs_cost;assert.equal(s.costCapabilities().viewRevision,false);await assert.rejects(s.costLocalRequest('open',{projectId:'A00001',scenarioId:'S1',expectedRevision:1}),/RD และ Admin/);});
+test('A2 open gate: Sales, OPC, Finance และ CEO เปิดเครื่องคำนวณไม่ได้เลย และการปฏิเสธไม่แตะข้อมูล',async()=>{const c=fixture('rd');c.loadCostStore().catalog.push(offer);await c.costLocalRequest('open',{projectId:'A00001'});await c.costLocalRequest('selectRM',{projectId:'A00001',scenarioId:'S1',expectedRevision:1,offerRef:'O1'});
+  for(const [role,name,caps] of [['sales','Synthetic Sales',null],['opc','Synthetic OPC',null],['sales','Synthetic Finance',['Finance']],['sales','Synthetic CEO',['CEO']],['pd','Synthetic PD',null],['mkt','Synthetic MKT',null]]){
+    const s=fixture(role,name);s.backing.fs_cost=c.backing.fs_cost;if(caps)s.loadCostStore().caps[name]=caps;
+    assert.equal(s.costCapabilities().open,false,name);
+    const before=s.backing.fs_cost;
+    await assert.rejects(s.costLocalRequest('open',{projectId:'A00001'}),/สิทธิ์/,name);
+    assert.equal(s.backing.fs_cost,before,name+': การปฏิเสธต้องไม่เขียนอะไร');
+  }
+  for(const [role,name] of [['rd','Synthetic RD'],['purchasing','Synthetic Buyer'],['admin','Synthetic Admin']]){const u=fixture(role,name);u.backing.fs_cost=c.backing.fs_cost;assert.equal(u.costCapabilities().open,true,name);}});
+test('deep link to an older revision is refused for Sales and allowed for RD',async()=>{const c=fixture();await c.costLocalRequest('open',{projectId:'A00001'});await c.costLocalRequest('save',{projectId:'A00001',scenarioId:'S1',expectedRevision:1,patch:{lines:[]}});const old=await c.costLocalRequest('open',{projectId:'A00001',scenarioId:'S1',expectedRevision:1});assert.equal(old.revision,1);assert.equal(old.capabilities.viewRevision,true);const s=fixture('sales','Synthetic Sales');s.backing.fs_cost=c.backing.fs_cost;assert.equal(s.costCapabilities().viewRevision,false);await assert.rejects(s.costLocalRequest('open',{projectId:'A00001',scenarioId:'S1',expectedRevision:1}),/สิทธิ์/);const p=fixture('purchasing','Synthetic Buyer');p.backing.fs_cost=c.backing.fs_cost;assert.equal(p.costCapabilities().viewRevision,false);await assert.rejects(p.costLocalRequest('open',{projectId:'A00001',scenarioId:'S1',expectedRevision:1}),/RD และ Admin/);});
 test('roles with no cost capability are refused entirely',async()=>{for(const role of ['pd','ra','mkt']){const c=fixture(role,'Someone');await assert.rejects(c.costLocalRequest('open',{projectId:'A00001'}),/ยังไม่ได้รับสิทธิ์/);}});
 test('purchasing holds both RM and PK capabilities but cannot edit the formula',async()=>{const c=fixture('purchasing','Synthetic Buyer');assert.deepEqual(Array.from(c.costBusinessRoles('Synthetic Buyer')),['Procurement RM','PU-PK']);const caps=c.costCapabilities();assert.equal(caps.open,true);assert.equal(caps.editRM,false);assert.equal(caps.adoptPK,true);});
 test('an explicit capability assignment overrides the role default',()=>{const c=fixture('sales','Synthetic Sales');c.loadCostStore().caps['Synthetic Sales']=['Finance','CEO','NOT_A_ROLE'];assert.deepEqual(Array.from(c.costBusinessRoles('Synthetic Sales')),['Finance','CEO']);assert.equal(c.costPrimaryRole(c.costBusinessRoles('Synthetic Sales')),'CEO');});
@@ -77,7 +85,7 @@ test('a failed chat write leaves the summary unsent rather than falsely delivere
 test('adoptPK refuses rather than inventing a PK result, and PK stays absent',async()=>{const c=fixture();await c.costLocalRequest('open',{projectId:'A00001'});await assert.rejects(c.costLocalRequest('adoptPK',{projectId:'A00001',scenarioId:'S1',expectedRevision:1,snapshotRef:'PK1'}),/ยังไม่มีผล PK/);const body=await c.costLocalRequest('open',{projectId:'A00001'});assert.equal(body.pkCandidate,null);assert.equal(body.view.pk.ready,false);});
 test('sourcing request is recorded without adding a price and without a new revision',async()=>{const c=fixture();await c.costLocalRequest('open',{projectId:'A00001'});await c.costLocalRequest('requestMaterial',{projectId:'A00001',scenarioId:'S1',expectedRevision:1,brief:'ต้องการสารสกัด spec ใหม่'});const store=c.loadCostStore();assert.equal(store.requests.length,1);assert.equal(store.requests[0].status,'open');assert.equal(store.scenarios.length,1);});
 test('Procurement RM gets RM detail but never PK or Operation base cost',async()=>{const c=fixture('rd');c.loadCostStore().catalog.push(offer);await c.costLocalRequest('open',{projectId:'A00001'});await c.costLocalRequest('selectRM',{projectId:'A00001',scenarioId:'S1',expectedRevision:1,offerRef:'O1'});const b=fixture('purchasing','Synthetic Buyer');b.backing.fs_cost=c.backing.fs_cost;const body=await b.costLocalRequest('open',{projectId:'A00001'});assert.ok(Array.isArray(body.view.pending),'projection must stay a full cost-v1 view');assert.ok(Object.hasOwn(body.view.rm,'baseTotal'));assert.ok(!Object.hasOwn(body.view.pk,'baseTotal'));assert.ok(!Object.hasOwn(body.view.operation,'baseTotal'));});
-test('every mapped business role returns a renderable cost-v1 view',async()=>{const c=fixture('rd');await c.costLocalRequest('open',{projectId:'A00001'});for(const [role,name] of [['rd','Synthetic RD'],['purchasing','Synthetic Buyer'],['sales','Synthetic Sales'],['opc','Synthetic OPC'],['admin','Synthetic Admin']]){const u=fixture(role,name);u.backing.fs_cost=c.backing.fs_cost;const body=await u.costLocalRequest('open',{projectId:'A00001'});assert.equal(body.view.projectId,'A00001',role);assert.equal(body.view.revision,body.revision,role);assert.ok(Array.isArray(body.view.pending),role);}});
+test('every mapped business role returns a renderable cost-v1 view',async()=>{const c=fixture('rd');await c.costLocalRequest('open',{projectId:'A00001'});for(const [role,name] of [['rd','Synthetic RD'],['purchasing','Synthetic Buyer'],['admin','Synthetic Admin']]){const u=fixture(role,name);u.backing.fs_cost=c.backing.fs_cost;const body=await u.costLocalRequest('open',{projectId:'A00001'});assert.equal(body.view.projectId,'A00001',role);assert.equal(body.view.revision,body.revision,role);assert.ok(Array.isArray(body.view.pending),role);}});
 
 // Wiring: the UI block on its own has no fallback, so prove the shipped app
 // actually routes costRequest into the local store rather than the network.
@@ -281,15 +289,14 @@ test('บทบาทที่ไม่มีอำนาจด้านรา�
   assert.throws(()=>u.costRecordOperationFormat({id:'CAP-GEL-0',label:'x',owner:'o',validUntil:'2999-01-01',
     charges:[{label:'ค่าอัดแคป',amount:0.15}]}),/อำนาจด้านราคา/,role);
  }});
-test('Sales เห็นราคาต่อหน่วยหลังกำหนดกฎ แต่ยังไม่เห็นต้นทุนหรืออัตรา',async()=>{const c=fixture();
+test('ข้อความสรุปที่ RD ส่งให้ Sales มีราคาต่อหน่วยหลังกำหนดกฎ แต่ไม่มีต้นทุนหรืออัตรา',async()=>{const c=fixture();
  await readyScenario(c);seedRates(c);
  setRule(c,RULE);
+ const body=await c.costLocalRequest('open',{projectId:'A00001'});
+ assert.ok(body.summaryText.includes('5.44'),'ราคาต่อหน่วยต้องถึง Sales ผ่านข้อความสรุป: '+body.summaryText);
+ assert.ok(!body.summaryText.includes('เจ้าของอัตรา')&&!/markup|อัตรา/.test(body.summaryText),'อัตราและผู้กำหนดต้องไม่อยู่ในข้อความ');
  const s=fixture('sales','Synthetic Sales');s.backing.fs_cost=c.backing.fs_cost;
- const body=await s.costLocalRequest('open',{projectId:'A00001'});
- assert.ok(Math.abs(body.view.finalPerSellingUnit-5.4425)<1e-6);
- assert.equal(body.pricingRule,null,'Sales ต้องไม่เห็นอัตราหรือผู้กำหนด');
- assert.ok(!Object.hasOwn(body.view.rm,'baseTotal'));
- assert.ok(!JSON.stringify(body).includes('เจ้าของอัตรา'));});
+ await assert.rejects(s.costLocalRequest('open',{projectId:'A00001'}),/สิทธิ์/,'Sales ไม่เข้าเครื่องคำนวณ');});
 test('ค่าตั้งต้นที่แสดงบนฟอร์มกับค่าตั้งต้นของ draft ต้องตรงกัน มิฉะนั้นฟอร์มจะค้างสถานะแก้ไข',()=>{
  // ช่องที่ render ค่าหนึ่งแต่ draft บอกอีกค่าหนึ่ง ทำให้ costDraftDirty เป็นจริงตลอด
  // และบล็อกทุกคำสั่งที่ไม่ใช่ open/save เช่นการรับผล PK
@@ -416,13 +423,13 @@ test('เปลี่ยน Tier ข้ามสารไม่ได้ แล�
  await c.costLocalRequest('changeTier',{projectId:'A00001',scenarioId:'S1',expectedRevision:2,lineId:id,offerRef:'O2'});
  const old=await c.costLocalRequest('open',{projectId:'A00001',scenarioId:'S1',expectedRevision:2});
  assert.equal(old.lines[0].offerRef,'O1','revision เดิมต้องยังใช้ Tier เดิม');});
-test('Sales ไม่เห็นทั้งกลุ่มแคตตาล็อกและตัวเลือก Tier',async()=>{const c=await catalogFixture();
+test('ชื่อผู้ขายและ Tier ไม่หลุดไปในข้อความสรุปที่ Sales จะได้รับ',async()=>{const c=await catalogFixture();
  await c.costLocalRequest('selectRM',{projectId:'A00001',scenarioId:'S1',expectedRevision:1,offerRef:'O1'});
+ const body=await c.costLocalRequest('open',{projectId:'A00001'});
+ assert.ok(!body.summaryText.includes('SYNTHETIC VENDOR'));
+ assert.ok(!/Tier|T1/.test(body.summaryText));
  const s=fixture('sales','Synthetic Sales');s.backing.fs_cost=c.backing.fs_cost;
- const body=await s.costLocalRequest('open',{projectId:'A00001'});
- assert.deepEqual(Array.from(body.catalogGroups),[]);
- assert.deepEqual(Array.from(body.lines),[]);
- assert.ok(!JSON.stringify(body).includes('SYNTHETIC VENDOR'));});
+ await assert.rejects(s.costLocalRequest('open',{projectId:'A00001'}),/สิทธิ์/);});
 test('สารที่ข้อมูลไม่ครบยังปรากฏในรายการ แต่เลือกไม่ได้และบอกว่าขาดอะไร',async()=>{const c=fixture();
  const partial={...tierOffer('O9','M9','สารที่ข้อมูลไม่ครบ',900,5,7)};
  delete partial.leadTimeDays;delete partial.validUntil;
@@ -508,12 +515,12 @@ test('ข้อความสรุปคัดลอกได้ และม�
  assert.ok(b.summaryText.includes('revision'));
  for(const secret of ['SYNTHETIC VENDOR','สาร ก.','1000','500'])
    assert.ok(!b.summaryText.includes(secret),secret+' ต้องไม่อยู่ในข้อความสรุป');});
-test('Sales ก็ได้ข้อความสรุปเดียวกัน แต่ไม่ได้ตัวเลขปริมาณในสูตร',async()=>{const c=await formulaFixture(0.6);
+test('ข้อความสรุปสำหรับ Sales ไม่มีตัวเลขปริมาณในสูตร',async()=>{const c=await formulaFixture(0.6);
  seedRates(c);setRule(c);
- const s=fixture('sales','Synthetic Sales');s.backing.fs_cost=c.backing.fs_cost;
- const b=await s.costLocalRequest('open',{projectId:'A00001'});
+ const b=await c.costLocalRequest('open',{projectId:'A00001'});
  assert.ok(b.summaryText.includes('ยอดหลังบวกเท่านั้น'));
- assert.equal(b.formula,null,'Sales ต้องไม่เห็นตัวเลขปริมาณในสูตร');});
+ assert.ok(!b.summaryText.includes('0.6'),'ปริมาณในสูตรต้องไม่อยู่ในข้อความที่ Sales ได้รับ');
+ assert.ok(b.formula,'RD เองยังเห็นตัวเลขสูตร');});
 test('รูปแบบสินค้ามี 12 แบบ และพกปริมาณต่อหน่วยตั้งต้นมาด้วย',()=>{const c=fixture();
  const list=c.costFormatList();
  assert.equal(list.length,12);
@@ -565,7 +572,7 @@ test('A2 non-RD direct summary command is denied before any write',async()=>{
   assert.equal(c.costCapabilities().sendSummary,true,'RD control can send');
   const base={projectId:'A00001',scenarioId:'S1',expectedRevision:1};
   const sent=await c.costLocalRequest('sendSummary',{...base,idempotencyKey:'A00001:S1:1:rd-control'});assert.equal(sent.sendState,'sent');
-  for(const role of ['sales','opc']){
+  for(const role of ['purchasing']){ // เปิดได้แต่ห้ามส่ง · Sales/OPC ถูกกันตั้งแต่ประตูใน test อื่น
     c.currentRole=()=>role;c.userList[0].role=role;
     const before=JSON.stringify({backing:c.backing,chats:c.chats,store:c.loadCostStore()});
     await assert.rejects(c.costLocalRequest('sendSummary',{...base,idempotencyKey:'A00001:S1:1:'+role}),/ไม่มีสิทธิ์ส่งสรุป/);
@@ -605,7 +612,7 @@ test('หน้าจอบอกว่าแคตตาล็อกมาจ�
  const ui=grab('UI');
  assert.match(ui,/แคตตาล็อกเก็บแยกในแต่ละเครื่อง/,'ต้องเตือนบนหน้าจอว่าเครื่องอื่นอาจใช้คนละชุด');
  const s=fixture('sales','Synthetic Sales');s.backing.fs_cost=c.backing.fs_cost;
- assert.equal((await s.costLocalRequest('open',{projectId:'A00001'})).catalogSource,null,'Sales ไม่ต้องเห็นที่มาของแคตตาล็อก');});
+ await assert.rejects(s.costLocalRequest('open',{projectId:'A00001'}),/สิทธิ์/,'Sales ไม่เข้าเครื่องคำนวณ จึงไม่เห็นที่มาของแคตตาล็อกโดยปริยาย');});
 
 // เจ้าของระบบตัดสิน 2026-09-06: นำเข้าซ้ำให้ "ยืนยันเฉพาะราคา"
 test('นำเข้าซ้ำยกการรับรอง spec และ Lead Time มาให้ แต่ราคาใหม่ยังต้องยืนยันก่อนใช้',()=>{

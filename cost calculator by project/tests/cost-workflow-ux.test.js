@@ -25,7 +25,7 @@ test('request saved once, listed to requester and Procurement, absent from Sales
   assert.equal(c.loadCostStore().requests.length,1);assert.equal(c.chats.length,0);
   c.elements.costRequestBrief.value='Synthetic spec <b>';await c.costRequestMaterial();assert.equal(c.loadCostStore().requests.length,1);
   const buyer=fixture('purchasing');buyer.backing.fs_cost=c.backing.fs_cost;assert.equal((await buyer.costLocalRequest('open',{projectId:'A00001'})).requests.length,1);
-  const sales=fixture('sales');sales.backing.fs_cost=c.backing.fs_cost;assert.equal((await sales.costLocalRequest('open',{projectId:'A00001'})).requests,undefined);
+  const sales=fixture('sales');sales.backing.fs_cost=c.backing.fs_cost;await assert.rejects(sales.costLocalRequest('open',{projectId:'A00001'}),/สิทธิ์/,'Sales ไม่เข้าเครื่องคำนวณ จึงไม่เห็นคำขอจัดหา');
 });
 test('failed request and revision writes leave no success or in-memory phantom',async()=>{
   const c=fixture();await c.openCostCalculator('A00001');const initial=c.backing.fs_cost;c.localStorage.setItem=()=>{throw Error('Quota');};
