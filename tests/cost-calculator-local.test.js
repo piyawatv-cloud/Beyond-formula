@@ -300,10 +300,13 @@ test('ข้อความสรุปที่ RD ส่งให้ Sales ม
 test('ค่าตั้งต้นที่แสดงบนฟอร์มกับค่าตั้งต้นของ draft ต้องตรงกัน มิฉะนั้นฟอร์มจะค้างสถานะแก้ไข',()=>{
  // ช่องที่ render ค่าหนึ่งแต่ draft บอกอีกค่าหนึ่ง ทำให้ costDraftDirty เป็นจริงตลอด
  // และบล็อกทุกคำสั่งที่ไม่ใช่ open/save เช่นการรับผล PK
+ // E6-01: ส่วนตั้งกฎราคาย้ายไปหน้า "กฎราคา" แล้ว เครื่องคำนวณต้องไม่วาดช่องพวกนี้อีก
+ // ไม่งั้นค่าตั้งต้นที่ต่างกันจะทำให้ draft ค้างสถานะแก้ไขและบล็อกการรับผล PK
  const ui=grab('UI');
- const rendered=ui.match(/costField\('ทศนิยมที่ปัด','costRuleDecimals',([^,]+),/)[1];
- assert.match(rendered,/data\.pricingRule\?data\.pricingRule\.decimals:2/);
- assert.match(ui,/costRuleDecimals:rule\.decimals\?\?2/,'draft default ต้องเป็น 2 เท่ากับที่แสดง');
+ const calc=ui.slice(ui.indexOf('function renderCostCalculator'),ui.indexOf('function costCatalogVisible'));
+ for(const id of ['costRuleDecimals','costAllowance','costFactor','costRateAmount'])assert.ok(!calc.includes('id="'+id+'"')&&!calc.includes("'"+id+"'"),'เครื่องคำนวณยังวาด '+id);
+ const page=ui.slice(ui.indexOf('function renderCostPricing'),ui.indexOf('function costPricingSaveRates'));
+ assert.match(page,/id="costRuleDecimals"[^>]*value="\$\{rule&&rule\.decimals!=null\?text\(rule\.decimals\):'2'\}"/,'หน้ากฎราคาแสดงทศนิยมตั้งต้น 2');
 });
 
 // ── ตารางอัตรามาตรฐานกลาง ──────────────────────────────────────────────────
@@ -531,7 +534,7 @@ test('รูปแบบสินค้ามี 12 แบบ และพกป
  assert.ok(list.some(f=>f.fillAmount===null),'รูปแบบที่ยังไม่รู้ปริมาณต้องเป็น null ไม่ใช่เดา');});
 test('มีหน้าจอกรอกอัตรามาตรฐานจริง และผู้มีอำนาจด้านราคาใช้ได้ครบวงจร',async()=>{
  const ui=grab('UI');
- assert.match(ui,/costSaveRates\(\)/,'ต้องมีปุ่มเรียกฟังก์ชันบันทึกอัตรา');
+ assert.match(ui,/costPricingSaveRates\(\)/,'ต้องมีปุ่มเรียกฟังก์ชันบันทึกอัตรา (หน้ากฎราคา)');
  assert.match(ui,/costRateAmount/,'ต้องมีช่องกรอกจำนวนเงิน');
  assert.match(ui,/ต่อหน่วยที่ผลิต/,'ต้องบอกฐานให้ชัดว่าเป็นต่อหน่วยที่ผลิต');
  // เดินครบวงจร: ตั้งอัตรา แล้วตั้งกฎราคา แล้วต้องได้ราคาต่อหน่วยจริง
@@ -902,4 +905,21 @@ test('ใบงาน Formula ปิดแล้ว: เปิดดูได้
   await c.costLocalRequest('save',{projectId:job.id,scenarioId:'S1',expectedRevision:1,patch:{sellingUnits:7}});
   c.records[0].closed=undefined;
   assert.equal((await c.costLocalRequest('open',{projectId:'A00001'})).locked,false,'เปิดงานใหม่แล้วแก้ได้อีก');
+});
+
+// ---- E6-01 หน้ากฎราคา: รายการใบงานสำหรับผู้ตั้งราคา ----
+test('costPricingJobs ให้เฉพาะใบที่ผูกแล้ว พร้อมกฎปัจจุบัน ไม่มีต้นทุนดิบ/ผู้ขาย/สูตร และให้เฉพาะผู้มีอำนาจด้านราคา',async()=>{
+  const c=fixture('rd','RD-ก');c.records=[{id:'A00001',customer:'ลูกค้า ก',brand:'B'}];
+  await readyScenario(c);seedRates(c);
+  c.run(`costStartJob({mode:'float',title:'ลอย'})`);
+  assert.deepEqual(Array.from(c.run('costPricingJobs()')),[],'RD ไม่มีอำนาจด้านราคา');
+  const f=fixture('sales','Synthetic Finance');f.backing.fs_cost=c.backing.fs_cost;f.records=c.records;f.loadCostStore().caps['Synthetic Finance']=['Finance'];
+  let jobs=f.run('costPricingJobs()');
+  assert.equal(jobs.length,1,'งานลอยต้องไม่อยู่ในรายการ');
+  assert.equal(jobs[0].projectId,'A00001');assert.equal(jobs[0].customer,'ลูกค้า ก');assert.equal(jobs[0].rule,null);assert.equal(jobs[0].revision,3);
+  const text=JSON.stringify(jobs);assert.ok(!/SYNTHETIC|vendor|rmLines|baseTotal|price/i.test(text),'ต้องไม่มีต้นทุนดิบหรือผู้ขาย: '+text);
+  f.costRecordPricingRule('A00001','S1',RULE);
+  jobs=f.run('costPricingJobs()');
+  assert.equal(jobs[0].rule.factor,2.2);assert.equal(jobs[0].rule.allowancePercent,10);assert.equal(jobs[0].rule.pkMode,'notApplicable');assert.equal(jobs[0].rule.format.id,'CAP-GEL-0');assert.equal(jobs[0].revision,4,'บันทึกกฎ = revision ใหม่');
+  assert.equal(f.costCapabilities().open,false,'Finance ยังเปิดเครื่องคำนวณไม่ได้');
 });

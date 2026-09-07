@@ -76,7 +76,21 @@
  check('closed Formula job renders read-only with clone',document.getElementById('costView').textContent.includes('ปิดงานแล้ว · อ่านอย่างเดียว')&&document.getElementById('costSellingUnits').disabled);
  delete records.find(r=>r.id==='A00002').closed;
  switchView('cost');costDashSearchChanged('');check('dashboard shows the bound job once with its Formula id',document.getElementById('costDashBody').textContent.split(floatingId).length===2&&document.getElementById('costDashBody').textContent.includes('A00002'));
+ // E6: หน้ากฎราคา (Admin ถือ Finance/CEO) — ตั้งอัตราและกฎโดยไม่ผ่านเครื่องคำนวณ
+ userList=[{name:currentUser,role:'admin'}];renderUserUI();
+ check('Admin sees the pricing menu',document.getElementById('sidePricing').style.display==='flex');
+ switchView('pricing');
+ check('pricing page renders the rate table and the bound job list',document.getElementById('costPricingView').classList.contains('on')&&document.getElementById('costPricingRates').textContent.includes('รอกรอก')&&document.getElementById('costPricingJob').textContent.includes('A00001'));
+ document.getElementById('costRateId').value='CAP-GEL-0';document.getElementById('costRateOwner').value='ฝ่ายผลิต';document.getElementById('costRateUntil').value='2999-01-01';document.getElementById('costRateLabel0').value='ค่าอัดแคป';document.getElementById('costRateAmount0').value='0.15';
+ costPricingSaveRates();
+ check('saving a rate produces a usable format version',document.getElementById('costPricingView').textContent.includes('บันทึกอัตรามาตรฐาน CAP-GEL-0')&&costFormatList().find(f=>f.id==='CAP-GEL-0').ready===true);
+ document.getElementById('costPricingJob').value=costPricingJobs().find(j=>j.projectId==='A00001').id;document.getElementById('costPricingJob').dispatchEvent(new Event('change'));
+ for(const [id,v] of [['costAllowance','10'],['costFactor','2.2'],['costRuleDecimals','6'],['costRuleOwner','Finance สังเคราะห์'],['costRuleUntil','2999-01-01'],['costPkMode','notApplicable'],['costFormatId','CAP-GEL-0']])document.getElementById(id).value=v;
+ const revBeforeRule=loadCostStore().scenarios.filter(r=>r.projectId==='A00001').length;costPricingSaveRule();
+ check('saving a rule appends a revision to that job',document.getElementById('costPricingView').textContent.includes('บันทึกกฎการบวกราคาของ')&&loadCostStore().scenarios.filter(r=>r.projectId==='A00001').length===revBeforeRule+1);
  userList=[{name:currentUser,role:'sales'}];renderUserUI();
+ check('Sales pricing menu hidden',document.getElementById('sidePricing').style.display==='none');
+ switchView('pricing');check('Sales cannot switch to the pricing page',!document.getElementById('costPricingView').classList.contains('on'));
  check('Sales menu hidden and dashboard view closed',document.getElementById('sideCost').style.display==='none'&&!document.getElementById('costDashView').classList.contains('on'));
  switchView('cost');
  check('Sales cannot switch to the cost dashboard',!document.getElementById('costDashView').classList.contains('on'));

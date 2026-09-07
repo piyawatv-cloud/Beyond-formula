@@ -284,3 +284,37 @@ test('ผูกจากหน้าเครื่องคำนวณ: มี
   assert.equal(c.run('costTabs.length'),1,'tab CJ เดิมต้องหาย เหลือ tab A00002');
   assert.equal(c.run("costTabFor('CJ-000009')"),null);
 });
+
+// ---- E6-01 หน้ากฎราคา ----
+test('เมนูกฎราคาเปิดเฉพาะผู้มีอำนาจด้านราคา และหน้าวาดตารางอัตรากับตัวเลือกใบงาน',()=>{
+  const c=fixture();
+  assert.equal(c.costPricingMenuAllowed(),false);
+  c.run(`var costCapabilities=()=>({open:false,setPricing:true});
+    var costFormatList=()=>[{id:'CAP-GEL-0',label:'แคปซูล',version:2,owner:'ฝ่ายผลิต',validUntil:'2999-01-01',charges:[{label:'ค่าอัดแคป',amount:0.15}],ready:true},{id:'SACHET',label:'ซอง',version:0,owner:'',validUntil:null,charges:[{label:'ค่าบรรจุ',amount:null}],ready:false}];
+    var costPricingJobs=()=>[{id:'CJ-000001',projectId:'A00001',scenarioId:'S1',owner:'RD-ก',revision:3,customer:'ลูกค้า ก',brand:'B',rule:null},{id:'CJ-000002',projectId:'A00002',scenarioId:'S1',owner:'RD-ข',revision:5,customer:'ลูกค้า ข',brand:'',rule:{version:2,allowancePercent:10,factor:2.2,owner:'Finance-ก',validUntil:'2999-01-01',decimals:6,pkMode:'notApplicable',format:{id:'CAP-GEL-0',label:'แคปซูล',version:2}}}];
+    var costFormatCurrent=id=>({id,label:'แคปซูล'});`);
+  assert.equal(c.costPricingMenuAllowed(),true,'Finance ที่เปิดเครื่องคำนวณไม่ได้ก็ยังเข้าหน้ากฎราคาได้');
+  const view={innerHTML:'',classList:{contains:()=>true,add(){},remove(){}}};c.elements.costPricingView=view;
+  c.renderCostPricing();
+  assert.ok(view.innerHTML.includes('แคปซูล')&&view.innerHTML.includes('ใช้ได้')&&view.innerHTML.includes('รอกรอก'),'ตารางอัตราแสดงสถานะครบ');
+  assert.ok(view.innerHTML.includes('CJ-000001 · A00001')&&view.innerHTML.includes('ยังไม่มีกฎ')&&view.innerHTML.includes('กฎ v2'));
+  assert.ok(!view.innerHTML.includes('id="costAllowance"'),'ยังไม่เลือกใบงาน ไม่มีฟอร์มกฎ');
+  c.costPricingJobSelect('CJ-000002');
+  assert.ok(view.innerHTML.includes('id="costAllowance"')&&view.innerHTML.includes('value="2.2"')&&view.innerHTML.includes('value="10"'),'เลือกใบที่มีกฎแล้วฟอร์มเติมค่าเดิม');
+  assert.ok(/id="costPkMode"[\s\S]*value="notApplicable" selected/.test(view.innerHTML));
+  // บันทึกกฎเรียก recorder ด้วยค่าที่กรอก
+  let got=null;c.run('var costRecordPricingRule=(p,s,input)=>{globalThis.__got={p,s,input};};');
+  for(const [id,v] of [['costAllowance','12'],['costFactor','2.5'],['costRuleDecimals','4'],['costRuleOwner','Finance-ข'],['costRuleUntil','2999-12-31'],['costPkMode','separate'],['costFormatId','CAP-GEL-0']])c.elements[id]={value:v};
+  c.costPricingSaveRule();got=c.run('globalThis.__got');
+  assert.equal(got.p,'A00002');assert.equal(got.s,'S1');assert.equal(got.input.factor,2.5);assert.equal(got.input.allowancePercent,12);assert.equal(got.input.decimals,4);assert.equal(got.input.owner,'Finance-ข');
+  assert.ok(view.innerHTML.includes('บันทึกกฎการบวกราคาของ CJ-000002'),'ต้องบอกผลบนหน้า');
+  c.run('costRecordPricingRule=()=>{throw Error("ตัวคูณต้องมากกว่า 0");};');c.costPricingSaveRule();
+  assert.ok(view.innerHTML.includes('ตัวคูณต้องมากกว่า 0')&&!view.innerHTML.includes('บันทึกกฎการบวกราคาของ'),'ข้อผิดพลาดต้องแทนที่ข้อความสำเร็จ');
+  c.run('costCapabilities=()=>({open:true,setPricing:false});');c.renderCostPricing();assert.equal(view.innerHTML,'','ไม่มีอำนาจ = ว่าง');
+});
+test('เครื่องคำนวณไม่วาดส่วนตั้งกฎราคาอีก แต่ชี้ทางไปเมนูกฎราคาให้ผู้มีอำนาจ',async()=>{
+  const c=fixture();const r=c.response();r.capabilities.setPricing=true;r.pricingRule={version:3,factor:2.2,allowancePercent:10};
+  c.window.__costTestRequest=()=>r;await c.openCostCalculator('A00001');
+  assert.ok(!c.panel.innerHTML.includes('id="costAllowance"')&&!c.panel.innerHTML.includes('costPricingSaveRates'));
+  assert.ok(c.panel.innerHTML.includes('เมนู <b>กฎราคา</b>')&&c.panel.innerHTML.includes('กฎเวอร์ชัน 3'));
+});

@@ -642,6 +642,7 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
 .cost-pill-open{background:#E6F4EA;color:#1E8E3E}.cost-pill-closed{background:var(--card2);color:var(--muted)}
 .cost-pill-float{background:var(--tint);color:var(--ontint)}.cost-pill-wait{background:#FEF7E0;color:#B06000}
 .cost-pill-ready{background:#E6F4EA;color:#1E8E3E}.cost-pill-draft{background:var(--card2);color:var(--muted)}
+.cost-ok{background:#E6F4EA;color:#1E8E3E;border-radius:8px;padding:8px 12px}
 .cost-dash-row{cursor:pointer}.cost-dash-row:hover td{background:var(--tint)}
 .cost-dash-row.cost-dash-locked{cursor:default}.cost-dash-row.cost-dash-locked:hover td{background:transparent}
 .cost-who{display:block;color:var(--muted);font-size:12px}
@@ -694,7 +695,7 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
   <div class="logo"><svg viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-1.73-3L9 11.35V4H8a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2h-1v7.35L19.73 19A2 2 0 0 1 18 22H6Zm5-10.11L8.31 16.5h7.38L13 11.89V4h-2v7.89Z"/></svg></div>
   <div>
     <div class="hdr-title">Formula Studio</div>
-    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-07.5-tabs-readonly</div>
+    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-07.6-pricing-page</div>
   </div>
   <div class="sync-chip" id="syncChip" onclick="sbManualSync()" title="สถานะการซิงก์ข้อมูลกับเซิร์ฟเวอร์กลาง"></div>
 </div>
@@ -706,6 +707,9 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
   <!-- Cost Calculation — เห็นเฉพาะ RD/Admin/PU-PK/Purchasing (SPEC Grill round 9 · E2-01) -->
   <button class="side-item" id="sideCost" style="display:none" onclick="switchView('cost')">
     <svg class="side-ic" viewBox="0 0 24 24"><path d="M7 2h10a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Zm0 2v4h10V4H7Zm0 6v2h2v-2H7Zm4 0v2h2v-2h-2Zm4 0v2h2v-2h-2ZM7 14v2h2v-2H7Zm4 0v2h2v-2h-2Zm4 0v6h2v-6h-2ZM7 18v2h6v-2H7Z"/></svg>Cost Calculation</button>
+  <!-- กฎราคา — Finance/CEO/Admin ตั้งกฎการบวกราคาและอัตรามาตรฐานที่นี่ ไม่ใช่ในเครื่องคำนวณ (E6-01) -->
+  <button class="side-item" id="sidePricing" style="display:none" onclick="switchView('pricing')">
+    <svg class="side-ic" viewBox="0 0 24 24"><path d="M19.14 12.94a7.07 7.07 0 0 0 0-1.88l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.03 7.03 0 0 0-1.62-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.58.24-1.12.56-1.62.94l-2.39-.96a.5.5 0 0 0-.6.22L2.67 8.84a.5.5 0 0 0 .12.64l2.03 1.58a7.07 7.07 0 0 0 0 1.88l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32c.13.22.39.31.6.22l2.39-.96c.5.38 1.04.7 1.62.94l.36 2.54c.05.24.26.42.5.42h3.84c.24 0 .45-.18.5-.42l.36-2.54c.58-.24 1.12-.56 1.62-.94l2.39.96c.21.09.47 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58ZM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Z"/></svg>กฎราคา</button>
   <button class="side-item" id="sideData" onclick="switchView('input')">
     <svg class="side-ic" viewBox="0 0 24 24"><path d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2Zm0 16H5V5h14v14ZM7 12h2v5H7v-5Zm4-5h2v10h-2V7Zm4 7h2v3h-2v-3Z"/></svg>Customer Data</button>
   <div class="side-group open" id="chatGroup">
@@ -1156,6 +1160,7 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
 
 <!-- ======= MODIFY DATA VIEW ======= -->
 <div id="costDashView" class="view"></div>
+<div id="costPricingView" class="view"></div>
 <div id="modifyView" class="view">
   <div id="modEmpty" class="empty">
     <div class="empty-ic"><svg viewBox="0 0 24 24" width="56" height="56" fill="#BDC1C6"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25ZM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83Z"/></svg></div>
@@ -1697,6 +1702,61 @@ function costDashSearchChanged(value){
   // วาดใหม่เฉพาะเนื้อตาราง ช่องค้นหาไม่ถูกแตะ เคอร์เซอร์อยู่ที่เดิม (แนวเดียวกับ costCatalogBody)
   body.innerHTML=costDashboardBody(costDashboardFilter(costDashboardRows(),value),!!costCapabilities().editRM);
 }
+// ---- หน้ากฎราคา (E6-01): Finance/CEO/Admin · ไม่ผ่านเครื่องคำนวณ ----
+function costPricingMenuAllowed(){
+  if(!currentUser || impersonator) return false;
+  if(typeof costCapabilities!=='function') return false;
+  return !!costCapabilities().setPricing;
+}
+let costPricingState={jobId:'',msg:'',err:''};
+function costPricingJobSelect(value){costPricingState.jobId=value;costPricingState.msg='';costPricingState.err='';renderCostPricing();}
+function renderCostPricing(){
+  const panel=document.getElementById('costPricingView'); if(!panel) return;
+  if(!costPricingMenuAllowed()){ panel.innerHTML=''; return; }
+  const formats=costFormatList(),jobs=costPricingJobs();
+  const job=jobs.find(j=>j.id===costPricingState.jobId)||null,rule=job&&job.rule;
+  const text=v=>v==null?'':esc(v);
+  panel.innerHTML=`<div class="sec-card cost-workspace">
+    <div class="cost-dash-top"><div><h2>กฎการบวกราคาและอัตรามาตรฐาน</h2><p class="hint">ตั้งค่าที่นี่ ไม่ใช่ในเครื่องคำนวณ · ทุกครั้งที่บันทึกเป็นเวอร์ชันใหม่ ของเดิมไม่ถูกแก้ · revision ที่บันทึกไปแล้วไม่เปลี่ยน</p></div></div>
+    <div role="status" aria-live="polite">${costPricingState.msg?`<p class="cost-ok">${esc(costPricingState.msg)}</p>`:''}${costPricingState.err?`<p class="cost-warning">${esc(costPricingState.err)}</p>`:''}</div>
+    <h3>อัตรามาตรฐาน Operation (ตารางกลาง · เลือกตามรูปแบบสินค้า)</h3>
+    <p class="hint">คิด<b>ต่อหน่วยที่ผลิต</b> เช่นต่อแคปซูล ต่อเม็ด ต่อซอง · แก้ที่นี่มีผลกับโครงการที่เลือกรูปแบบนี้ในภายหลัง</p>
+    <div class="rec-wrap"><table class="rec-tbl"><thead><tr><th>รูปแบบสินค้า</th><th>รายการ</th><th>อัตรารวม / หน่วยผลิต</th><th>เวอร์ชัน</th><th>ผู้รับผิดชอบ</th><th>ใช้ได้ถึง</th><th>สถานะ</th></tr></thead><tbody id="costPricingRates">${formats.map(f=>`<tr><td>${esc(f.label)}<span class="cost-who mono">${esc(f.id)}</span></td><td>${f.charges.map(c=>esc(c.label)+(c.amount==null?' (ยังไม่ระบุ)':' '+costNumber(c.amount))).join('<br>')||'—'}</td><td>${f.ready?costNumber(f.charges.reduce((a,c)=>a+c.amount,0)):'<span class="hint">ยังไม่ครบ</span>'}</td><td>${text(f.version)}</td><td>${text(f.owner)}</td><td>${text(f.validUntil)}</td><td>${f.ready?'<span class="cost-pill cost-pill-ready">ใช้ได้</span>':'<span class="cost-pill cost-pill-wait">รอกรอก</span>'}</td></tr>`).join('')}</tbody></table></div>
+    <h4>บันทึกอัตรามาตรฐานเวอร์ชันใหม่</h4>
+    <div class="fg4"><label class="fgrp"><span class="flbl">รหัสรูปแบบ</span><select class="fi" id="costRateId">${formats.map(f=>`<option value="${esc(f.id)}">${esc(f.id)} · ${esc(f.label)}</option>`).join('')}</select></label><label class="fgrp"><span class="flbl">ชื่อรูปแบบ</span><input class="fi" id="costRateLabel" placeholder="เว้นว่าง = ชื่อเดิม"></label><label class="fgrp"><span class="flbl">ผู้รับผิดชอบอัตรา</span><input class="fi" id="costRateOwner" placeholder="เช่น ฝ่ายผลิต"></label><label class="fgrp"><span class="flbl">ใช้ได้ถึง</span><input class="fi" id="costRateUntil" placeholder="YYYY-MM-DD"></label></div>
+    <div class="rec-wrap"><table class="rec-tbl"><thead><tr><th>รายการค่าใช้จ่าย</th><th>บาท / หน่วยที่ผลิต</th></tr></thead><tbody>${[0,1,2].map(i=>`<tr><td><input class="fi" id="costRateLabel${i}" placeholder="เช่น ค่าอัดแคป"></td><td><input class="fi" id="costRateAmount${i}" type="number" min="0" step="any"></td></tr>`).join('')}</tbody></table></div>
+    <div class="btn-row"><button class="btn btn-p" onclick="costPricingSaveRates()">บันทึกอัตรามาตรฐานเวอร์ชันใหม่</button></div>
+    <h3>กฎการบวกราคารายใบงาน</h3>
+    <p class="hint">กฎผูกกับใบงานต้นทุน บันทึกแล้วเป็น revision ใหม่ของใบนั้น · ใบงานที่ยังไม่ผูกใบงาน Formula ไม่อยู่ในรายการ</p>
+    <label class="fgrp"><span class="flbl">ใบงานต้นทุน</span><select class="fi" id="costPricingJob" onchange="costPricingJobSelect(this.value)"><option value="">— เลือกใบงาน —</option>${jobs.map(j=>`<option value="${esc(j.id)}"${j.id===costPricingState.jobId?' selected':''}>${esc(j.id)} · ${esc(j.projectId)}${j.customer?' · '+esc(j.customer):''}${j.brand?' · '+esc(j.brand):''}${j.rule?' · กฎ v'+esc(j.rule.version):' · ยังไม่มีกฎ'}</option>`).join('')}</select></label>
+    ${job?`<p class="hint">${rule?`ใช้อยู่: กฎเวอร์ชัน ${text(rule.version)} · ค่าเผื่อขั้นต้น ${text(rule.allowancePercent)}% · ตัวคูณ ${text(rule.factor)} · ผู้รับผิดชอบ ${text(rule.owner)} · ใช้ได้ถึง ${text(rule.validUntil)} · รูปแบบ ${rule.format?text(rule.format.label)+' v'+text(rule.format.version):'—'}`:'ยังไม่มีกฎสำหรับใบนี้ ราคาต่อหน่วยจะขึ้น "รอกำหนดราคา" จนกว่าจะบันทึก'} · revision ล่าสุด ${text(job.revision)} · เจ้าของสูตร ${text(job.owner)}</p>
+    <div class="fg4"><label class="fgrp"><span class="flbl">ค่าเผื่อขั้นต้น</span><input class="fi" id="costAllowance" type="number" min="0" max="100" step="any" value="${rule?text(rule.allowancePercent):''}"><span class="hint">% ของต้นทุนขั้นต้น — คนละตัวกับ Loss รายบรรทัด</span></label><label class="fgrp"><span class="flbl">ตัวคูณราคา</span><input class="fi" id="costFactor" type="number" min="0" step="any" value="${rule?text(rule.factor):''}"><span class="hint">ใส่ตามที่ใช้จริง เช่น 2.2</span></label><label class="fgrp"><span class="flbl">ผู้รับผิดชอบอัตรา</span><input class="fi" id="costRuleOwner" value="${rule?text(rule.owner):''}"></label><label class="fgrp"><span class="flbl">ใช้ได้ถึง</span><input class="fi" id="costRuleUntil" value="${rule?text(rule.validUntil):''}" placeholder="YYYY-MM-DD"></label><label class="fgrp"><span class="flbl">ทศนิยมที่ปัด</span><input class="fi" id="costRuleDecimals" type="number" min="0" max="6" step="1" value="${rule&&rule.decimals!=null?text(rule.decimals):'2'}"></label>
+    <label class="fgrp"><span class="flbl">หมวด PK</span><select class="fi" id="costPkMode"><option value="">— เลือก —</option><option value="separate"${rule&&rule.pkMode==='separate'?' selected':''}>มีหมวด PK แยก (รอผลจาก PU-PK)</option><option value="notApplicable"${rule&&rule.pkMode==='notApplicable'?' selected':''}>ไม่มีหมวด PK — รวมอยู่ในค่าดำเนินการต่อหน่วย</option></select></label>
+    <label class="fgrp"><span class="flbl">รูปแบบสินค้า — อัตราจากตารางกลาง</span><select class="fi" id="costFormatId"><option value="">— เลือกรูปแบบสินค้า —</option>${formats.map(f=>`<option value="${esc(f.id)}"${rule&&rule.format&&rule.format.id===f.id?' selected':''}${f.ready?'':' disabled'}>${esc(f.label)}${f.ready?'':' (อัตรายังไม่ครบ)'}</option>`).join('')}</select></label></div>
+    <div class="btn-row"><button class="btn btn-p" onclick="costPricingSaveRule()">บันทึกกฎการบวกราคา (เวอร์ชันใหม่)</button></div>`:''}
+  </div>`;
+}
+function costPricingSaveRates(){
+  const text=id=>{const el=document.getElementById(id);return el?el.value.trim():'';};
+  try{
+    const id=text('costRateId'),current=costFormatCurrent(id);
+    costRecordOperationFormat({id,label:text('costRateLabel')||(current&&current.label)||'',owner:text('costRateOwner'),validUntil:text('costRateUntil'),
+      charges:[0,1,2].map(i=>({label:text('costRateLabel'+i),amount:costInputNumber('costRateAmount'+i)})).filter(row=>row.label||row.amount!=null)});
+    costPricingState.msg='บันทึกอัตรามาตรฐาน '+id+' เวอร์ชันใหม่แล้ว';costPricingState.err='';
+  }catch(error){costPricingState.err=String(error.message);costPricingState.msg='';}
+  renderCostPricing();
+}
+function costPricingSaveRule(){
+  const text=id=>{const el=document.getElementById(id);return el?el.value.trim():'';};
+  const job=costPricingJobs().find(j=>j.id===costPricingState.jobId);
+  try{
+    if(!job)throw Error('เลือกใบงานก่อน');
+    costRecordPricingRule(job.projectId,job.scenarioId,{allowancePercent:costInputNumber('costAllowance'),factor:costInputNumber('costFactor'),
+      decimals:costInputNumber('costRuleDecimals'),owner:text('costRuleOwner'),validUntil:text('costRuleUntil'),pkMode:text('costPkMode'),formatId:text('costFormatId')});
+    costPricingState.msg='บันทึกกฎการบวกราคาของ '+job.id+' เป็น revision ใหม่แล้ว';costPricingState.err='';
+  }catch(error){costPricingState.err=String(error.message);costPricingState.msg='';}
+  renderCostPricing();
+}
 // ---- หน้าสร้างใบงานต้นทุน (E3-01) ----
 let costCreateState={mode:'ref',search:''};
 function costUnboundRecords(){
@@ -2008,21 +2068,7 @@ function renderCostCalculator(){
     ${data.capabilities&&data.capabilities.recordPK?`<p class="hint">กรอกยอดที่ PU-PK ยืนยันแล้วเท่านั้น ระบบบันทึกผู้กรอกและเวลาเป็นหลักฐาน และไม่แก้ย้อนหลัง</p>
     <div class="fg4">${costField('ยอด PK หลังบวก (บาท/ล็อต)','costPkAdjusted',null,'เว้นว่างได้ถ้ายังไม่มีนโยบายราคา')}${costField('ยอด PK ต้นทุนใช้จริง (บาท/ล็อต)','costPkBase',null,'เว้นว่างได้ถ้ายังไม่ทราบ')}${costTextField('ราคามีผลถึง','costPkValidUntil',null,'YYYY-MM-DD')}${costTextField('เลขอ้างอิงหลักฐาน','costPkEvidence',null,'เช่น เลข Req-PK')}</div>
     <button class="btn btn-s" ${disabled} onclick="costSavePk()">บันทึกผล PK ที่ยืนยันแล้ว</button>`:''}
-    ${!(data.capabilities&&data.capabilities.setPricing)?'':`<h3>กฎการบวกราคา</h3>${data.pricingRule?`<p class="hint">ใช้อยู่: เวอร์ชัน ${esc(data.pricingRule.version)} · ค่าเผื่อขั้นต้น ${esc(data.pricingRule.allowancePercent)}% · ตัวคูณ ${esc(data.pricingRule.factor)} · ผู้รับผิดชอบ ${esc(data.pricingRule.owner)} · ใช้ได้ถึง ${esc(data.pricingRule.validUntil)}</p>`:'<p class="cost-warning">ยังไม่ได้กำหนดกฎการบวกราคา จึงยังไม่มีราคาต่อหน่วย</p>'}
-    <div class="fg4">${costField('ค่าเผื่อขั้นต้น','costAllowance',data.pricingRule&&data.pricingRule.allowancePercent,'% ของต้นทุนขั้นต้น — คนละตัวกับ Loss รายบรรทัด')}${costField('ตัวคูณราคา','costFactor',data.pricingRule&&data.pricingRule.factor,'ใส่ตามที่ใช้จริง เช่น 2.2')}${costTextField('ผู้รับผิดชอบอัตรา','costRuleOwner',data.pricingRule&&data.pricingRule.owner,'ชื่อผู้กำหนดอัตรานี้')}${costTextField('ใช้ได้ถึง','costRuleUntil',data.pricingRule&&data.pricingRule.validUntil,'YYYY-MM-DD')}${costField('ทศนิยมที่ปัด','costRuleDecimals',data.pricingRule?data.pricingRule.decimals:2,'0–6 ตำแหน่ง')}
-    <label class="fgrp"><span class="flbl">หมวด PK</span><select id="costPkMode" class="fi" ${disabled}><option value="">— เลือก —</option><option value="separate"${costDraftValue('costPkMode',data.pricingRule&&data.pricingRule.pkMode)==='separate'?' selected':''}>มีหมวด PK แยก (รอผลจาก PU-PK)</option><option value="notApplicable"${costDraftValue('costPkMode',data.pricingRule&&data.pricingRule.pkMode)==='notApplicable'?' selected':''}>ไม่มีหมวด PK แยก — คิดรวมเป็นค่าต่อหน่วย</option></select><span class="hint">เลือกให้ตรงกับรูปแบบสินค้า</span></label></div>
-    <h4>ค่าดำเนินการต่อหน่วย (ที่ต้นทุน ไม่บวกกำไรซ้ำ)</h4>
-    <label class="flbl" for="costFormatId">รูปแบบสินค้า — อัตรามาจากตารางกลาง</label>
-    <select id="costFormatId" class="fi" ${disabled}><option value="">— เลือกรูปแบบสินค้า —</option>${(data.operationFormats||[]).map(f=>`<option value="${esc(f.id)}"${costDraftValue('costFormatId',data.pricingRule&&data.pricingRule.format&&data.pricingRule.format.id)===f.id?' selected':''}${f.ready?'':' disabled'}>${esc(f.label)}${f.ready?' · '+f.charges.map(c=>esc(c.label)+' '+costNumber(c.amount)).join(' + '):' · ยังไม่ได้กรอกอัตรา'}</option>`).join('')}</select>
-    <p class="hint">${data.pricingRule&&data.pricingRule.format?`ใช้อยู่: ${esc(data.pricingRule.format.label)} เวอร์ชัน ${esc(data.pricingRule.format.version)} · อัตราถูกคัดลอกไว้ใน revision นี้แล้ว การแก้ตารางกลางภายหลังไม่เปลี่ยนราคาที่บันทึกไปแล้ว`:'อัตราจะถูกคัดลอกลง revision ตอนบันทึก ไม่ได้อ้างอิงสด'}</p>
-    <p class="hint">ทุกครั้งที่บันทึกจะสร้างกฎเวอร์ชันใหม่ ผูกผู้รับผิดชอบและวันที่ไว้ ของเดิมไม่ถูกแก้</p>
-    <button class="btn btn-p" ${disabled} onclick="costSavePricingRule()">บันทึกกฎการบวกราคา</button>`}
-    ${!(data.capabilities&&data.capabilities.setPricing)?'':`<h3>อัตรามาตรฐาน Operation (ตารางกลาง)</h3>
-    <p class="hint">คิด<b>ต่อหน่วยที่ผลิต</b> เช่นต่อแคปซูล ต่อเม็ด ต่อซอง ไม่ใช่ต่อหน่วยขาย · แก้ที่นี่มีผลกับทุกโครงการที่เลือกรูปแบบนี้ในภายหลัง ของที่บันทึกไปแล้วไม่เปลี่ยน</p>
-    <div class="fg4">${costTextField('รหัสรูปแบบ','costRateId',(data.operationFormats&&data.operationFormats[0]&&data.operationFormats[0].id)||'','เลือกจากรายการด้านล่างแล้วแก้ได้')}${costTextField('ชื่อรูปแบบ','costRateLabel','','เช่น แคปซูลเจลาติน #0')}${costTextField('ผู้รับผิดชอบอัตรา','costRateOwner','','เช่น ฝ่ายผลิต')}${costTextField('ใช้ได้ถึง','costRateUntil','','YYYY-MM-DD')}</div>
-    <div class="rec-wrap"><table class="rec-tbl"><thead><tr><th>รายการค่าใช้จ่าย</th><th>บาท / หน่วยที่ผลิต</th></tr></thead><tbody>${[0,1,2].map(i=>`<tr><td><input class="fi" id="costRateLabel${i}" value="${esc(costDraftValue('costRateLabel'+i,''))}" placeholder="เช่น ค่าอัดแคป" ${disabled}></td><td><input class="fi" id="costRateAmount${i}" type="number" min="0" step="any" value="${esc(costDraftValue('costRateAmount'+i,''))}" ${disabled}></td></tr>`).join('')}</tbody></table></div>
-    <button class="btn btn-p" ${disabled} onclick="costSaveRates()">บันทึกอัตรามาตรฐานเวอร์ชันใหม่</button>
-    <div class="rec-wrap" style="margin-top:12px"><table class="rec-tbl"><thead><tr><th>รูปแบบสินค้า</th><th>อัตรารวม</th><th>สถานะ</th></tr></thead><tbody>${(data.operationFormats||[]).map(f=>`<tr><td>${esc(f.label)}<br><span class="hint">${esc(f.id)}${f.fillAmount!=null?' · '+costNumber(f.fillAmount)+' '+esc(f.fillUnit)+' ต่อหน่วย':''}</span></td><td>${f.ready?f.charges.map(ch=>esc(ch.label)+' '+costNumber(ch.amount)).join('<br>'):'<span class="hint">ยังไม่ได้กรอก</span>'}</td><td>${f.ready?'พร้อมใช้ · เวอร์ชัน '+esc(f.version):'ใช้ไม่ได้'}</td></tr>`).join('')}</tbody></table></div>`}
+    ${data.capabilities&&data.capabilities.setPricing?`<p class="hint">กฎการบวกราคาและอัตรามาตรฐานตั้งที่เมนู <b>กฎราคา</b> ไม่ใช่ที่นี่${data.pricingRule?` · ใช้อยู่: กฎเวอร์ชัน ${esc(data.pricingRule.version)} ตัวคูณ ${esc(data.pricingRule.factor)} ค่าเผื่อ ${esc(data.pricingRule.allowancePercent)}%`:' · ยังไม่มีกฎสำหรับใบนี้'}</p>`:''}
     <h3>สรุปเข้าแชทโครงการ</h3><p>ส่งเฉพาะยอดหลังบวกที่ผู้รับเห็นได้ พร้อม revision และรายการค้าง</p><button class="btn btn-p" ${disabled||!data.capabilities||!data.capabilities.sendSummary?'disabled':''} onclick="costSendSummary()">ส่งสรุป revision นี้เข้า Formula chat</button><p role="status">${esc(data.sendState==='sent'?'ส่งสำเร็จ':data.sendState==='pending'?'รอส่ง':data.sendState==='failed'?'ส่งไม่สำเร็จ':'ยังไม่ได้ส่ง')}</p>
     <h3>คัดลอกสรุปไปส่งต่อ</h3><p class="hint">ข้อความเดียวกับที่ส่งเข้าแชท — มีเฉพาะยอดหลังบวก ไม่มีต้นทุนดิบหรือชื่อผู้ขาย</p>
     <textarea id="costSummaryText" class="fi" rows="7" readonly onclick="this.select()">${esc(data.summaryText||'')}</textarea>
@@ -2102,32 +2148,6 @@ function costParseCatalogWorkbook(workbook){
     // ตัวสร้างบางตัวบอกเลขแถวจริง บางตัวบอกได้แค่ RD-Code การนับลำดับใหม่แล้วเรียกว่า
     // "แถว" ทำให้จัดซื้อเปิดชีตไปผิดแถวสนิท จึงส่งต่อสิ่งที่รู้จริงเท่านั้น
     rejected:built.skipped.map(item=>({row:item.row??null,ref:item.code??null,reason:item.reason}))};
-}
-function costSaveRates(){
-  const data=costState.response;if(!data||!data.capabilities.setPricing||data.historical)return;
-  const text=id=>{const el=document.getElementById(id);return el?el.value.trim():'';};
-  try{
-    costRecordOperationFormat({id:text('costRateId'),label:text('costRateLabel'),owner:text('costRateOwner'),
-      validUntil:text('costRateUntil'),
-      charges:[0,1,2].map(i=>({label:text('costRateLabel'+i),amount:costInputNumber('costRateAmount'+i)}))
-        .filter(row=>row.label||row.amount!=null)});
-  }catch(error){costState.error=error.message;renderCostCalculator();return;}
-  costState.route=null;costState.response=null;
-  return costAction('open',{});
-}
-function costSavePricingRule(){
-  const data=costState.response;if(!data||!data.capabilities.setPricing||data.historical)return;
-  const text=id=>{const el=document.getElementById(id);return el?el.value.trim():'';};
-  try{
-    costRecordPricingRule(costState.projectId,data.scenarioId,{
-      allowancePercent:costInputNumber('costAllowance'),factor:costInputNumber('costFactor'),
-      decimals:costInputNumber('costRuleDecimals'),owner:text('costRuleOwner'),validUntil:text('costRuleUntil'),
-      pkMode:text('costPkMode'),
-      formatId:text('costFormatId')});
-  }catch(error){costState.error=error.message;renderCostCalculator();return;}
-  // บันทึกกฎสร้าง revision ใหม่ ต้องปลดการปักหมุด revision เดิม ไม่งั้นเปิดกลับมาที่อันเก่า
-  costState.route=null;costState.response=null;
-  return costAction('open',{});
 }
 function costSavePk(){
   const data=costState.response;if(!data||!data.capabilities.recordPK||data.historical)return;
@@ -2285,6 +2305,20 @@ function costJobStatus(result,scenario){
   if(pending.some(m=>/^PK:/.test(m))) return 'pk';
   if(pending.some(m=>/รอกำหนดราคา/.test(m))) return 'price';
   return 'wait';
+}
+// ใบงานสำหรับหน้ากฎราคา (E6-01): เฉพาะที่ผูกใบงาน Formula แล้ว พร้อมกฎปัจจุบันจาก revision ล่าสุด
+// ไม่มีต้นทุนดิบ ชื่อผู้ขาย หรือสูตร — ผู้ตั้งราคาไม่ต้องเห็นสิ่งเหล่านั้น
+function costPricingJobs(){
+  const caps=costCapabilities(); if(!caps.setPricing) return [];
+  const list=typeof records!=='undefined'&&Array.isArray(records)?records:[];
+  return costJobs().filter(j=>j.projectId).map(job=>{
+    const entries=costJobEntries(job.id),latest=entries.reduce((a,b)=>!a||b.revision>a.revision?b:a,null);
+    const record=list.find(r=>r&&r.id===job.projectId)||null,sc=latest&&latest.scenario,rm=sc&&sc.policies&&sc.policies.RM;
+    return {id:job.id,projectId:job.projectId,scenarioId:latest?latest.scenarioId:'S1',owner:job.owner||'',revision:latest?latest.revision:0,
+      customer:record?record.customer||'':'',brand:record?record.brand||'':'',
+      rule:rm?{version:rm.version,allowancePercent:(rm.allowanceRate||0)*100,factor:rm.rate,owner:rm.owner,validUntil:rm.validUntil,
+        decimals:rm.rounding&&rm.rounding.decimals,pkMode:sc.pkNotApplicable===true?'notApplicable':'separate',format:sc.operationFormat||null}:null};
+  }).sort((a,b)=>a.id.localeCompare(b.id));
 }
 // แถว dashboard: ใบงานต้นทุน + ข้อมูลอ่านอย่างเดียวจากใบงาน Formula · ราคาเฉพาะผู้ที่แก้สูตรได้
 function costDashboardRows(){
@@ -3937,7 +3971,7 @@ function fmtUW(d){ return d.uw ? [d.uw, d.uwUnit || 'mg'].filter(Boolean).join('
 
 // ========== NAVIGATION ==========
 function switchView(v) {
-  const viewIds = {input:'inputView', dash:'dashView', modify:'modifyView', chat:'chatView', act:'actView', cost:'costDashView'};
+  const viewIds = {input:'inputView', dash:'dashView', modify:'modifyView', chat:'chatView', act:'actView', cost:'costDashView', pricing:'costPricingView'};
   // panel ที่ loader สร้างตอน runtime ไม่ได้อยู่ในตารางข้างบน · ถ้าไม่ดักไว้ตรงนี้
   // การกดปุ่มของมันจะตกไปที่ค่าเริ่มต้น inputView แล้วเปิดหน้าผิด
   if(v === 'pws'){
@@ -3957,6 +3991,7 @@ function switchView(v) {
   if(v==='act' && !can('manageUsers')){ alert('Activities log เปิดดูได้เฉพาะ Role: Admin'); return; }
   // ชั้นที่ 2 ของกฎข้อ 8 สำหรับเมนู Cost Calculation (ชั้นที่ 3 อยู่ใน costLocalRequest)
   if(v==='cost' && !costMenuAllowed()){ alert('Cost Calculation ใช้ได้เฉพาะ Role: RD, Admin, PU-PK, Purchasing'); return; }
+  if(v==='pricing' && !costPricingMenuAllowed()){ alert('กฎราคาตั้งได้เฉพาะ Finance, CEO และ Admin'); return; }
   if(v==='input' && currentUser && !can('createData')){
     alert('เมนู Customer Data ใช้ได้เฉพาะ Role: Admin, Sales, OPC, MKT\nRole ของคุณ: ' + (roleLabel(currentRole())||'ไม่ระบุ'));
     return;
@@ -3968,7 +4003,9 @@ function switchView(v) {
   document.getElementById('sideChat').classList.toggle('on', v==='chat');
   document.getElementById('sideActivities').classList.toggle('on', v==='act');
   const sideCost=document.getElementById('sideCost'); if(sideCost) sideCost.classList.toggle('on', v==='cost');
+  const sidePricing=document.getElementById('sidePricing'); if(sidePricing) sidePricing.classList.toggle('on', v==='pricing');
   if(v==='cost') renderCostDashboard();
+  if(v==='pricing') renderCostPricing();
   if(v==='input') renderSalesOwnerField();
   if(v==='modify') renderModify();
   if(v==='dash') renderRecordsList();
@@ -4922,6 +4959,9 @@ function renderUserUI(){
   const costBtn = document.getElementById('sideCost'), costOK = costMenuAllowed();
   if(costBtn) costBtn.style.display = costOK ? 'flex' : 'none';
   if(!costOK && document.getElementById('costDashView') && document.getElementById('costDashView').classList.contains('on')) switchView('dash');
+  const pricingBtn = document.getElementById('sidePricing'), pricingOK = costPricingMenuAllowed();
+  if(pricingBtn) pricingBtn.style.display = pricingOK ? 'flex' : 'none';
+  if(!pricingOK && document.getElementById('costPricingView') && document.getElementById('costPricingView').classList.contains('on')) switchView('dash');
   renderLoginView();
   const outBtn = document.getElementById('sideLogout');
   if(outBtn) outBtn.style.display = currentUser ? 'flex' : 'none';
