@@ -32,13 +32,13 @@
  check('new costs never enter legacy stores',!JSON.stringify(localStorage).includes('SYNTHETIC VENDOR'));
  // Exercise shipped local transport and actual DOM events, not just the fixture gateway.
  delete window.__costTestRequest;userList=[{name:currentUser,role:'rd'}];costStore=null;localStorage.removeItem('fs_cost');
- await openCostCalculator('A00001');
- document.getElementById('costRequestBrief').value='Synthetic sourcing request';await costRequestMaterial();
+ window.__step='reopen-A00001-local';await openCostCalculator('A00001');
+ window.__step='costRequestBrief';document.getElementById('costRequestBrief').value='Synthetic sourcing request';await costRequestMaterial();
  check('local request is acknowledged and visible without an external send',document.getElementById('costView').textContent.includes('บันทึกคำขอจัดหาแล้ว')&&document.getElementById('costView').textContent.includes('Synthetic sourcing request')&&loadCostStore().requests.length===1);
  check('weight unit is a dropdown',document.getElementById('costFillUnit').tagName==='SELECT');
  await costLocalRequest('save',{projectId:'A00001',expectedRevision:1,patch:{sellingUnits:100,unitsPerPack:60,fillAmount:1,fillUnit:'g',lines:[]}});
  loadCostStore().catalog=[offers[0]];await costLocalRequest('selectRM',{projectId:'A00001',expectedRevision:2,offerRef:'O1'});
- await openCostCalculator('A00001');const amount=document.getElementById('costAmount0');amount.value='0.4';amount.dispatchEvent(new Event('input',{bubbles:true}));
+ window.__step='reopen-after-selectRM';await openCostCalculator('A00001');window.__step='costAmount0';const amount=document.getElementById('costAmount0');amount.value='0.4';amount.dispatchEvent(new Event('input',{bubbles:true}));
  check('typing updates cumulative mass before save',document.getElementById('costFormulaPreview').textContent.includes('0.4')&&document.getElementById('costFormulaPreview').textContent.includes('ยังขาด 0.6'));
  await costSave();const revision=costState.response.revision;await costSave();
  check('unchanged real form save retains revision',costState.response.revision===revision&&document.getElementById('costView').textContent.includes('ไม่มีข้อมูลเปลี่ยนแปลง'));
@@ -62,6 +62,19 @@
  const floatingId=costState.projectId;
  document.getElementById('costBindSelect').value='A00002';await costBindFromView();
  check('binding reopens the job under the Formula id with the same job id',costState.projectId==='A00002'&&costState.response.job.id===floatingId&&costState.response.job.bound===true&&!document.getElementById('costBindSelect'));
+ // E4: สอง tab สลับกัน ค่าที่กรอกค้างไม่หาย ปิดต้องยืนยัน
+ await openCostCalculator('A00001');document.getElementById('costSellingUnits').value='4321';
+ await openCostCalculator('A00002');
+ check('two tabs are open and the first keeps its unsaved value',document.querySelectorAll('.cost-tab[data-tab]').length===2&&costTabFor('A00001').state.edits.costSellingUnits==='4321'&&document.querySelector('.cost-tab-dirty')!==null);
+ costActivateTab('A00001');check('switching back restores the unsaved value into the form',document.getElementById('costSellingUnits').value==='4321');
+ let confirms=0;window.confirm=()=>{confirms++;return false;};costCloseTab('A00001');
+ check('closing a dirty tab asks and a refusal keeps it',confirms===1&&document.querySelectorAll('.cost-tab[data-tab]').length===2);
+ window.confirm=()=>{confirms++;return true;};const revBefore=loadCostStore().scenarios.length;costCloseTab('A00001');
+ check('confirmed close drops the tab without saving a revision',document.querySelectorAll('.cost-tab[data-tab]').length===1&&loadCostStore().scenarios.length===revBefore&&costState.projectId==='A00002');
+ // E4-02: ใบงาน Formula ปิดแล้ว
+ records.find(r=>r.id==='A00002').closed={by:'Sales',at:'2026-09-07',ts:1};await openCostCalculator('A00002');
+ check('closed Formula job renders read-only with clone',document.getElementById('costView').textContent.includes('ปิดงานแล้ว · อ่านอย่างเดียว')&&document.getElementById('costSellingUnits').disabled);
+ delete records.find(r=>r.id==='A00002').closed;
  switchView('cost');costDashSearchChanged('');check('dashboard shows the bound job once with its Formula id',document.getElementById('costDashBody').textContent.split(floatingId).length===2&&document.getElementById('costDashBody').textContent.includes('A00002'));
  userList=[{name:currentUser,role:'sales'}];renderUserUI();
  check('Sales menu hidden and dashboard view closed',document.getElementById('sideCost').style.display==='none'&&!document.getElementById('costDashView').classList.contains('on'));
@@ -71,6 +84,6 @@
  document.querySelector('.main').style.display='block';
  const banner=document.createElement('p');banner.textContent='ข้อมูลจำลองสำหรับตรวจ UI — ไม่ใช่ระบบเชื่อมจริง';banner.className='cost-warning';document.getElementById('costView').prepend(banner);
  document.documentElement.setAttribute('data-cost-test-status','passed');
- }catch(error){results.push({name:String(error.message),pass:false});document.documentElement.setAttribute('data-cost-test-status','failed');}
+ }catch(error){results.push({name:String(error.message)+' @ '+(window.__step||'?'),pass:false});document.documentElement.setAttribute('data-cost-test-status','failed');}
  const report=document.createElement('pre');report.id='cost-browser-results';report.textContent=JSON.stringify({passed:results.filter(x=>x.pass).length,failed:results.filter(x=>!x.pass).length,results},null,2);report.style.display='none';document.body.appendChild(report);
 })();

@@ -882,3 +882,24 @@ test('สร้างใบงานแล้วบันทึก revision แ�
   c.localStorage.setItem=setItem;
   assert.equal(c.run(`costStartJob({mode:'float',title:'ok'}).id`),'CJ-00000'+(counter+1),'รหัสถัดไปต้องต่อจากเดิม ไม่กระโดด');
 });
+
+// ---- E4-02 ใบงาน Formula ปิดแล้ว = อ่านอย่างเดียว ----
+test('ใบงาน Formula ปิดแล้ว: เปิดดูได้ แต่ทุก action ที่เปลี่ยนข้อมูลถูกปฏิเสธ และโคลนไปทำใบใหม่ได้',async()=>{
+  const c=fixture('rd','RD-ก');c.records=[{id:'A00001'}];
+  await c.costLocalRequest('open',{projectId:'A00001'});
+  await c.costLocalRequest('save',{projectId:'A00001',scenarioId:'S1',expectedRevision:1,patch:{sellingUnits:100,unitsPerPack:1,fillAmount:1,fillUnit:'g',lines:[]}});
+  c.records[0].closed={by:'Sales',at:'2026-09-07',ts:1};
+  const body=await c.costLocalRequest('open',{projectId:'A00001'});
+  assert.equal(body.locked,true);assert.equal(body.revision,2,'ยังอ่านของเดิมได้');
+  const store=c.backing.fs_cost;
+  for(const [action,extra] of [['save',{patch:{sellingUnits:5}}],['selectRM',{offerRef:'O1'}],['removeRM',{lineId:'L1'}],['requestMaterial',{brief:'x'}],['adoptPK',{}],['sendSummary',{idempotencyKey:'k:1'}]]){
+    await assert.rejects(c.costLocalRequest(action,{projectId:'A00001',scenarioId:'S1',expectedRevision:2,...extra}),/ปิดงานแล้ว/,action);
+  }
+  assert.equal(c.backing.fs_cost,store,'การปฏิเสธต้องไม่เขียนอะไร');
+  const job=c.run(`costStartJob({mode:'clone',from:'CJ-000001'})`);
+  const cloned=await c.costLocalRequest('open',{projectId:job.id});
+  assert.equal(cloned.locked,false,'ใบโคลนเป็นงานลอย ไม่ล็อก');assert.equal(cloned.inputs.sellingUnits,100,'ค่าติดมา');
+  await c.costLocalRequest('save',{projectId:job.id,scenarioId:'S1',expectedRevision:1,patch:{sellingUnits:7}});
+  c.records[0].closed=undefined;
+  assert.equal((await c.costLocalRequest('open',{projectId:'A00001'})).locked,false,'เปิดงานใหม่แล้วแก้ได้อีก');
+});

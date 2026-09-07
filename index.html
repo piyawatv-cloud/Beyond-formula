@@ -649,6 +649,14 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
 .cost-pick-row{display:flex;align-items:center;gap:8px;padding:9px 12px;border-top:1px solid var(--line);cursor:pointer;min-height:44px}
 .cost-pick-row:first-child{border-top:none}.cost-pick-row:hover{background:var(--tint)}
 .cost-bind{border:1px solid var(--or);background:var(--tint);border-radius:10px;padding:12px 14px;margin:10px 0}
+.cost-tabs{display:flex;gap:2px;align-items:flex-end;border-bottom:1px solid var(--bd);margin-bottom:12px;overflow-x:auto}
+.cost-tab{display:flex;align-items:center;border:1px solid transparent;border-bottom:none;border-radius:8px 8px 0 0;color:var(--muted);font-size:13px;white-space:nowrap;min-height:40px}
+.cost-tab.on{background:var(--card);border-color:var(--bd);color:var(--tx);font-weight:500;margin-bottom:-1px}
+.cost-tab-open,.cost-tab-dash{border:none;background:transparent;color:inherit;font-family:inherit;font-size:13px;padding:8px 6px 8px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;min-height:40px}
+.cost-tab-dash{font-weight:600;color:var(--tx);padding-right:12px}
+.cost-tab-x{border:none;background:transparent;color:var(--muted);width:26px;height:26px;border-radius:50%;cursor:pointer;margin-right:6px;font-size:15px}
+.cost-tab-x:hover{background:var(--card2)}
+.cost-tab-dirty{width:8px;height:8px;border-radius:50%;background:#B06000;display:inline-block}
 .cost-pending{margin:8px 0}
 .cost-pending>b{display:block;font-size:12px;color:var(--muted);letter-spacing:.02em}
 .cost-pending>ul{margin:2px 0 0;padding-left:20px}
@@ -686,7 +694,7 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
   <div class="logo"><svg viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-1.73-3L9 11.35V4H8a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2h-1v7.35L19.73 19A2 2 0 0 1 18 22H6Zm5-10.11L8.31 16.5h7.38L13 11.89V4h-2v7.89Z"/></svg></div>
   <div>
     <div class="hdr-title">Formula Studio</div>
-    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-07.4-create-bind</div>
+    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-07.5-tabs-readonly</div>
   </div>
   <div class="sync-chip" id="syncChip" onclick="sbManualSync()" title="สถานะการซิงก์ข้อมูลกับเซิร์ฟเวอร์กลาง"></div>
 </div>
@@ -1733,13 +1741,22 @@ function costCreateSubmit(){
     return openCostCalculator(costJobKey(job));
   }catch(error){if(msg)msg.textContent=String(error.message);}
 }
+function costCloneFromView(){
+  const data=costState.response; if(!data||!data.job||!data.capabilities.editRM)return;
+  try{const job=costStartJob({mode:'clone',from:data.job.id});return openCostCalculator(costJobKey(job));}
+  catch(error){costState.error=String(error.message);renderCostCalculator();}
+}
 // ---- ผูกงานลอยจากในหน้าเครื่องคำนวณ (E3-02) ----
 function costBindFromView(){
   const data=costState.response,sel=document.getElementById('costBindSelect'),msg=document.getElementById('costBindMsg');
   if(!data||!data.job||data.job.bound||!sel)return;
   try{
     if(!sel.value)throw Error('เลือกใบงาน Formula ก่อน');
-    const job=costBindJob(data.job.id,sel.value);
+    costCaptureDraft();
+    if(costDraftDirty())throw Error('บันทึก revision สูตร / RM ก่อนผูก ไม่งั้นค่าที่กรอกค้างจะหาย');
+    const oldKey=costState.projectId,job=costBindJob(data.job.id,sel.value);
+    // ใบงานเดียวกันย้ายคีย์จาก CJ ไป A00001 · tab เดิมต้องเกษียณ ไม่ปล่อยให้ใบเดียวเปิดสอง tab
+    const old=costTabFor(oldKey);if(old)costTabs.splice(costTabs.indexOf(old),1);
     return openCostCalculator(job.projectId);
   }catch(error){if(msg)msg.textContent=String(error.message);}
 }
@@ -1757,9 +1774,45 @@ let COST_API_ORIGIN = '';
 let costRouteState={handledKey:''};
 let costState = {projectId:null, response:null, error:'', busy:false, search:'', sequence:0, identity:'', edits:{}};
 function costIdentity(){ return [currentUser, currentRole(), authSession && authSession.user && authSession.user.id, impersonator].join('|'); }
+// ---- tab ภายในแอป (E4-01): หลายใบงานพร้อมกัน สถานะแยกต่อ tab · ไม่ persist ----
+// tab เบราว์เซอร์จริงใช้ไม่ได้ เพราะ session อยู่ใน sessionStorage แยกต่อ tab (SPEC Grill round 9)
+let costTabs=[]; // [{key,state}] · costState คือ state ของ tab ที่เปิดอยู่
+function costTabFor(key){return costTabs.find(t=>t.key===key)||null;}
+function costFreshState(){return {projectId:null,response:null,error:'',busy:false,search:'',sequence:costState.sequence+1,identity:costIdentity(),edits:{}};}
 function costReset(){
-  costState={projectId:null,response:null,error:'',busy:false,search:'',sequence:costState.sequence+1,identity:costIdentity(),edits:{}};
+  // ทิ้งทุก tab: ใช้เมื่อตัวตนเปลี่ยนหรือหมดสิทธิ์ ไม่ใช่ตอนสลับ tab
+  costTabs=[];
+  costState=costFreshState();
   const panel=document.getElementById('costView'); if(panel){panel.replaceChildren();panel.classList.remove('on');}
+}
+function costTabLabel(state){
+  const job=state.response&&state.response.job;
+  if(job)return job.id+' · '+(job.bound?job.projectId:(job.title||'งานลอย'));
+  return String(state.projectId||'');
+}
+function costTabBar(){
+  const dash=`<button class="cost-tab cost-tab-dash" onclick="switchView('cost')">Dashboard</button>`;
+  return `<div class="cost-tabs" role="tablist">${dash}${costTabs.map(t=>{const on=t.state===costState,dirty=costDraftDirty(t.state);
+    return `<div class="cost-tab${on?' on':''}" role="tab" aria-selected="${on}" data-tab="${esc(t.key)}"><button class="cost-tab-open" onclick="costActivateTab('${esc(t.key)}')">${dirty?'<span class="cost-tab-dirty" title="ยังไม่บันทึก"></span>':''}<span class="mono">${esc(costTabLabel(t.state))}</span></button><button class="cost-tab-x" aria-label="ปิด ${esc(t.key)}" onclick="costCloseTab('${esc(t.key)}')">×</button></div>`;}).join('')}</div>`;
+}
+function costActivateTab(key){
+  const tab=costTabFor(key); if(!tab)return;
+  if(tab.state!==costState){costCaptureDraft();costState=tab.state;}
+  const panel=document.getElementById('costView');
+  if(panel){document.querySelectorAll('.view').forEach(el=>el.classList.remove('on'));panel.classList.add('on');}
+  renderCostCalculator();
+}
+function costCloseTab(key){
+  const tab=costTabFor(key); if(!tab)return;
+  if(tab.state===costState)costCaptureDraft();
+  // ปิดต้องยืนยันถ้ายังไม่บันทึก และห้ามบันทึกให้เอง (คำตัดสิน 2026-09-06)
+  if(costDraftDirty(tab.state)&&!confirm('ปิด '+costTabLabel(tab.state)+'? มีค่าที่ยังไม่บันทึก ปิดแล้วค่าเหล่านั้นจะหาย ระบบไม่บันทึก revision ให้เอง'))return;
+  const index=costTabs.indexOf(tab);costTabs.splice(index,1);
+  if(tab.state===costState){
+    const next=costTabs[Math.min(index,costTabs.length-1)];
+    if(next){costState=next.state;renderCostCalculator();}
+    else{costState=costFreshState();const panel=document.getElementById('costView');if(panel){panel.replaceChildren();panel.classList.remove('on');}if(typeof switchView==='function')switchView('cost');}
+  }else renderCostCalculator();
 }
 function costCheckSession(){if(costState.identity && costState.identity!==costIdentity()){costReset();costRouteState.handledKey='';}}
 function costAuthenticated(){return !!(currentUser && authSession && authSession.user && authSession.user.id && authMembership && !impersonator);}
@@ -1817,7 +1870,16 @@ async function openCostCalculator(projectId,scenarioId,revision){
   const exact= scenarioId!==undefined || revision!==undefined;
   if(exact && (!costAuthenticated() || !/^[A-Za-z0-9_-]{1,80}$/.test(scenarioId || '') || !Number.isSafeInteger(revision) || revision<1))return;
   if(!requirePerm('chat','เปิดเครื่องคำนวณได้เฉพาะผู้มีสิทธิ์โครงการ') || !costAllowed(projectId))return;
-  costReset();costState.projectId=projectId;costState.identity=costIdentity();costState.route=exact?{scenarioId,revision}:null;
+  costCheckSession();
+  // มี tab ของใบงานนี้อยู่แล้วและไม่ได้ขอ revision เฉพาะ → สลับไปหา ไม่เปิดซ้ำ (ค่าที่กรอกค้างต้องไม่หาย)
+  const existing=costTabFor(projectId);
+  // สลับไป tab เดิมแล้วอ่านซ้ำจาก store เพื่อไม่ค้างภาพเก่า ค่าที่กรอกค้างยังอยู่ (edits ไม่ถูกล้างโดย open)
+  // อ่านซ้ำต้องได้ revision ล่าสุด ไม่ใช่ปักหมุดที่ response เดิม จึงล้าง response ก่อน แต่เก็บ draft ไว้
+  if(existing&&!exact){costActivateTab(projectId);costState.edits=costDirtyEdits(costState);costState.response=null;costState.route=null;costState.keepEdits=true;await costAction('open',{});return;}
+  if(existing){costCaptureDraft();costState=existing.state;}
+  else{if(costState.projectId)costCaptureDraft();costState=costFreshState();costTabs.push({key:projectId,state:costState});}
+  // คำขอเก่าที่ยังค้างจะถูกทิ้งด้วย sequence อยู่แล้ว ห้ามให้ busy ของมันบล็อกการเปิดครั้งใหม่
+  costState.projectId=projectId;costState.identity=costIdentity();costState.route=exact?{scenarioId,revision}:null;costState.response=null;costState.edits={};costState.busy=false;costState.error='';
   let panel=document.getElementById('costView');if(!panel){panel=document.createElement('div');panel.id='costView';panel.className='view';document.querySelector('.main').appendChild(panel);}
   document.querySelectorAll('.view').forEach(el=>el.classList.remove('on'));panel.classList.add('on');
   await costAction('open',{});
@@ -1836,7 +1898,9 @@ async function costAction(action,extra){
     if(seq!==costState.sequence || identity!==costIdentity() || projectId!==costState.projectId)return;
     costState.response=costValidateResponse(data,projectId,scenarioId,minimumRevision,route&&route.revision);
     if(action!=='open' && costState.route && data.revision!==costState.route.revision)costState.route=null;
-    if(['open','save'].includes(action))costState.edits={};
+    // open ครั้งแรกหรือหลัง save ล้าง draft · แต่การอ่านซ้ำของ tab ที่เปิดอยู่ต้องเก็บค่าที่กรอกค้างไว้ (E4-01)
+    if(action==='save'||(action==='open'&&!costState.keepEdits))costState.edits={};
+    costState.keepEdits=false;
     if(['selectRM','removeRM'].includes(action)){const brief=costState.edits.costRequestBrief;costState.edits=brief===undefined?{}:{costRequestBrief:brief};}
     if(action==='requestMaterial')delete costState.edits.costRequestBrief;
     costState.notice=action==='requestMaterial'?'บันทึกคำขอจัดหาแล้ว ดูรายการด้านล่าง · ยังไม่ได้ส่งข้อความหรืออีเมลถึง Procurement':action==='save'?(data.revision===minimumRevision?'ไม่มีข้อมูลเปลี่ยนแปลง ใช้ revision เดิม':'บันทึก revision ใหม่แล้ว'):'';
@@ -1884,12 +1948,16 @@ function costPendingGroups(pending){
 }
 function costNumber(value){return typeof value==='number' && Number.isFinite(value)?value.toLocaleString('th-TH',{maximumFractionDigits:4}):'รอข้อมูล';}
 function costDraftValue(id,fallback){return Object.hasOwn(costState.edits,id)?costState.edits[id]:fallback;}
-function costDraftDefaults(){const data=costState.response;if(!data)return {};const draft=data.inputs||{},rule=data.pricingRule||{},defaults={costSellingUnits:draft.sellingUnits,costUnitsPerPack:draft.unitsPerPack,costFillAmount:draft.fillAmount,costFillUnit:draft.fillUnit,costPkSpecVersion:draft.pkSpecVersion,costAllowance:rule.allowancePercent,costFactor:rule.factor,costRuleOwner:rule.owner,costRuleUntil:rule.validUntil,costRuleDecimals:rule.decimals??2,costPkMode:rule.pkMode||'',costFormatId:(rule.format&&rule.format.id)||'',costRateId:'',costRateLabel:'',costRateOwner:'',costRateUntil:''};[0,1,2].forEach(i=>{defaults['costRateLabel'+i]='';defaults['costRateAmount'+i]='';});data.lines.forEach((line,i)=>{defaults["costAlias"+i]=line.alias||"";defaults["costAmount"+i]=line.amount;defaults["costLoss"+i]=line.lossPercent;});return defaults;}
+// ตัวช่วย draft รับ state ได้ เพราะแถบ tab ต้องรู้ว่า tab ที่ไม่ได้เปิดอยู่มีค่าค้างหรือไม่ (E4-01)
+function costDraftDefaults(state){const data=(state||costState).response;if(!data)return {};const draft=data.inputs||{},rule=data.pricingRule||{},defaults={costSellingUnits:draft.sellingUnits,costUnitsPerPack:draft.unitsPerPack,costFillAmount:draft.fillAmount,costFillUnit:draft.fillUnit,costPkSpecVersion:draft.pkSpecVersion,costAllowance:rule.allowancePercent,costFactor:rule.factor,costRuleOwner:rule.owner,costRuleUntil:rule.validUntil,costRuleDecimals:rule.decimals??2,costPkMode:rule.pkMode||'',costFormatId:(rule.format&&rule.format.id)||'',costRateId:'',costRateLabel:'',costRateOwner:'',costRateUntil:''};[0,1,2].forEach(i=>{defaults['costRateLabel'+i]='';defaults['costRateAmount'+i]='';});data.lines.forEach((line,i)=>{defaults["costAlias"+i]=line.alias||"";defaults["costAmount"+i]=line.amount;defaults["costLoss"+i]=line.lossPercent;});return defaults;}
 function costCaptureDraft(){for(const id of [...Object.keys(costDraftDefaults()),"costRequestBrief"]){const el=document.getElementById(id);if(el)costState.edits[id]=el.value;}}
-function costDraftDirty(){return Object.entries(costDraftDefaults()).some(([id,value])=>Object.hasOwn(costState.edits,id)&&String(costState.edits[id])!==String(value??""));}
-function costTextField(label,id,value,hint){value=costDraftValue(id,value);return `<label class="fgrp"><span class="flbl">${esc(label)}</span><input id="${id}" class="fi" value="${value==null?'':esc(value)}" ${costState.busy?'disabled':''}><span class="hint">${esc(hint)}</span></label>`;}
-function costField(label,id,value,unit){value=costDraftValue(id,value);return `<label class="fgrp"><span class="flbl">${esc(label)}</span><input id="${id}" class="fi" type="number" min="0" step="any" value="${value==null?'':esc(value)}" ${costState.busy?'disabled':''}><span class="hint">${esc(unit)}</span></label>`;}
-function costUnitField(value){value=costDraftValue('costFillUnit',value);return `<label class="fgrp"><span class="flbl">หน่วยน้ำหนัก</span><select id="costFillUnit" class="fi" ${costState.busy?'disabled':''}><option value="">— เลือกหน่วย —</option>${['kg','g','mg'].map(u=>`<option value="${u}"${value===u?' selected':''}>${u}</option>`).join('')}</select></label>`;}
+// เฉพาะค่าที่ผู้ใช้พิมพ์ต่างจากค่าตั้งต้น — ค่าที่จับจาก DOM แล้วเท่ากับค่าตั้งต้นไม่ใช่การแก้ ห้ามพาไปทับ revision ใหม่
+function costDirtyEdits(state){const st=state||costState,defaults=costDraftDefaults(st),out={};Object.keys(st.edits).forEach(id=>{if(!Object.hasOwn(defaults,id)?st.edits[id]!==''&&st.edits[id]!==undefined:String(st.edits[id])!==String(defaults[id]??''))out[id]=st.edits[id];});return out;}
+function costDraftDirty(state){const st=state||costState;return Object.entries(costDraftDefaults(st)).some(([id,value])=>Object.hasOwn(st.edits,id)&&String(st.edits[id])!==String(value??""));}
+function costFieldLocked(){const d=costState.response;return costState.busy||!!(d&&(d.historical||d.locked));}
+function costTextField(label,id,value,hint){value=costDraftValue(id,value);return `<label class="fgrp"><span class="flbl">${esc(label)}</span><input id="${id}" class="fi" value="${value==null?'':esc(value)}" ${costFieldLocked()?'disabled':''}><span class="hint">${esc(hint)}</span></label>`;}
+function costField(label,id,value,unit){value=costDraftValue(id,value);return `<label class="fgrp"><span class="flbl">${esc(label)}</span><input id="${id}" class="fi" type="number" min="0" step="any" value="${value==null?'':esc(value)}" ${costFieldLocked()?'disabled':''}><span class="hint">${esc(unit)}</span></label>`;}
+function costUnitField(value){value=costDraftValue('costFillUnit',value);return `<label class="fgrp"><span class="flbl">หน่วยน้ำหนัก</span><select id="costFillUnit" class="fi" ${costFieldLocked()?'disabled':''}><option value="">— เลือกหน่วย —</option>${['kg','g','mg'].map(u=>`<option value="${u}"${value===u?' selected':''}>${u}</option>`).join('')}</select></label>`;}
 function costOpenLatest(){const projectId=costState.projectId;if(costDraftDirty()&&!confirm('เปิด revision ล่าสุดและละทิ้งค่าที่ยังไม่บันทึก?'))return;return openCostCalculator(projectId);}
 function costFormulaPreview(){
   const data=costState.response;if(!data)return '';
@@ -1907,12 +1975,13 @@ function renderCostCalculator(){
   const panel=document.getElementById('costView');if(!panel || !costState.projectId)return;
   if(costState.identity!==costIdentity() || !costAllowed(costState.projectId)){costReset();return;}
   const data=costState.response,view=data&&data.view,canEdit=!!(data&&data.capabilities&&data.capabilities.editRM),draft=data&&data.inputs||{};
-  const disabled=costState.busy||data?.historical?'disabled':'';
+  const disabled=costState.busy||data?.historical||data?.locked?'disabled':'';
   const rows=data&&Array.isArray(data.lines)?data.lines:[];
   const catalog=data&&Array.isArray(data.catalog)?data.catalog:[];
   // ถ้า response ยังไม่ส่งกลุ่มมา costCatalogVisible จะแสดงเป็นกลุ่มเดียว contract เดิมจึงยังใช้ได้
   const groups=data?costCatalogVisible(data,costState.search):[];
-  panel.innerHTML=`<div class="sec-card cost-workspace">
+  panel.innerHTML=`${costTabBar()}<div class="sec-card cost-workspace">
+    ${data?.locked?`<p class="cost-warning">🔒 ใบงาน Formula ${esc(data.projectId)} ปิดงานแล้ว · อ่านอย่างเดียว ${canEdit?`<button class="btn btn-s" onclick="costCloneFromView()">โคลนไปทำใบใหม่</button>`:''}</p>`:''}
     <div class="cost-top"><div><h2>Cost Calculator · ${esc(data&&data.job?data.job.id:costState.projectId)}${data&&data.job&&data.job.bound?' · '+esc(data.job.projectId):''}</h2><p class="hint">${data?'Revision '+esc(data.revision):'กำลังเปิดโครงการ'} · สูตรและ RM ทำต่อได้ระหว่างรอ PK</p></div><button class="btn btn-s" onclick="switchView('cost')">กลับ Dashboard ต้นทุน</button></div>
     ${costBindBox(data)}
     ${data?.historical?`<p class="cost-warning">กำลังดู revision เก่า ${esc(data.revision)} · อ่านอย่างเดียว <button class="btn btn-s" onclick="costOpenLatest()">เปิด revision ล่าสุด ${esc(data.latestRevision)}</button></p>`:''}
@@ -2149,6 +2218,12 @@ function costCreateJob(input){
 function costJobEntries(jobId){return loadCostStore().scenarios.filter(row=>row.jobId===jobId);}
 // คีย์ที่ใช้เปิดใบงาน: ใบงาน Formula ถ้าผูกแล้ว มิฉะนั้นรหัสใบงานต้นทุนเอง (งานลอย)
 function costJobKey(job){return job.projectId||job.id;}
+// ใบงาน Formula ปิดงานแล้ว → ใบงานต้นทุนอ่านอย่างเดียว โคลนไปทำใบใหม่ได้ (คำตัดสิน 2026-09-06)
+function costJobLocked(projectId){
+  const list=typeof records!=='undefined'&&Array.isArray(records)?records:[];
+  const record=list.find(r=>r&&r.id===projectId);
+  return !!(record&&record.closed);
+}
 // เริ่มใบงานต้นทุนจากหน้า "สร้าง" (E3-01): อ้างอิง Formula · สร้างลอย · โคลน
 // ทุกทางได้ revision 1 ทันที ใบงานที่ไม่มี revision จะไม่มีวันเกิด
 function costStartJob(input){
@@ -2333,6 +2408,7 @@ function costEnvelope(entry,sendState){
     requests:(detail||costBusinessRoles(currentUser).includes('Procurement RM'))?store.requests.filter(r=>r.projectId===entry.projectId&&r.scenarioId===entry.scenarioId).map(r=>({...r})):undefined,
     formula:detail?result.formula:null,
     summaryText:costSummaryText(CostCalculator.project(result,'Sales')),
+    locked:costJobLocked(entry.projectId),
     job:(function(){const j=costJobById(entry.jobId)||costJobById(entry.projectId)||costJobByProject(entry.projectId);
       return j?{id:j.id,projectId:j.projectId,bound:!!j.projectId,title:j.title||'',form:j.form||'',owner:j.owner||'',clonedFrom:j.clonedFrom||null}:null;})(),
     inputs:detail?{sellingUnits:scenario.sellingUnits,unitsPerPack:scenario.unitsPerPack,fillAmount:scenario.fillAmount,fillUnit:scenario.fillUnit,pkSpecVersion:scenario.pkSpecVersion}:{},
@@ -2439,6 +2515,7 @@ async function costLocalRequest(action,payload){
     return costEnvelope(entry);
   }
   if(!entry)throw Error('ยังไม่มีข้อมูลต้นทุนของโครงการนี้');
+  if(costJobLocked(projectId))throw Error('ใบงาน Formula '+projectId+' ปิดงานแล้ว ใบงานต้นทุนอ่านอย่างเดียว โคลนไปทำใบใหม่ได้');
   const latest=costLatestEntry(projectId,scenarioId);
   if(action!=='sendSummary'&&latest&&entry.revision!==latest.revision)throw Error('มี revision ใหม่กว่าแล้ว กรุณาเปิดใหม่ก่อนแก้ไข');
   if(action==='sendSummary'){

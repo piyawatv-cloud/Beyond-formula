@@ -210,3 +210,77 @@ test('กล่องผูกโผล่เฉพาะงานลอยข�
   assert.equal(c.costBindBox({job:{id:'CJ-000001',bound:true,projectId:'A00001'},capabilities:{editRM:true}}),'','ผูกแล้วไม่ต้องมีกล่อง');
   assert.equal(c.costBindBox({...floating,capabilities:{editRM:false}}),'','PU-PK/Purchasing ผูกไม่ได้');
 });
+
+// ---- E4-01 tab ภายในแอป ----
+function tabFixture(){
+  const c=fixture();c.records=[{id:'A00001'},{id:'A00002'}];
+  c.window.__costTestRequest=(action,p)=>{const r=c.response();r.projectId=p.projectId;r.view.projectId=p.projectId;r.job={id:'CJ-'+p.projectId.slice(1),projectId:p.projectId,bound:true};r.inputs={sellingUnits:10,unitsPerPack:1,fillAmount:1,fillUnit:'g'};return r;};
+  return c;
+}
+test('เปิดสองใบงานได้สอง tab สลับแล้วค่าที่กรอกค้างของแต่ละ tab ไม่ปนกัน',async()=>{
+  const c=tabFixture();
+  await c.openCostCalculator('A00001');
+  c.elements.costSellingUnits={value:'111'};        // RD พิมพ์ค้างไว้ใน tab แรก
+  await c.openCostCalculator('A00002');
+  assert.equal(c.run('costTabs.length'),2);
+  assert.equal(c.run('costState.projectId'),'A00002');
+  assert.equal(c.run("costTabFor('A00001').state.edits.costSellingUnits"),'111','ค่าที่พิมพ์ค้างต้องถูกเก็บก่อนสลับ');
+  assert.ok(c.panel.innerHTML.includes('CJ-00001')&&c.panel.innerHTML.includes('CJ-00002'),'แถบ tab แสดงทั้งสองใบ');
+  assert.ok(c.panel.innerHTML.includes('cost-tab-dirty'),'tab ที่มีค่าค้างต้องมีจุดบอก');
+  c.elements.costSellingUnits={value:'10'};
+  c.costActivateTab('A00001');
+  assert.equal(c.run('costState.projectId'),'A00001');
+  assert.equal(c.run('costDraftValue(\"costSellingUnits\",null)'),'111','กลับมาแล้วค่าค้างยังอยู่');
+  assert.equal(c.run("costDraftDirty(costTabFor('A00002').state)"),false,'tab สองไม่ได้พิมพ์อะไร ต้องไม่ติดค่าของ tab แรก');
+});
+test('เปิดใบเดิมซ้ำ = สลับไป tab เดิมและอ่านซ้ำจาก store ไม่เปิดเป็น tab ใหม่',async()=>{
+  const c=tabFixture();let calls=0;const inner=c.window.__costTestRequest;c.window.__costTestRequest=(a,p)=>{calls++;return inner(a,p);};
+  await c.openCostCalculator('A00001');await c.openCostCalculator('A00002');await c.openCostCalculator('A00001');
+  assert.equal(c.run('costTabs.length'),2);assert.equal(c.run('costState.projectId'),'A00001');assert.equal(calls,3,'เปิดซ้ำต้องอ่านซ้ำเพื่อไม่ค้างภาพเก่า');
+  c.elements.costSellingUnits={value:'77'};await c.openCostCalculator('A00002');await c.openCostCalculator('A00001');
+  assert.equal(c.run('costDraftValue("costSellingUnits",null)'),'77','อ่านซ้ำต้องไม่ล้างค่าที่กรอกค้าง');
+});
+test('ปิด tab ที่มีค่าค้างต้องยืนยัน ปฏิเสธแล้วไม่ปิด ยืนยันแล้วปิดโดยไม่บันทึกและไปที่ tab ข้างเคียง',async()=>{
+  const c=tabFixture();let asked=0,requests=0;const inner=c.window.__costTestRequest;c.window.__costTestRequest=(a,p)=>{requests++;return inner(a,p);};
+  await c.openCostCalculator('A00001');c.elements.costSellingUnits={value:'999'};
+  await c.openCostCalculator('A00002');
+  c.confirm=()=>{asked++;return false;};c.costCloseTab('A00001');
+  assert.equal(asked,1);assert.equal(c.run('costTabs.length'),2,'ปฏิเสธแล้วต้องไม่ปิด');
+  c.confirm=()=>{asked++;return true;};const before=requests;c.costCloseTab('A00001');
+  assert.equal(c.run('costTabs.length'),1);assert.equal(requests,before,'ปิดต้องไม่ยิง save ให้เอง');
+  assert.equal(c.run('costState.projectId'),'A00002','tab ที่เปิดอยู่ยังเป็นใบที่สอง');
+  c.elements.costSellingUnits={value:'10'}; // DOM ปลอมยังถือค่าของ tab แรกอยู่ ต้องคืนเป็นค่าตั้งต้นของ tab สอง
+  c.costCloseTab('A00002');
+  assert.equal(asked,2,'tab ที่ไม่มีค่าค้างปิดได้โดยไม่ถาม');assert.equal(c.run('costTabs.length'),0);assert.equal(c.run('costState.projectId'),null);
+});
+test('ตัวตนเปลี่ยน (logout) ทิ้งทุก tab',async()=>{
+  const c=tabFixture();await c.openCostCalculator('A00001');await c.openCostCalculator('A00002');
+  c.currentUser='';c.costCheckSession();assert.equal(c.run('costTabs.length'),0);assert.equal(c.run('costState.response'),null);
+});
+// ---- E4-02 ใบงาน Formula ปิดแล้ว ----
+test('ใบงานที่ล็อกวาดเป็นอ่านอย่างเดียว มีปุ่มโคลนเฉพาะผู้แก้สูตร',async()=>{
+  const c=tabFixture();const inner=c.window.__costTestRequest;c.window.__costTestRequest=(a,p)=>{const r=inner(a,p);r.locked=true;return r;};
+  await c.openCostCalculator('A00001');
+  assert.ok(c.panel.innerHTML.includes('ปิดงานแล้ว · อ่านอย่างเดียว')&&c.panel.innerHTML.includes('costCloneFromView'));
+  assert.ok(/id="costSellingUnits"[^>]*disabled/.test(c.panel.innerHTML),'ช่องกรอกต้องปิด');
+  c.window.__costTestRequest=(a,p)=>{const r=inner(a,p);r.locked=true;r.capabilities.editRM=false;return r;};
+  await c.openCostCalculator('A00002');
+  assert.ok(!c.panel.innerHTML.includes('costCloneFromView'),'ไม่มีสิทธิ์แก้สูตร = ไม่มีปุ่มโคลน');
+});
+
+test('ผูกจากหน้าเครื่องคำนวณ: มี draft ค้างต้องปฏิเสธ · ผูกแล้ว tab คีย์เดิมถูกเกษียณ เหลือ tab เดียวของใบนั้น',async()=>{
+  const c=tabFixture();
+  const inner=c.window.__costTestRequest;
+  c.window.__costTestRequest=(a,p)=>{const r=inner(a,p);if(p.projectId==='CJ-000009'){r.job={id:'CJ-000009',projectId:null,bound:false};}return r;};
+  c.run(`var costJobById=id=>id==='CJ-000009'?{id}:null;var costBindJob=(id,pid)=>({id,projectId:pid});var costJobByProject=()=>null;`);
+  await c.openCostCalculator('CJ-000009');
+  const msg={textContent:''};c.elements.costBindMsg=msg;c.elements.costBindSelect={value:'A00002'};
+  c.elements.costSellingUnits={value:'555'};
+  await c.costBindFromView();
+  assert.match(msg.textContent,/บันทึก revision .* ก่อนผูก/);assert.equal(c.run('costState.projectId'),'CJ-000009','ยังไม่ผูก');
+  c.elements.costSellingUnits={value:'10'};
+  await c.costBindFromView();
+  assert.equal(c.run('costState.projectId'),'A00002');
+  assert.equal(c.run('costTabs.length'),1,'tab CJ เดิมต้องหาย เหลือ tab A00002');
+  assert.equal(c.run("costTabFor('CJ-000009')"),null);
+});
