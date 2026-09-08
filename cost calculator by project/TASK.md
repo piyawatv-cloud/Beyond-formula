@@ -1,5 +1,11 @@
 # Task handoff
 
+## PO scan / IN source mapping — latest clarification 2026-09-08
+
+Owner confirmed PO scans in Google Drive; link intentionally deferred. Placeholder fields poDriveFolderUrl/poDocumentUrl remain null in design. Inventory price source now identified as IN; metadata plus six first-row header reads succeeded. REGISTRY records candidate columns and unresolved meanings (Price vs Unit Cost, UOM/tax/freight, Ref→PO, stable line identity, Type/posted/reversal, reservation netting). No business rows/formulas read, workbook edits, runtime changes or new sheets.
+
+Status: WAITING_FOR_INPUT for price semantics and later PO link; source-location discovery for IN is complete. This supersedes the older request to identify inventory location. Scan extraction must remain unverified until human validation; no claim of PO/OCR integration. files_changed: REGISTRY.md, TASK.md; ignored local-only source reference. tests_run: six header reads, metadata, documentation diff check; application suites not rerun for this documentation-only change (previous counts are historical). Runtime security/database/permission/dependency impact: none. Rollback: revert document commit/remove local reference. Risks: incomplete mapping/OCR verification/live status. task_id unchanged; Issue/PR none; no deploy.
+
 ## Cost evidence classification — 2026-09-08 (latest owner request)
 
 task_id: cost-calculator-implementation-2026-09-05; issue_id: none. Owner: System Owner; reviewer: @phossatron for future integration. Allowed: this worktree only. Environment: local documentation, synthetic examples. Change: data/integration design; future synchronization/reconciliation implementation is Critical Change. No source data, live writes, permission changes or deployment in this round.

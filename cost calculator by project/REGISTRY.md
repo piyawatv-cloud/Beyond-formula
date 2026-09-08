@@ -74,7 +74,28 @@ RM/PU-PK คง authority ข้อเสนอเดิม; PO/receipt/movement
 
 สิทธิ์เดิมไม่ขยายตาม reference: Sales/OPC ไม่ได้ supplier/ราคาต้นทางผ่าน PO หรือ drill-through และงานนี้ไม่เปิดต้นทุนข้ามฝ่ายเพิ่ม ก่อนใช้งานต้องมี sanitized mapping, owner รับรอง semantics, synthetic tests + mutation ของกฎใหม่, CODEOWNER review และ operator deploy
 
-### 6. ตัวอย่างทวนสอบสังเคราะห์สำหรับ implementation (ยังไม่ใช่ผลเทสต์)
+### 6. แหล่ง PO และราคา IN — ข้อยืนยันและผลตรวจล่าสุด 2026-09-08
+
+เจ้าของระบุ PO เป็นไฟล์สแกนใน Google Drive; เว้น `poDriveFolderUrl` และ `poDocumentUrl` ไว้เป็น null (รอ link ภายหลัง) ไม่สร้าง URL/เลข PO สมมติ ไม่ขวาง draft ต้นทุน แต่การตรวจ PO ที่ไม่มีหลักฐานต้องขึ้น PENDING_EVIDENCE ส่วนแหล่งราคาเปรียบเทียบคือชีต **IN** ใน workbook inventory ที่เจ้าของระบุ (URL เก็บใน local-only/SOURCE_INVENTORY_REFERENCE.md)
+
+ตรวจ metadata และหัวตารางแถว 1 เท่านั้นของ IN, IN Price Snapshot, Master Item, Movement, Stock onhand, Reserve ไม่อ่านแถวธุรกิจ/ราคาจริง ไม่ตรวจสูตรหรือเขียน workbook ดังนั้น mapping ต่อไปนี้เป็น candidate ไม่ใช่ binding ที่ยืนยันแล้ว:
+
+| ความหมาย | หัวคอลัมน์ที่พบจริง | การนำไปใช้ / ข้อค้าง |
+|---|---|---|
+| เอกสารรับเข้า | IN: Doc No, Date, Ref, Type, Legacy Type | Doc No อาจซ้ำหลายบรรทัด; Ref ยังไม่ยืนยันว่าเป็น PO; ต้องมี stable line/event identity ก่อน import ซ้ำอย่างปลอดภัย |
+| ตัวตนวัสดุ | IN: New Code, Old Code, Category, Trade name | New Code เป็น candidate ไป Master Item ไม่เท่ากับ RMS-/RD-Code/PK ID อัตโนมัติ; ต้องยืนยัน mapping/spec |
+| รับจริง | IN: Lot, MFG, Exp. date, Qty, UOM, Loc | ขอบเขต Type/การกลับรายการ/สถานะ posted และคุณภาพยังไม่ยืนยัน ไม่ถือทุก IN ว่าเป็นซื้อใหม่ |
+| ราคาเปรียบเทียบ | IN: Price, Unit Cost | เก็บแยกทั้งสอง ไม่เลือกเองว่าอันไหนต่อหน่วย/ยอดรวม; ยังรอฐานหน่วย VAT สกุลเงิน freight และสูตร |
+| Item master | Master Item: New Code, Old Code, UOM, Vendor name, Cost per unit, Lead Time, MOQ, Pack side | ใช้ master เดิม; Cost per unit ไม่แทนราคา IN ราย lot/เอกสาร และไม่แทนข้อเสนอปัจจุบัน |
+| ประวัติสำรองราคา | IN Price Snapshot: Run ID, Captured At, Source Row, Doc No, Ref, Canonical Item Code, Lot, Price, Unit Cost, Restore Status | ไม่รวมเป็นรับเข้าอีกชุด; header ดูเป็น snapshot/restore แต่ semantics ยังไม่ตรวจ ห้ามเลือกเป็นแหล่งหลักแทน IN |
+| ปริมาณสำหรับ planning | Stock onhand: UOM, คงเหลือ, Location, status; Reserve: Qty, UOM, Ref, QO No | ยังไม่ยืนยันว่าคงเหลือหักจองแล้วหรือไม่; ไม่ net reservation ซ้ำ |
+| Movement | Qty (g) IN, Qty (g) OUT, New Code, Lot (IN) | มีหัวหน่วย g; ห้ามแปลง PK จำนวนชิ้นเป็น g หรือใช้เป็น event ledger โดยยังไม่ตรวจ |
+
+PO scan pipeline ที่เตรียมรองรับ: Drive file ID/version → extraction candidate ระดับหน้า/รายการพร้อมตำแหน่งหลักฐาน → ผู้รับผิดชอบตรวจยืนยันเลข PO/รายการ/item/spec/จำนวน/หน่วย/ราคา/สถานะ → จึงใช้เทียบ IN ได้ ข้อความ OCR ไม่ใช่ข้อมูลยืนยัน; อ่านไม่ชัดต้องค้าง ไม่เดา และไม่ส่งเอกสารไป OCR ภายนอกจนมีช่องทางที่ได้รับอนุมัติ ไฟล์ PO scan อย่างเดียวไม่ยืนยันยอดค้าง/ยกเลิก/กำหนดรับล่าสุดสำหรับ MRP ต้องมีแหล่งสถานะหรือผู้รับผิดชอบยืนยันเพิ่ม
+
+แผนเทียบสามทาง: selected offer revision → verified PO line → IN line (ฐานราคาที่รับรองแล้ว) พร้อมผลต่างแต่ละคู่ ยังไม่ถือ IN เป็น invoice/landed cost/actual production cost และไม่อัปเดตราคาแคตตาล็อกหรือ revision เดิมตาม IN โดยอัตโนมัติ รายการที่ไม่มี PO link แสดงส่วนที่ตรวจได้พร้อม PO evidence pending ไม่แสดงว่าผ่านครบ
+
+### 7. ตัวอย่างทวนสอบสังเคราะห์สำหรับ implementation (ยังไม่ใช่ผลเทสต์)
 
 | กรณี | ผลที่ต้องได้ |
 |---|---|
