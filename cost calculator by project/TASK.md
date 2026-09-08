@@ -1,5 +1,11 @@
 # Task handoff
 
+## THB and monetary display confirmed — 2026-09-08 (latest)
+
+Owner confirms THB and two decimal places with thousands separators (1,234.56). Currency/display precision are resolved, superseding older pending currency/rounding-precision entries. REGISTRY specifies preservation of source precision, monetary-only formatting, proposed deterministic decimal half-up, and no implicit variance tolerance. Remaining: unit basis, source identity/status/PO mapping; PO links intentionally deferred. No live workbook or runtime formatter change in this documentation round.
+
+status: WAITING_FOR_INPUT for remaining mapping only. task_id: cost-calculator-implementation-2026-09-05; issue_id/pr_reference: none. files_changed: REGISTRY.md, TASK.md. tests_run: git diff --check; runtime suites not rerun for documentation-only changes. security/database/permission/dependency impact: none. rollback: revert document commit. open_risks: adapter/UI not implemented; no claim of UAT or live formatting change.
+
 ## IN price semantics confirmed — 2026-09-08 (latest)
 
 Owner confirms Price = total amount for that receipt; Unit Cost = per-unit price for that receipt; both exclude VAT/freight. REGISTRY now records the mapping, quantity × unit-cost reconciliation, pending rounding/unit/currency checks and separate freight evidence. Price meanings and VAT/freight inclusion are resolved; the older pending-price-semantics text below is historical. PO link remains intentionally deferred. Remaining integration dependencies: unit basis/currency, rounding/tolerance, stable line/event identity, Ref→PO and posted/return/reservation semantics. No new sheet, live read/write or runtime change this round.
