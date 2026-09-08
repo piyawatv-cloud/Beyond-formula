@@ -1,4 +1,6 @@
 # เชื่อม RM และ PU-PK ให้ทำงานต่อเนื่อง
+
+**อัปเดต 2026-09-08 หลังคำสั่งทำขั้น 1–4:** เจ้าของเลือกทิศทางดึงผ่านระบบแล้ว ข้อความรอเลือกช่องทางด้านล่างเป็นบันทึกรอบออกแบบเดิม ไม่ใช่คำถามที่ต้องถามซ้ำ งาน local รอบนี้เพิ่ม source reference/confirmation guard และ IN arithmetic preview ตาม TASK; ยังต้องกรอกผล PU-PK และวางข้อมูล IN จึงยังไม่ผ่าน acceptance เรื่องไม่กรอกซ้ำ ตัวเชื่อมตรงและ physical mapping ยังไม่เปิดใช้งาน ดู docs/PK_SOURCE_MAPPING.md และ UAT extension สำหรับขอบเขตที่ทำแล้ว/หลักฐานที่ยังขาด
 วันที่ 2026-09-08 · สถานะ DECISION_REQUIRED (ช่องทางรับข้อมูล) / HUMAN_GATE (ติดตั้งจริง)
 task_id: cost-calculator-implementation-2026-09-05 · source inspected: index.html ที่ 3358674 และ browser แบบ read-only
 เอกสารนี้เป็น change design ที่ตรวจทานได้ ไม่ใช่การประกาศว่าเปิด integration หรืออนุมัติ source migration แล้ว

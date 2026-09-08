@@ -1,5 +1,22 @@
 # Task handoff
 
+## Execute requested steps 1–4 — 2026-09-08
+
+Result: LOCAL_VERIFIED for the bounded local confirmation/IN arithmetic features; WAITING_FOR_INPUT for direct PU-PK integration; HUMAN_GATE for real RD/PU-PK UAT and release. Step 1: current metadata/five header ranges + existing source review inspected, not a fresh full script audit. Step 2: local source-linked manual confirmation implemented, direct retrieval not implemented. Step 3: read-only pasted IN arithmetic implemented, PO matching not implemented. Step 4: automated synthetic verification complete; eight UAT cases prepared, human UAT NOT_RUN.
+
+Fresh verification: baseline 392 module / 54 calculator browser / 37 parent / 33 SQL. Final 402 module (0 failed, 0 skipped) / 63 calculator browser / 37 parent / 33 SQL; git diff --check clean. First final parent attempt failed to connect to the local Chrome test endpoint (fetch failed, no assertion results); unchanged retry passed 37/37. No test skipped or assertion removed. Mutation: 22 data checks + 2 browser interaction checks caught all 24 intentional faults; original source restored. Evidence: .runtime/pk-in-{module,browser,parent-retry,sql}.log and mutation result JSON files, local only. Synthetic browser screenshot visually inspected; no claim of real-user speed or live integration.
+
+files_changed: index.html; tests/cost-calculator-local.test.js; tests/cost-calculator-browser.fixture.js; TASK.md; docs/PK_SOURCE_MAPPING.md; docs/UAT_COST_CALCULATOR.md. Build: 2026-09-08.2-pk-in-review. Security/permission: existing roles retained, no grants added; ordinary current refresh is distinct from restricted historical reads; IN gate at controls/handler/check entrypoint. Database: optional pk.source in existing fs_cost, no schema migration or server synchronization; IN inputs/results are not persisted. Dependencies: none added. Rollback: revert this implementation commit, retaining existing local data; older readers ignore pk.source. PR: none. Open risks: manual provenance is not authenticated source evidence; latest physical PU-PK mapping/transport/currentness unavailable; PO link deferred; human UAT/CODEOWNER/operator gates remain. No production writes, deploy, push or real messages.
+
+Scope: local feature branch only, synthetic tests; task_id unchanged, Issue none. Owner System Owner, reviewer @phossatron. Critical Change: reconciliation/source traceability code, independent review required before release. No production script edits, network endpoint deployment, raw business reads, new master sheets or permissions expansion.
+
+1. Inspected existing PK mapping review and current headers: PU_Pricing_History (59 columns), PK_Quote_Data, Incoming_ReqPK, PO_Price_Reference and PO_Price_Summary. Reuse existing pricing/PO history; APPROVED is not calculator confirmation and QuoteEffectiveCost is not consumed base.
+2. Implement local explicit confirmation with source request/quote/snapshot/revision references, stale/duplicate/conflict validation, persistence rollback and historical preservation. Existing manual amount path remains; direct source transport is blocked on reviewed physical mapping/endpoint, not represented as completed by this local work.
+3. Implement read-only pasted IN arithmetic checks (per-UOM THB, decimal precision, no tolerance guessing), clearly separate from PO matching; no storage/stock writes.
+4. Extend module/browser tests and mutation checks; prepare synthetic walkthrough and UAT cases. Real-user UAT, CODEOWNER review and deployment remain human gates.
+
+Additional file updated: docs/design/RM_PK_CONNECTION_DESIGN.md marks the transport-choice discussion as historical and makes the remaining direct-read gap explicit.
+
 ## IN UOM / PO-first identity confirmed — 2026-09-08 (latest)
 
 Owner confirms Unit Cost per 1 UOM of the same IN row. New Code/Old Code are matched primarily against actual PO records, not forced into pre-purchase RD/PU-PK offers. REGISTRY closes these general questions and specifies offer revision → verified PO line → IN line, optional inventory mapping at estimate stage and conditional package conversion only for cross-unit comparison. Same-row Qty × Unit Cost checks can proceed without a formula-unit conversion. No new inventory codes/master sheets or automatic name matches.

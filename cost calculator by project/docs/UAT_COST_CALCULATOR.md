@@ -76,3 +76,19 @@ Stop/revert criteria: unauthorized raw payload, incorrect units/pricing/selected
 ### หลังผ่าน UAT
 
 ส่งต่อ CODEOWNER `@phossatron` review (แตะ permission = Critical Change: E1-02, E5, E6) → Runtime Operator deploy · ผู้เขียนโค้ดไม่ final-approve และไม่ deploy เอง
+# PU-PK / IN extension — synthetic walkthrough, not user acceptance (2026-09-08)
+
+Build 2026-09-08.2-pk-in-review. Local-only; manual PU-PK amount/provenance entry remains necessary. No direct source transport, PO matching or stock writes. Run only with synthetic values in the development environment. Existing UAT cases below remain required; this section does not replace them.
+
+| Case | Actor/action | Expected evidence |
+|---|---|---|
+| PK-IN-01 | RD creates a job, saves 100 units, 1 unit/pack, 1 g and synthetic spec; PU-PK opens it | Same quantity/pack/spec shown; no new master sheet |
+| PK-IN-02 | PU-PK enters adjusted lot 1,234.56, leaves unknown base blank, evidence, validity and source request/quote/snapshot/revision; cancels then confirms | Cancel writes nothing; explicit confirmation records actor/time and source reference, leaves base null, does not adopt |
+| PK-IN-03 | Retry identical source result; then change amount using the same source version | No duplicate; changed content rejected with source conflict |
+| PK-IN-04 | RD explicitly adopts v1; PU-PK enters v2 with 1,200.00 | Prior formula revision retains 1,234.56; new candidate shown; RM still editable |
+| PK-IN-05 | Reopen old revision or closed job; attempt source result with stale expected revision | No write to old/closed context; no phantom candidate on persistence failure |
+| PK-IN-06 | Procurement pastes Qty/UOM/Price/Unit Cost: 100 / piece / 123.45 / 1.2345 | Arithmetic matched at 123.45; PO remains pending; no stock/storage change |
+| PK-IN-07 | Paste 1 / box / 1.001 / 1; missing UOM; return quantity; malformed comma | Nonzero sub-cent difference flagged; missing/return/invalid rows pending; no inferred package conversion |
+| PK-IN-08 | Switch to RD then Sales/OPC | RD can adopt, cannot enter raw PK/IN through these controls; Sales/OPC cannot enter calculator or obtain source values through summary |
+
+Reviewer records actual actor role, build, case, expected/actual, time, and PASS/FAIL with sanitized evidence. Human execution: NOT_RUN. Direct-read end-to-end UAT is BLOCKED until source mapper/transport exists. CODEOWNER and Runtime Operator gates unchanged.
