@@ -705,7 +705,7 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
   <div class="logo"><svg viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-1.73-3L9 11.35V4H8a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2h-1v7.35L19.73 19A2 2 0 0 1 18 22H6Zm5-10.11L8.31 16.5h7.38L13 11.89V4h-2v7.89Z"/></svg></div>
   <div>
     <div class="hdr-title">Formula Studio</div>
-    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-08.2-pk-in-review</div>
+    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-08.3-pk-summary-preview</div>
   </div>
   <div class="sync-chip" id="syncChip" onclick="sbManualSync()" title="สถานะการซิงก์ข้อมูลกับเซิร์ฟเวอร์กลาง"></div>
 </div>
@@ -2398,14 +2398,22 @@ function renderCostCalculator(){
     ${data.capabilities&&(data.capabilities.recordPK||data.capabilities.confirmOffer)?`<details><summary>ตรวจเลขรับเข้า IN · ไม่แก้สต็อก</summary><p class="hint">คัดลอกหัวตารางและแถวจากชีต IN (ไม่เกิน 1,000 แถว) ต้องมี Qty, UOM, Price, Unit Cost · ตรวจเฉพาะเลขในแถว หน่วย THB ไม่รวม VAT/ขนส่ง · PO รอหลักฐาน · ไม่เก็บข้อมูลนี้</p><textarea id="costInPaste" class="fi" rows="4" placeholder="วางข้อมูลจากชีต IN พร้อมหัวตาราง"></textarea><button class="btn btn-s" onclick="costCheckInPreview()">ตรวจรายการ IN</button><div id="costInResult" role="status"></div></details>`:''}
     <h3>สรุปเข้าแชทโครงการ</h3><p>ส่งเฉพาะยอดหลังบวกที่ผู้รับเห็นได้ พร้อม revision และรายการค้าง</p>
     ${data.capabilities&&data.capabilities.sendSummary&&data.job&&data.job.bound?`<div class="btn-row"><button class="btn btn-s" ${disabled} onclick="costSendDocument()">ส่งให้ CEO ดูทั้งเอกสาร (revision ${esc(data.revision)})</button><span class="hint">ลิงก์ชี้ revision นี้คงที่ · CEO/RD/Admin เปิดได้ Sales เปิดไม่ได้</span></div>`:''}<button class="btn btn-p" ${disabled||!data.capabilities||!data.capabilities.sendSummary?'disabled':''} onclick="costSendSummary()">ส่งสรุป revision นี้เข้า Formula chat</button><p role="status">${esc(data.sendState==='sent'?'ส่งสำเร็จ':data.sendState==='pending'?'รอส่ง':data.sendState==='failed'?'ส่งไม่สำเร็จ':'ยังไม่ได้ส่ง')}</p>
-    <h3>คัดลอกสรุปไปส่งต่อ</h3><p class="hint">ข้อความเดียวกับที่ส่งเข้าแชท — มีเฉพาะยอดหลังบวก ไม่มีต้นทุนดิบหรือชื่อผู้ขาย</p>
+    <h3>คัดลอกสรุปไปส่งต่อ</h3><p class="hint">สรุปล่าสุดแยกผล PK รอใช้และร่างที่ยังไม่บันทึก · ส่งเข้าแชทเฉพาะ revision ที่บันทึกแล้ว · ไม่มีต้นทุนดิบหรือชื่อผู้ขาย</p>
     <textarea id="costSummaryText" class="fi" rows="7" readonly onclick="this.select()">${esc(data.summaryText||'')}</textarea>
     <div class="btn-row"><button class="btn btn-s" onclick="costCopySummary()">คัดลอกข้อความสรุป</button><span id="costCopyState" class="hint" role="status"></span></div>`}
   </div>`;
   if(data?.historical && panel.querySelectorAll)panel.querySelectorAll('input,select,textarea,button[onclick^="costSave"],button[onclick^="costAdopt"],button[onclick^="costSend"],button[onclick^="costRequest"],button[onclick^="costRemove"],button[onclick^="costSelect"]').forEach(el=>el.disabled=true);
   for(const id of ['costFillAmount','costFillUnit',...rows.map((line,i)=>'costAmount'+i)]){const el=document.getElementById(id);if(el)el.oninput=costUpdateFormulaPreview;}
   costUpdateFormulaPreview();
-  costUpdateFormulaPreview();
+  for(const id of ['costPkAdjusted','costPkBase','costPkValidUntil','costPkEvidence','costPkSourceRequest','costPkSourceQuote','costPkSourceSnapshot','costPkSourceRevision']){const el=document.getElementById(id);if(el)el.addEventListener('input',costUpdatePkSummaryDraft);}
+}
+function costUpdatePkSummaryDraft(){
+  const data=costState.response,box=document.getElementById('costSummaryText');
+  if(!data||!data.capabilities?.recordPK||data.historical||data.locked||!box)return;
+  const input=document.getElementById('costPkAdjusted'),raw=input?.value.trim()||'',n=Number(raw);
+  const amount=raw!==''&&Number.isFinite(n)&&n>=0?n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'รอกำหนดราคา';
+  box.value='ร่าง PK ที่กำลังแก้ไข: '+amount+' บาท/ล็อต (ยอดหลังบวก ไม่รวม VAT)\nยังไม่บันทึก / ยังไม่ยืนยัน · ยังไม่ใช่ต้นทุนรวมต่อชิ้น\n\n'+(data.summaryText||'');
+  const state=document.getElementById('costCopyState');if(state)state.textContent='';
 }
 function costCopySummary(){
   const el=document.getElementById('costSummaryText'),state=document.getElementById('costCopyState');
@@ -2983,7 +2991,7 @@ function costEnvelope(entry,sendState){
     latestRevision:costLatestEntry(entry.projectId,entry.scenarioId).revision,historical:entry.revision!==costLatestEntry(entry.projectId,entry.scenarioId).revision,
     requests:(detail||costBusinessRoles(currentUser).includes('Procurement RM'))?store.requests.filter(r=>r.projectId===entry.projectId&&r.scenarioId===entry.scenarioId).map(r=>({...r})):undefined,
     formula:detail?result.formula:null,
-    summaryText:costSummaryText(CostCalculator.project(result,'Sales')),
+    summaryText:costCopySummaryText(entry),
     locked:costJobLocked(entry.projectId),
     job:(function(){const j=costJobById(entry.jobId)||costJobById(entry.projectId)||costJobByProject(entry.projectId);
       return j?{id:j.id,projectId:j.projectId,bound:!!j.projectId,title:j.title||'',form:j.form||'',owner:j.owner||'',clonedFrom:j.clonedFrom||null}:null;})(),
@@ -3017,6 +3025,16 @@ function costEnvelope(entry,sendState){
 }
 function costSalesView(entry){
   return CostCalculator.project(CostCalculator.calculate(entry.scenario,costToday()),'Sales');
+}
+function costCopySummaryText(entry){
+  const saved=costSummaryText(costSalesView(entry));
+  if(entry.revision!==costLatestEntry(entry.projectId,entry.scenarioId).revision)return saved;
+  const candidate=costPkCandidate(entry.projectId,entry.scenarioId),current=entry.scenario.pk;
+  if(!candidate||(current&&current.id===candidate.id&&current.version===candidate.version))return saved;
+  try{CostCalculator.adoptPK(entry.scenario,candidate,costToday());}catch(error){return 'ผล PK ล่าสุดไม่ตรงเงื่อนไขของ revision นี้ — รอตรวจ\n\n'+saved;}
+  if(candidate.status!=='confirmed')return saved;
+  const amount=typeof candidate.adjustedTotal==='number'&&Number.isFinite(candidate.adjustedTotal)?candidate.adjustedTotal.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'รอกำหนดราคา';
+  return 'ผล PK ล่าสุดที่ยืนยันแล้ว: '+amount+' บาท/ล็อต (ยอดหลังบวก ไม่รวม VAT)\nรอ RD นำมาใช้ · ยังไม่ใช่ต้นทุนรวมต่อชิ้น\n\n'+saved;
 }
 function costMoney(value){
   return typeof value==='number'&&Number.isFinite(value)?value.toLocaleString('th-TH',{maximumFractionDigits:4}):'รอกำหนดราคา';

@@ -141,11 +141,14 @@
  userList=[{name:currentUser,role:'purchasing'}];renderUserUI();await openCostCalculator('A00004');
  check('PU-PK sees source fields and exact job context',!!document.getElementById('costPkSourceSnapshot')&&document.getElementById('costView').textContent.includes('SYN-PACK'));
  for(const [id,value] of [['costPkAdjusted','1234.56'],['costPkValidUntil','2999-01-01'],['costPkEvidence','SYN-E'],['costPkSourceRequest','SYN-R'],['costPkSourceQuote','SYN-Q'],['costPkSourceSnapshot','SYN-S1'],['costPkSourceRevision','1']])document.getElementById(id).value=value;
+ document.getElementById('costPkAdjusted').dispatchEvent(new Event('input',{bubbles:true}));
+ check('typing PK updates copy preview as unsaved adjusted-only text',document.getElementById('costSummaryText').value.includes('1,234.56')&&document.getElementById('costSummaryText').value.includes('ยังไม่บันทึก / ยังไม่ยืนยัน'));
  const pkBefore=loadCostStore().pk.length;window.confirm=()=>false;await costSavePk();
  check('declining PK confirmation records nothing',loadCostStore().pk.length===pkBefore);
  window.confirm=()=>true;await costSavePk();
  if(!costState.response.pkCandidate)throw Error('PK confirmation: '+costState.error+' pkCount='+loadCostStore().pk.length);
  check('explicit confirmation records source version without adopting',loadCostStore().pk.length===pkBefore+1&&costLatestEntry('A00004','S1').scenario.pk===null&&costState.response.pkCandidate.versionLabel.includes('SYN-S1'));
+ check('confirmed PK immediately updates copy summary while waiting for RD',document.getElementById('costSummaryText').value.includes('1,234.56')&&document.getElementById('costSummaryText').value.includes('รอ RD นำมาใช้')&&!document.getElementById('costSummaryText').value.includes('ร่าง PK ที่กำลังแก้ไข'));
  document.getElementById('costInPaste').value='Qty\tUOM\tPrice\tUnit Cost\n100\tpiece\t123.45\t1.2345\n1\tbox\t1.001\t1';document.querySelector('button[onclick="costCheckInPreview()"]').click();
  check('IN preview shows exact arithmetic and sub-cent warning',document.getElementById('costInResult').textContent.includes('123.45')&&document.getElementById('costInResult').textContent.includes('ผลต่างต่ำกว่า 0.01'));
  check('IN preview explicitly keeps PO evidence pending',document.getElementById('costInResult').textContent.includes('PO: รอหลักฐาน'));
@@ -156,6 +159,7 @@
  userList=[{name:currentUser,role:'purchasing'}];renderUserUI();await openCostCalculator('A00004');
  for(const [id,value] of [['costPkAdjusted','1200'],['costPkValidUntil','2999-01-01'],['costPkEvidence','SYN-E2'],['costPkSourceRequest','SYN-R'],['costPkSourceQuote','SYN-Q2'],['costPkSourceSnapshot','SYN-S2'],['costPkSourceRevision','2']])document.getElementById(id).value=value;
  await costSavePk();
+ check('copy summary updates again for negotiated PK v2',document.getElementById('costSummaryText').value.includes('ผล PK ล่าสุดที่ยืนยันแล้ว: 1,200.00')&&document.getElementById('costSummaryText').value.includes('PK 1,234.56'));
  check('negotiation v2 does not overwrite adopted v1',costState.response.pkCandidate.versionLabel.includes('SYN-S2')&&costLatestEntry('A00004','S1').scenario.pk.adjustedTotal===1234.56);
  userList=[{name:currentUser,role:'sales'}];renderUserUI();costCheckInPreview();await openCostCalculator('A00004');
  check('Sales cannot open source confirmation or IN controls',!document.getElementById('costInPaste')&&!document.getElementById('costPkSourceSnapshot'));

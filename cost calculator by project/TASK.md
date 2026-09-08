@@ -1,5 +1,11 @@
 # Task handoff
 
+## PK copy summary refresh — owner workflow feedback 2026-09-08
+
+Root cause: confirming a PK candidate persisted it without adoption, while the copy box rendered only the saved scenario projection. Fix: the copy summary adds the latest confirmed, context-compatible adjusted PK amount with “รอ RD นำมาใช้ / ยังไม่ใช่ต้นทุนรวม”; typing PK fields updates an explicitly unsaved preview. After adoption, the ordinary saved revision summary applies. Historical revisions stay fixed; unknown/expired/incompatible/unconfirmed candidates do not appear as confirmed applicable amounts. Source IDs, supplier data and base costs are not copied. Chat still sends only the saved revision; UI wording now explains the distinction. No auto-adoption or message sends.
+
+status: LOCAL_VERIFIED / HUMAN_GATE for user acceptance. task_id: cost-calculator-implementation-2026-09-05; issue_id/pr_reference: none. files_changed: index.html, local/browser tests, TASK.md. Build 2026-09-08.3-pk-summary-preview. Fresh results: 405 module, 66 calculator browser, 37 parent browser, 33 SQL; no failures/skips; six mutations caught (latest candidate, context, historical, confirmation, adjusted-only, draft input event); git diff --check clean. Local demo rebuilt preserving previously saved synthetic data; visible summary verified with the owner's saved demo PK amount. Runtime security/permission/database/dependency impact: no new grants, storage or dependencies; summary projection remains adjusted-only. Rollback: revert this fix and rebuild demo; snapshots unchanged. Risks: preview is not an adopted revision or direct-source integration; user UAT remains pending. No push/PR/deploy or production data changes.
+
 ## Execute requested steps 1–4 — 2026-09-08
 
 Result: LOCAL_VERIFIED for the bounded local confirmation/IN arithmetic features; WAITING_FOR_INPUT for direct PU-PK integration; HUMAN_GATE for real RD/PU-PK UAT and release. Step 1: current metadata/five header ranges + existing source review inspected, not a fresh full script audit. Step 2: local source-linked manual confirmation implemented, direct retrieval not implemented. Step 3: read-only pasted IN arithmetic implemented, PO matching not implemented. Step 4: automated synthetic verification complete; eight UAT cases prepared, human UAT NOT_RUN.
