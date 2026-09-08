@@ -1,8 +1,10 @@
 # RD Data Center — navigation and filter-view change
 
-## Follow-up: fewer visible sheets (prepared)
+## Follow-up: fewer visible sheets (applied and verified)
 
 Owner requested fewer sheets and accurate, fast system retrieval. Keep four visible tabs: 00_README, 01_Ingredients_Master, 02_Price_Map and 08_Price_Catalog. Hide the other 22, retaining all 26 sheets, names, IDs, formulas and history. Update README A14:B25 to three visible navigation links and instructions for opening hidden supporting sheets. Hiding is not a security boundary. No tabs are added or deleted.
+
+Applied after preparatory commit 8b8e44e. API readback verified 26 total sheets, exactly the four intended visible tabs, 24/24 README text values and all three intended link destinations. Cleared obsolete whole-cell links in B17:B25 and verified no link URI remains there. Backup includes original formatting for rollback of this additional link-field cleanup. Application code/tests were not changed or rerun for this document-only operation. Status: HUMAN_GATE for RD workflow acceptance; direct integration remains pending, not LOCAL_VERIFIED integration.
 
 Before snapshot and exact scoped requests: ignored local-only/RD_TAB_CONSOLIDATION_BEFORE_2026-09-08.json. Rollback restores original hidden flags and only A14:B25 values/text runs after checking for intervening edits. No business values or formulas are in the change request.
 
