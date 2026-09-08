@@ -1,5 +1,11 @@
 # Task handoff
 
+## IN price semantics confirmed — 2026-09-08 (latest)
+
+Owner confirms Price = total amount for that receipt; Unit Cost = per-unit price for that receipt; both exclude VAT/freight. REGISTRY now records the mapping, quantity × unit-cost reconciliation, pending rounding/unit/currency checks and separate freight evidence. Price meanings and VAT/freight inclusion are resolved; the older pending-price-semantics text below is historical. PO link remains intentionally deferred. Remaining integration dependencies: unit basis/currency, rounding/tolerance, stable line/event identity, Ref→PO and posted/return/reservation semantics. No new sheet, live read/write or runtime change this round.
+
+status: WAITING_FOR_INPUT for remaining integration mapping, not price definitions. task_id: cost-calculator-implementation-2026-09-05; issue_id/pr_reference: none. files_changed: REGISTRY.md, TASK.md. tests_run: document diff/consistency check; no runtime tests rerun for documentation-only changes. security/database/permission/dependency impact: none. rollback: revert this documentation commit. open_risks: source adapter and reconciliation remain unimplemented; no UAT/deploy claim.
+
 ## PO scan / IN source mapping — latest clarification 2026-09-08
 
 Owner confirmed PO scans in Google Drive; link intentionally deferred. Placeholder fields poDriveFolderUrl/poDocumentUrl remain null in design. Inventory price source now identified as IN; metadata plus six first-row header reads succeeded. REGISTRY records candidate columns and unresolved meanings (Price vs Unit Cost, UOM/tax/freight, Ref→PO, stable line identity, Type/posted/reversal, reservation netting). No business rows/formulas read, workbook edits, runtime changes or new sheets.
