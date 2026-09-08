@@ -152,6 +152,17 @@
  document.getElementById('costInPaste').value='Qty\tUOM\tPrice\tUnit Cost\n100\tpiece\t123.45\t1.2345\n1\tbox\t1.001\t1';document.querySelector('button[onclick="costCheckInPreview()"]').click();
  check('IN preview shows exact arithmetic and sub-cent warning',document.getElementById('costInResult').textContent.includes('123.45')&&document.getElementById('costInResult').textContent.includes('ผลต่างต่ำกว่า 0.01'));
  check('IN preview explicitly keeps PO evidence pending',document.getElementById('costInResult').textContent.includes('PO: รอหลักฐาน'));
+ window.__costTestInSource=async()=>({mode:'synthetic',asOf:'2026-09-08T00:00:00Z',rows:[{id:'SYN-IN-1',date:'2026-09-01',docNo:'DEMO-D1',ref:'DEMO-PO1',newCode:'DEMO-PK1',oldCode:'DEMO-OLD',name:'กล่องสังเคราะห์',lot:'L1',qty:'10',uom:'piece',price:'1100',unitCost:'110'},{id:'SYN-IN-2',date:'2026-09-02',docNo:'DEMO-D2',ref:'DEMO-PO1',newCode:'DEMO-PK1',oldCode:'DEMO-OLD',name:'กล่องสังเคราะห์',lot:'L2',qty:'10',uom:'piece',price:'1101',unitCost:'110'}]});
+ await costInRefresh();
+ check('IN lookup lists two rounds without auto-selection',document.querySelectorAll('[data-in-id]').length===2&&document.getElementById('costInSelected').textContent.includes('ยังไม่ได้เลือก'));
+ document.getElementById('costInQuery').value='DEMO-OLD';document.getElementById('costInQuery').dispatchEvent(new Event('input',{bubbles:true}));
+ check('IN lookup searches old code without collapsing lots',document.querySelectorAll('[data-in-id]').length===2);
+ document.querySelector('[data-in-id="SYN-IN-2"]').click();
+ check('IN chosen receipt checks its own amount with PO pending',document.getElementById('costInSelected').textContent.includes('ผลต่าง 1.00')&&document.getElementById('costInSelected').textContent.includes('PO: รอหลักฐาน'));
+ document.getElementById('costInFrom').value='2026-09-02';document.getElementById('costInFrom').dispatchEvent(new Event('change',{bubbles:true}));
+ check('IN date filter keeps only the matching round and clears selection',document.querySelectorAll('[data-in-id]').length===1&&document.getElementById('costInSelected').textContent.includes('ยังไม่ได้เลือก'));
+ document.getElementById('costInQuery').value='absent';document.getElementById('costInQuery').dispatchEvent(new Event('input',{bubbles:true}));
+ check('IN empty search is explicit',document.getElementById('costInLookupRows').textContent.includes('ไม่พบรายการ'));
  userList=[{name:currentUser,role:'rd'}];renderUserUI();await openCostCalculator('A00004');
  check('RD sees source version but no PK recording or IN entry controls',costState.response.pkCandidate.versionLabel.includes('SYN-S1')&&!document.getElementById('costPkSourceSnapshot')&&!document.getElementById('costInPaste'));
  await costAdoptPK();const adoptedPk=costLatestEntry('A00004','S1').scenario.pk;if(!adoptedPk)throw Error('PK adoption: '+costState.error);

@@ -1,5 +1,9 @@
 # Cost Calculator — UAT and release worksheet
 
+## IN lookup extension — 2026-09-08, human execution pending
+
+In the synthetic demo, choose PU-PK and click โหลดรายการรับเข้า. Search DEMO-PK1: two receipt lots must remain separate. Select each: expected arithmetic variance 0.00 and 1.00, both PO pending. Search DEMO-OLD1 for the same two receipts; set start date 2026-09-02 for only the second. A search without matches must say so; filters must clear the previous selection. Reload failures retain prior data with an error warning; role changes must hide the lookup and ignore in-flight replies. No real-source link is displayed for synthetic rows. This verifies the screen only; the live source connector and actual-source reconciliation remain unavailable. Manual paste is an optional collapsed fallback.
+
 Status: PREPARED, NOT EXECUTED. No business acceptance is inferred from synthetic tests. P24–P26 remain human/operator gates.
 
 Before UAT: approve the version/access contract; implement trusted persistence and project-scoped reads/writes; close legacy Formula disclosure routes; verify physical RM/PK mapping in a non-production environment; provide versioned STD/loss/pricing/rounding values. Use sanitized projects and test recipients. No actual external messages during automated tests.
