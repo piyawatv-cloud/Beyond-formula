@@ -1,5 +1,18 @@
 # Task handoff
 
+## RM unified selection prototype — 2026-09-08
+
+Task: cost-calculator-implementation-2026-09-05; issue_id: none. Owner approved next sequence and confirmed AVAILABLE-only/onhand-without-extra-Reserve-deduction semantics. Scope: synthetic interaction prototype and registry in this worktree only, no production application edits. Gate: G2/G4 prototype, human UAT pending; reviewer @phossatron for eventual integration.
+
+Prototype docs/prototypes/rm-selection.html + rm-picker.js presents one search across three synthetic catalog offers and AVAILABLE stock lots; filters by source, shows spec/price+MOQ+LT on offers and lot/onhand/UOM on stock, supports explicit in-memory draft selection. Verified catalog mapping can display matching AVAILABLE stock in the same UOM; similar names/specs never auto-map. New material remains draft with unknown stock. Selection from inventory does not silently use IN prices. No sheet/master/store created. Prototype rules are not imported into production: integrate into the existing canonical domain after live mapping review, do not retain a second production rule implementation.
+
+
+Prototype verification: LOCAL_VERIFIED / HUMAN_GATE for workflow acceptance; live integration WAITING_FOR_INPUT (sanitized source implementation and authenticated item/spec/UOM/status binding). Tests run fresh: full module suite 416/416, existing calculator browser 71/71, parent browser 37/37, SQL 33 PASS checks, additional prototype browser 9/9. Seven targeted mutations caught: AVAILABLE filter, Reserve subtraction, mapping confirmation, spec, UOM, unknown quantity and direct selection guard; source restored. Initial prototype test failed before implementation, then passed 4/4. Browser screen visually inspected; local URL responds HTTP 200. No tests skipped or old assertions removed.
+
+files_changed: REGISTRY.md, TASK.md, docs/UAT_COST_CALCULATOR.md, docs/prototypes/rm-selection.html, docs/prototypes/rm-picker.js, tests/rm-picker-demo.test.js, tests/rm-picker-browser.fixture.js, tools/run-rm-picker-browser.js. Security/permission impact: isolated synthetic page has no authenticated data or role grant, network blocked by CSP; live RM access must use existing role gates, this page is not a production permission implementation. Database/dependency impact: none; production index.html unchanged. Rollback: revert this prototype commit and remove its two served demo copies, leaving fs_cost intact. pr_reference: none; no push/deploy/production read or messages. Limits: synthetic kg-only examples, single stock lot selection, no live refresh or conversion or final price policy; not end-to-end real-data UAT.
+
+Reproduce: node --test 'cost calculator by project/tests/rm-picker-demo.test.js'; node 'cost calculator by project/tools/run-rm-picker-browser.js'. Copy docs/prototypes/rm-selection.html and rm-picker.js into the existing bounded .runtime/pk-workflow-demo directory to expose /rm-selection.html on the local synthetic server.
+
 ## IN receipt lookup screen — owner-approved direction 2026-09-08
 
 Task cost-calculator-implementation-2026-09-05; Issue none. Scope: existing local calculator UI and synthetic-only read seam, within this worktree; reviewer @phossatron. Critical Change for reconciliation/permission boundary review, no new grants. Replaced the primary paste-only workflow with search by New Code/Old Code/name/document/ref/lot, inclusive date filtering, all receipt rounds, explicit selection and the existing exact-decimal checker. Manual paste remains a collapsed fallback. A receipt selection is never a PO match or inventory write.

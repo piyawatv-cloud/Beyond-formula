@@ -88,7 +88,7 @@ RM/PU-PK คง authority ข้อเสนอเดิม; PO/receipt/movement
 | ราคาเปรียบเทียบ | IN: Price, Unit Cost | เจ้าของยืนยัน: Price = ราคารวมรอบรับ; Unit Cost = ราคาต่อ 1 UOM ในแถวเดียวกันเสมอ; ไม่รวม VAT/ขนส่ง สกุลเงิน THB แสดงทศนิยม 2 ตำแหน่งพร้อม comma หลักพัน |
 | Item master | Master Item: New Code, Old Code, UOM, Vendor name, Cost per unit, Lead Time, MOQ, Pack side | ใช้ master เดิม; Cost per unit ไม่แทนราคา IN ราย lot/เอกสาร และไม่แทนข้อเสนอปัจจุบัน |
 | ประวัติสำรองราคา | IN Price Snapshot: Run ID, Captured At, Source Row, Doc No, Ref, Canonical Item Code, Lot, Price, Unit Cost, Restore Status | ไม่รวมเป็นรับเข้าอีกชุด; header ดูเป็น snapshot/restore แต่ semantics ยังไม่ตรวจ ห้ามเลือกเป็นแหล่งหลักแทน IN |
-| ปริมาณสำหรับ planning | Stock onhand: UOM, คงเหลือ, Location, status; Reserve: Qty, UOM, Ref, QO No | ยังไม่ยืนยันว่าคงเหลือหักจองแล้วหรือไม่; ไม่ net reservation ซ้ำ |
+| ปริมาณสำหรับ planning | Stock onhand: UOM, คงเหลือ, Location, status; Reserve: Qty, UOM, Ref, QO No | เจ้าของยืนยัน 2026-09-08: อ่านคงเหลือของ status = AVAILABLE เท่านั้น; ไม่หัก Reserve เพิ่ม เพราะ workflow ปัจจุบันตัดออกเลย; ต้องตรวจ binding กับโค้ดต้นทางก่อนเชื่อมจริง |
 | Movement | Qty (g) IN, Qty (g) OUT, New Code, Lot (IN) | มีหัวหน่วย g; ห้ามแปลง PK จำนวนชิ้นเป็น g หรือใช้เป็น event ledger โดยยังไม่ตรวจ |
 
 PO scan pipeline ที่เตรียมรองรับ: Drive file ID/version → extraction candidate ระดับหน้า/รายการพร้อมตำแหน่งหลักฐาน → ผู้รับผิดชอบตรวจยืนยันเลข PO/รายการ/item/spec/จำนวน/หน่วย/ราคา/สถานะ → จึงใช้เทียบ IN ได้ ข้อความ OCR ไม่ใช่ข้อมูลยืนยัน; อ่านไม่ชัดต้องค้าง ไม่เดา และไม่ส่งเอกสารไป OCR ภายนอกจนมีช่องทางที่ได้รับอนุมัติ ไฟล์ PO scan อย่างเดียวไม่ยืนยันยอดค้าง/ยกเลิก/กำหนดรับล่าสุดสำหรับ MRP ต้องมีแหล่งสถานะหรือผู้รับผิดชอบยืนยันเพิ่ม
@@ -359,3 +359,9 @@ Implementation tracking: [Plan](docs/IMPLEMENTATION_PLAN.md) owns the current P0
 5. **ช่องปริมาณอยู่บนแถวเดียวกับข้อเสนอที่เลือก** พร้อมราคาต่อหน่วยผลิตขึ้นทันทีที่พิมพ์ (`amount × pricePerKg`) — RD เห็นผลของตัวเลขทันที ไม่ต้องรอบันทึก
 6. **แสดง "ใช้ได้ถึง N kg" และ MOQ เป็นคำ ไม่ใช่รหัส** ในตัวเลือก — ตัดสินใจ Tier ได้ในบรรทัดเดียว
 7. **ปุ่ม "ไม่พบ → ขอจัดหา" อยู่ท้ายผลค้นหาทุกครั้ง** ส่งชื่อสารและใบงานไปให้จัดซื้อโดยไม่ต้องพิมพ์ซ้ำ
+
+### 8. RM picker / stock semantics — owner confirmation 2026-09-08
+
+Owner states Stock onhand คงเหลือ does not subtract Reserve; the current operational workflow deducts directly. The calculator must consume the supplied balance unchanged and must not subtract Reserve a second time or infer reserved quantity from it. Only exact status AVAILABLE rows may be visible or selectable in the RD stock picker. Other/unknown statuses are excluded at projection and selection; no new stock status policy is invented. This owner statement establishes intended semantics, not verification of the live formula or event timing.
+
+RD Data Center and inventory remain separate authoritative sources. Unified search is a view, not a new material master or sheet. Stock balances attach to a catalog offer only through an explicitly confirmed item/spec/UOM reference, never similarity of name. New materials can remain unmapped with unknown balance, distinct from zero. Stock selection identifies item/lot only; it does not select IN price, reserve stock, record consumption, or prove offer→PO→IN reconciliation. The existing PO evidence chain still applies to actual purchase verification. Live identity binding, authenticated RM-only projection, source freshness/complete snapshot, conversion, approved price basis and source status implementation remain integration gates.

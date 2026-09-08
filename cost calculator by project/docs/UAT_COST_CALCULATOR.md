@@ -96,3 +96,7 @@ Build 2026-09-08.2-pk-in-review. Local-only; manual PU-PK amount/provenance entr
 | PK-IN-08 | Switch to RD then Sales/OPC | RD can adopt, cannot enter raw PK/IN through these controls; Sales/OPC cannot enter calculator or obtain source values through summary |
 
 Reviewer records actual actor role, build, case, expected/actual, time, and PASS/FAIL with sanitized evidence. Human execution: NOT_RUN. Direct-read end-to-end UAT is BLOCKED until source mapper/transport exists. CODEOWNER and Runtime Operator gates unchanged.
+
+## RM combined picker prototype — human acceptance pending
+
+Open /rm-selection.html on the synthetic local demo. Search Alpha: compare 95% vs 98%, two sources and separate lots. Choose RD 95%: confirmed sample mapping shows 10.00 kg; enter 12 kg and see 2.00 kg shortage without a Reserve deduction. Choose stock LOT-A: selected lot shows 8.00 kg and price basis pending. Search Beta: choose a new material with no stock code, retain a draft with spec/purchase conditions pending. Search 98%: catalog offer stays unmapped despite a similarly named stock item. No HOLD/unknown status row appears; selections never reserve, deduct, update prices or save fs_cost. These are demonstration expectations, not real-data UAT evidence.
