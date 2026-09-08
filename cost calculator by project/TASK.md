@@ -1,5 +1,10 @@
 # Task handoff
 
+## Source connection design — 2026-09-08 (new owner request)
+
+ผู้ใช้ขอปรับ RD Data Center และ PU-PK ให้รับข้อมูลต้นทุนต่อเนื่อง งาน Phase E เดิมยัง LOCAL_VERIFIED; งานเชื่อมใหม่แยกตาม [RM/PK connection design](docs/design/RM_PK_CONNECTION_DESIGN.md) C0–C6. ตรวจสอง workbook แบบ read-only แล้ว โดยไม่เปลี่ยนข้อมูลหรือ source script. กำลังรอเลือกช่องทาง direct-read หรือ versioned-file (C1); คำขอใหม่ไม่ถือว่าเปลี่ยน ADR local-first หรืออนุมัติ deploy. ยังไม่เริ่ม runtime implementation และไม่ใช้สถานะ APPROVED/email sent แทน commercial confirmation/receipt.
+
+
 ## Status clarification — 2026-09-06
 
 The previous combined label is split below. **LOCAL_VERIFIED is a completed verification result, not a blocker.** Integration cannot be marked passed without the listed evidence. Missing per-material data and pricing inputs block only affected calculations/quotation readiness, not all draft Formula/RM work.
