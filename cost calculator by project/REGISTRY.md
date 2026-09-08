@@ -1,5 +1,95 @@
 # Ownership & integration registry
 
+## ข้อมูลต้นทุน → PO → รับเข้า → MRP/Forecast — 2026-09-08
+
+คำสั่งใหม่ให้เตรียมการแยกประเภทครอบคลุมโครงสร้างต้นทุน เพื่อทวนสอบ IN inventory และต่อยอด MRP/Forecast โดยไม่เพิ่มชีตเกินจำเป็น ส่วนนี้เป็น **logical contract สำหรับพัฒนาต่อ ยังไม่ใช่ schema/runtime ที่ติดตั้งแล้ว** ไม่เปลี่ยน ID/storage/สิทธิ์เดิม ไม่สร้าง PO หรือรับเข้าอัตโนมัติ และไม่เพิ่ม WMS เป็น gate ของ Phase E เดิม
+
+### 1. แยกหมวด องค์ประกอบ และชนิดหลักฐาน
+
+| มิติ | ค่า | ความหมาย |
+|---|---|---|
+| costCategory | RM / PK / OPERATION / OTHER | หมวดต้นทุน; OTHER ต้องมีรายละเอียด |
+| costElement | MATERIAL / DL / OH / SETUP / TOOLING / TESTING / FREIGHT / SERVICE / OTHER | องค์ประกอบ ไม่เปลี่ยนหมวดหรือกฎการบวกราคาเดิม |
+| evidenceType | ตามตารางถัดไป | ตัวเลขมาจากประมาณการ ภาระซื้อ หรือเหตุการณ์จริง |
+| receiptMode | STOCK / SERVICE / ASSET / NONE / UNRESOLVED | เจ้าของข้อมูลยืนยันตามรายการ ไม่เดาจากหมวด; tooling อาจเป็นสินทรัพย์ บริการบรรจุไม่ใช่ stock PK |
+
+| evidenceType | เจ้าของ / ใช้เมื่อ | ไม่ใช่ |
+|---|---|---|
+| SUPPLIER_OFFER | Procurement RM / PU-PK: ข้อเสนอราคา ใช้ประมาณการเมื่อเลือกเวอร์ชันและผ่าน gate ซื้อ/spec/หน่วย/อายุ/ขอบเขตเดิม | PO, stock หรือการรับประกันว่าจะซื้อได้ |
+| STANDARD_RATE | Production ยืนยันเวลา/กำลังผลิต; Finance ยืนยันอัตรา ฐานจัดสรร วันที่มีผล และสิ่งที่รวมใน STD | ค่าใช้จ่ายเกิดจริง |
+| COST_ESTIMATE | ผลคำนวณ revision ที่อ้างอิงข้อเสนอและ STD; draft แสดงข้อค้าง | demand ยืนยัน หรือ stock movement |
+| PURCHASE_ORDER | PO line/revision จากระบบจัดซื้อเดิม; ยืนยันสถานะ ยอดค้าง และกำหนดรับ | on-hand หรือต้นทุนจริงครบถ้วน |
+| GOODS_RECEIPT | คลังรับจริงระดับ line/lot; posted และอ้าง PO/item/หน่วย แยก received/accepted/rejected/quarantine | ของพร้อมใช้ทั้งหมด หรือการอนุมัติราคาสุดท้าย |
+| STOCK_MOVEMENT | คลัง: IN/OUT/คืน/โอน/ปรับ/กลับรายการ พร้อม event ID | ทุก IN เป็นการซื้อ หรือทุก OUT เป็นใช้ผลิต |
+| SERVICE_ACCEPTANCE | เจ้าของงานยืนยันผลงานบริการ/เวลา/งวด | จำนวน stock |
+| ACTUAL_RESOURCE_USAGE | Production/คลัง: เบิกใช้สุทธิ ชั่วโมงจริง driver จริง ผูก batch/operation; วัสดุอ้าง movement เดิม | ค่าใช้จริงจากยอดซื้อหรือยอดรับ |
+| INVOICE_ADJUSTMENT | Finance: invoice/credit/debit/ค่าใช้จ่ายเพิ่ม หลังตรวจหน่วย สกุลเงิน ภาษี และการจัดสรร | ปริมาณรับเข้า หรือราคาที่เทียบได้ทันที |
+| FORECAST_DEMAND | ความต้องการคาดการณ์ตาม item/spec/จำนวน/หน่วย/ช่วงเวลา/scenario/version; owner รอยืนยัน | คำสั่งซื้อหรือ demand ยืนยัน |
+| CONFIRMED_DEMAND | ระบบคำสั่งงาน/คำสั่งซื้อเดิม: สถานะยืนยัน ยอดค้างและวันใช้; owner รอยืนยัน | forecast อีกก้อนที่นำมาบวกซ้ำ |
+
+ชนิดหลักฐานไม่ใช่ lifecycle เดียว: ห้ามเปลี่ยนข้อเสนอเดิมเป็น PO ให้เชื่อม reference ไป PO ที่เกิดจริง แยก sourceStatus, validationStatus และ confirmationRef ไม่ใช้ APPROVED/ส่งอีเมลแล้วแทนทุก gate
+
+### 2. Field dictionary ของการเชื่อม (ไม่ใช่ให้กรอกซ้ำทุกชีต)
+
+| กลุ่ม logical fields | ข้อกำหนด |
+|---|---|
+| sourceSystem / sourceRecordId / sourceLineId / sourceVersion | คีย์ระดับรายการพร้อม namespace; ชื่อและเลขแถวไม่ใช่ identity |
+| sourceEventId / eventType / reversalOf | แยกเหตุการณ์จริงจาก correction; นำเข้าซ้ำไม่เพิ่มยอด; reversal ไม่ลบหลักฐาน |
+| occurredAt / postedAt / observedAt / sourceStatus | แยกวันเกิด วันลงรายการ และวันอ่าน ไม่ใช้วัน import แทนวันรับ |
+| materialId / inventoryItemRef / specRevision / mappingRef | map ไป master เดิมพร้อมผู้รับรอง/version/วันที่มีผล; คง RMS-/RD-Code/PK IDs เดิม ห้าม join ชื่อคล้ายแล้วผ่านเอง |
+| quantity / uom / baseQuantity / baseUom / conversionRef | เก็บหน่วยต้นทาง; box→piece ต้อง pack/spec version ที่ยืนยัน; ห้ามแปลงมวลเป็นจำนวนโดยเดา |
+| unitPrice / priceBasisQuantity / priceUom / currency / taxBasis / includedCharges | แยกฐานราคาและหน่วยซื้อ; แสดงราคาตามสิทธิ์เดิม ไม่รวมคนละสกุล/ฐานภาษีโดยเดา |
+| projectRef / costJobRef / scenarioRevision / formulaRevision / batchRef | อ้าง master เดิมตาม applicability; PO กลางไม่จำเป็นต้องผูก project เดียว |
+| offerRef / pkSnapshotRef / poLineRef / receiptLineRef / movementRef / invoiceLineRef | หลายต่อหลายผ่าน allocation; PO หนึ่ง line รับหลายครั้ง/หลาย lot และ invoice รวมหลาย line ได้ |
+| allocationRef / allocatedQuantity / allocationUom | บันทึกปริมาณที่จับคู่แต่ละคู่; รวมไม่เกินต้นทางที่ใช้ได้ ไม่จัด supply ซ้ำหลายงาน |
+| lotRef / warehouseRef / locationRef / qualityStatus / expiryDate | stock เท่านั้น; รับแล้วไม่เท่ากับพร้อมใช้; shelf-life ตามงานรอ policy |
+| confirmationRef / mappingApprovedBy / mappingApprovedAt / evidenceRef | เก็บหลักฐานและผู้รับรองจาก authority จริง ไม่พิมพ์ชื่อแทนสิทธิ์ |
+
+ฟิลด์ไม่ทราบ = pending ไม่ใช่ 0; ไม่เกี่ยวข้องต้องมีเหตุผล ระบบอ่านจากเจ้าของข้อมูลก่อนและถามเฉพาะสิ่งขาด ไม่มีการเปลี่ยน locked schema โดยเอกสารนี้
+
+### 3. กติกาทวนสอบ IN inventory
+
+1. ตรวจ ID/version/event, posted status, item/spec mapping และหน่วยก่อน; ขาดใช้ PENDING_EVIDENCE / MAPPING_REQUIRED ไม่ใช่ MATCHED
+2. เทียบ PO line กับรับสะสมสุทธิจาก receipt/return/reversal ตาม semantics ของต้นทางและยอดค้าง PO ล่าสุด แยก PARTIAL / OVER_RECEIPT / CANCELLED_PO_RECEIPT / SPEC_MISMATCH / UNIT_MISMATCH
+3. เทียบ receipt กับ movement IN ที่อ้าง line เดียวกันระดับ item/lot/หน่วย; โอนเข้า ปรับยอด คืนจากผลิต และยอดตั้งต้นเป็นคนละประเภท ไม่จับทั้งหมดเป็นการรับจาก PO
+4. รายงานผลจำนวน identity/spec คุณภาพ ราคา และสถานะเอกสารแยกกัน: จำนวนตรงแต่ราคาต่างไม่ใช่ผ่านทั้งหมด ไม่มี invoice ให้ส่วนราคาค้างโดยเก็บหลักฐานรับจริงไว้
+5. เทียบ offer→PO→invoice เฉพาะฐานเดียวกัน แยก freight/adjustment ไม่ทับ estimate เดิม; quantity/price tolerance และผู้อนุมัติผลต่างยังรอยืนยัน ห้าม auto-pass ด้วยค่าที่เดา
+6. ตรวจ duplicate/orphan, รับบางส่วนหลายครั้ง/หลาย lot, เอกสารลงย้อนหลัง, คืน/กลับรายการ; เก็บ cutoff/as-of และ version ชุดหลักฐานเพื่อทำซ้ำได้ ผล reconcile ไม่เขียนแก้ stock/PO
+
+### 4. MRP และ Forecast
+
+- Forecast กับ confirmed demand แยก version/ช่วงเวลา/ที่มา การเปลี่ยนเป็น confirmed ใช้ consumption/allocation reference และนโยบายที่ยืนยันเพื่อไม่บวกซ้ำ; โคลนใบงานต้นทุนไม่เพิ่ม demand
+- MRP ใช้ formula/BOM/spec/routing revision ที่ผู้รับผิดชอบยืนยันสำหรับ planning พร้อมหน่วย ขนาดบรรจุ batch และ loss ตามขั้นเดิม ห้ามบวก loss ซ้ำกับ PK snapshot
+- Eligible on-hand ต้องผ่าน quality/expiry/ข้อจำกัดและการจอง; open PO ใช้เฉพาะยอดค้างที่ยังไม่ยกเลิกและมีวันรับ การรับบางส่วนต้องไม่ถูกนับทั้ง scheduled receipt และ on-hand
+- Net ตาม time bucket และวันต้องใช้ จาก demand ที่ตัดการซ้ำแล้วเทียบ supply ที่ทันเวลา; หาก available balance หัก reservation แล้ว ห้ามหักซ้ำ ต้องตรวจ semantics ต้นทางก่อน
+- ผล MRP เป็นข้อเสนอจัดหาพร้อม as-of/need date/ข้อค้าง ใช้ MOQ/order increment/LT ที่ยืนยัน; ไม่สร้าง PO ไม่เลือก vendor/Tier/spec ใหม่ให้เอง และไม่ถือข้อเสนอราคาเป็น scheduled receipt
+- Operation ใช้ capacity/labor planning แยกจาก material MRP; service/tooling วางแผนตาม receiptMode ไม่ net กับ stock RM/PK
+- ยังรอ owner ของ forecast, horizon/bucket, consumption policy, safety stock, yield/loss, shelf-life, calendars และ receiving/inspection LT; ไม่ใส่ค่าจำลองเป็น policy หากขาดแสดง gross demand/ข้อค้าง ไม่อ้างว่าแผนซื้อพร้อมใช้
+
+### 5. Source ownership และระบบที่ไม่เพิ่มชีตซ้ำ
+
+RM/PU-PK คง authority ข้อเสนอเดิม; PO/receipt/movement/invoice อ่านจากระบบเจ้าของที่ยังรอระบุ ไม่สร้างทะเบียน PO สำเนาใน RM/PK รอบนี้เพิ่มชีต **0** การแยกประเภทเป็นข้อมูลและ reference ไม่ใช่ประเภทละชีต
+
+หน้าระบบในอนาคตใช้มุมมองจากข้อมูลชุดเดียว: ประมาณการ / จัดซื้อ / รับเข้าและผลต่าง / วางแผน อ่าน snapshot แล้ว delta ตาม source ID/version เมื่อรองรับ; หากไม่มี delta ใช้ bounded snapshot ตรวจครบก่อนสลับ cache ไม่อ่านทุกแท็บทุกครั้งที่ค้น รักษา cache เก่าพร้อมแจ้งอายุเมื่อ refresh ล้มเหลว และไม่ทับ revision ที่เลือกแล้ว ความเร็วต้องวัดจริง ไม่ถือการซ่อนแท็บว่าเพิ่มความเร็ว sync
+
+สิทธิ์เดิมไม่ขยายตาม reference: Sales/OPC ไม่ได้ supplier/ราคาต้นทางผ่าน PO หรือ drill-through และงานนี้ไม่เปิดต้นทุนข้ามฝ่ายเพิ่ม ก่อนใช้งานต้องมี sanitized mapping, owner รับรอง semantics, synthetic tests + mutation ของกฎใหม่, CODEOWNER review และ operator deploy
+
+### 6. ตัวอย่างทวนสอบสังเคราะห์สำหรับ implementation (ยังไม่ใช่ผลเทสต์)
+
+| กรณี | ผลที่ต้องได้ |
+|---|---|
+| PO 100 piece รับ 40 และ 60 คนละ event | รับสะสม 100, ยอดค้าง 0; import event 40 ซ้ำยอดไม่เพิ่ม |
+| กลับ receipt 60 โดย reversal reference | ยอดรับสุทธิ 40; ยอดค้างตรวจตามสถานะ PO ต้นทาง ไม่เดาว่า reopen |
+| PO 10 box รับ 100 piece ยังไม่มี conversion | UNIT_MISMATCH/PENDING_EVIDENCE ไม่ MATCHED |
+| item ชื่อเดียวกัน spec ต่าง | SPEC_MISMATCH ไม่รวม stock หรือทดแทน BOM |
+| รับ 100 แต่ quarantine 20 | ไม่ถือ 100 ว่า eligible; ส่วน 80 ยังต้องตรวจ reservation/expiry |
+| โอนเข้า 50 โดยไม่มี PO | จัดเป็น transfer ไม่เป็น orphan purchase receipt |
+| ข้อเสนอ 10 บาท/ชิ้น PO 12 บาท/ชิ้น ฐานเดียวกัน | ผลต่าง +2 แยกจากจำนวน; estimate revision เดิมคง 10 |
+| บริการ 8 ชั่วโมง | SERVICE_ACCEPTANCE ไม่เพิ่ม stock 8 |
+| forecast 100 และ confirmed 40 ที่ consume forecast เดียวกันตาม policy | demand 100 ไม่ใช่ 140; policy ไม่ยืนยันให้ค้าง |
+| STD รวม setup แล้วและมี setup อีกบรรทัด | ต้องตรวจ inclusion/การจัดสรร ไม่บวกซ้ำ |
+
+
 | Domain | Authority / Owner | Current status |
 |---|---|---|
 | Customer/project brief | Project Formula / Sales | integration mapping pending |

@@ -1,5 +1,22 @@
 # Task handoff
 
+## Cost evidence classification — 2026-09-08 (latest owner request)
+
+task_id: cost-calculator-implementation-2026-09-05; issue_id: none. Owner: System Owner; reviewer: @phossatron for future integration. Allowed: this worktree only. Environment: local documentation, synthetic examples. Change: data/integration design; future synchronization/reconciliation implementation is Critical Change. No source data, live writes, permission changes or deployment in this round.
+
+| Local work item (not Issue ID) | Status | Deliverable / next dependency |
+|---|---|---|
+| Classification contract | CREATED — design only | REGISTRY: categories, evidence types, receipt modes and ownership covering RM/PK/Operation/other costs |
+| Traceability contract | CREATED — design only | Source/line/version/event references, item/spec/unit mapping, allocations and reversal semantics |
+| Reconciliation and planning criteria | CREATED — design only | Quantity/price/quality checks, forecast consumption, time-based supply; ten synthetic acceptance examples, not executed business tests |
+| PO/Inventory mapping | WAITING_FOR_INPUT | Owner to identify PO and stock receipt/movement systems, stable item/line/event keys, unit conversions and sanitized headers/status semantics |
+| Adapter and screens | NOT_STARTED | Implement only after source mapping; preserve existing masters, permissions and local-first contract; synthetic mutation tests and CODEOWNER review required |
+| Planning policies | WAITING_FOR_INPUT | Forecast owner/horizon/bucket/consumption; safety stock, calendars, yield/loss, shelf-life and tolerances; no invented defaults |
+
+RD navigation is now four visible tabs (26 retained), verified in docs/design/RD_DATA_CENTER_UI_CHANGE_2026-09-08.md. Owner's latest direction is system retrieval; earlier text waiting for a transport choice is historical. Direct retrieval is still unimplemented. This classification adds zero sheets and does not claim integration, MRP or UAT completion.
+
+Verification this round: existing module suite 392/392 (0 skipped), calculator browser 54/54, parent browser 37/37; SQL script exited 0 with PASS authorization/rollback contract. Logs: .runtime/classification-{module,browser,parent,sql}.log (local only). These verify the unchanged baseline, not the proposed classification rules. git diff --check clean. files_changed: REGISTRY.md, SPEC.md, TASK.md. Runtime security/database/permission/dependency impact: none. Rollback: revert this document-only change. open_risks: mapping and policies above; no claim of operational correctness before adapter tests/UAT. status: WAITING_FOR_INPUT for integration. pr_reference: none.
+
 ## Source connection design — 2026-09-08 (new owner request)
 
 ผู้ใช้ขอปรับ RD Data Center และ PU-PK ให้รับข้อมูลต้นทุนต่อเนื่อง งาน Phase E เดิมยัง LOCAL_VERIFIED; งานเชื่อมใหม่แยกตาม [RM/PK connection design](docs/design/RM_PK_CONNECTION_DESIGN.md) C0–C6. ตรวจสอง workbook แบบ read-only แล้ว โดยไม่เปลี่ยนข้อมูลหรือ source script. กำลังรอเลือกช่องทาง direct-read หรือ versioned-file (C1); คำขอใหม่ไม่ถือว่าเปลี่ยน ADR local-first หรืออนุมัติ deploy. ยังไม่เริ่ม runtime implementation และไม่ใช้สถานะ APPROVED/email sent แทน commercial confirmation/receipt.

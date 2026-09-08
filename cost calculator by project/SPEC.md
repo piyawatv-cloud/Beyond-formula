@@ -219,6 +219,12 @@ See [Implementation Plan](docs/IMPLEMENTATION_PLAN.md) for the reviewed requirem
 
 ---
 
+## Data classification extension — คำสั่งใหม่ 2026-09-08
+
+เจ้าของให้เริ่มแยกประเภทข้อมูลทุกหมวดต้นทุน เพื่อทวนสอบการรับเข้า inventory และรองรับ MRP/Forecast ต่อไป ใช้ [REGISTRY — ข้อมูลต้นทุน → PO → รับเข้า → MRP/Forecast](REGISTRY.md) เป็น logical contract กลาง แยกหมวดต้นทุน ชนิดหลักฐาน และวิธีตรวจรับ ไม่สร้างชีตตามประเภทหรือทะเบียน PO ซ้ำ ข้อเสนอที่ยืนยันใช้ประมาณการได้ไม่ใช่การรับประกันการซื้อ; PO ไม่ใช่ stock และยอดรับไม่ใช่ต้นทุนใช้จริง
+
+รอบนี้สร้าง data classification/field dictionary/traceability/reconciliation criteria และตัวอย่างสังเคราะห์ไว้ทวนสอบก่อนทำ adapter ขยายขอบเขตการออกแบบตามคำสั่งใหม่ แต่ยังไม่ติดตั้ง WMS/MRP/Forecast ไม่เปลี่ยน storage/permission หรือเพิ่ม gate ให้ Phase E เดิม การต่อ live ต้องตรวจ source mapping/สถานะ/หน่วยและผู้รับผิดชอบจากระบบ PO/Inventory ที่ยังไม่ระบุ และผ่าน review/deployment เดิม
+
 ## Grill round 9 — ทางเข้า Cost Calculation, dashboard, tab, สิทธิ์ · ข้อยืนยันผู้ใช้ 2026-09-06
 
 ส่วนนี้**มีลำดับเหนือ**ถ้อยคำเดิมที่ขัดกัน โดยเฉพาะ Workflow ข้อ 5 ("Sales ใช้ cost calculator เปรียบเทียบ scenario")
