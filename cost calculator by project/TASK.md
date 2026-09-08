@@ -1,5 +1,11 @@
 # Task handoff
 
+## IN UOM / PO-first identity confirmed — 2026-09-08 (latest)
+
+Owner confirms Unit Cost per 1 UOM of the same IN row. New Code/Old Code are matched primarily against actual PO records, not forced into pre-purchase RD/PU-PK offers. REGISTRY closes these general questions and specifies offer revision → verified PO line → IN line, optional inventory mapping at estimate stage and conditional package conversion only for cross-unit comparison. Same-row Qty × Unit Cost checks can proceed without a formula-unit conversion. No new inventory codes/master sheets or automatic name matches.
+
+status: WAITING_FOR_INPUT only for deferred PO evidence and per-record/source binding (Doc No/Ref, stable line/event IDs, conversion when needed), not for general UOM or code strategy. task_id: cost-calculator-implementation-2026-09-05; issue_id/pr_reference: none. files_changed: REGISTRY.md, TASK.md. tests_run: git diff --check and document consistency review; runtime tests not rerun for documentation-only work. security/database/permission/dependency impact: none. rollback: revert document commit. open_risks: adapter not implemented, actual PO chain unverified. No live reads/writes, deploy, new sheets or UAT claim.
+
 ## THB and monetary display confirmed — 2026-09-08 (latest)
 
 Owner confirms THB and two decimal places with thousands separators (1,234.56). Currency/display precision are resolved, superseding older pending currency/rounding-precision entries. REGISTRY specifies preservation of source precision, monetary-only formatting, proposed deterministic decimal half-up, and no implicit variance tolerance. Remaining: unit basis, source identity/status/PO mapping; PO links intentionally deferred. No live workbook or runtime formatter change in this documentation round.
