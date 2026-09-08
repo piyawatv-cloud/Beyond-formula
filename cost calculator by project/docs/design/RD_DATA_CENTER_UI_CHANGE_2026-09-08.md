@@ -20,3 +20,18 @@ Original affected cells, notes and formatting captured before writing in ignored
 Bounded readback compares requested text/links/notes and original business headers. Inspect README visually and verify filter views are accessible. The API request changes only the declared fields; full business-data equality is not claimed because no complete business-data export is read. No application tests necessary for document-only changes.
 
 Status: PREPARED, not applied at this commit. Critical runtime change: no. security/permission/database/dependency impact: none. open_risks: navigation is only the first usability improvement; unified selection/mapping and fresh-data transport are not implemented here. User UAT remains outstanding.
+
+## Applied and verified
+
+Status: APPLIED_UI_VERIFIED / HUMAN_GATE (user workflow acceptance). Source workbook updated through Sheets API under the owner's explicit RD Data Center edit request. Preparatory Git commit: ea87181.
+
+- First batch validation rejected unsupported TEXT_NOT_EQ in a saved filter. No partial write was reported. Replaced it with hiddenValues ['READY'] plus nonblank RD-Code; the complete corrected batch succeeded.
+- All four filter views were returned with the expected ranges and criteria.
+- Readback: 37/37 requested text/note checks matched; eight navigation links present; original headers in 01/08/10 unchanged.
+- Visual check: README navigation is readable within the existing two-column layout. Browser opened the reference-price filter successfully and displayed 23 rows. This is a filtered reference-price count, not 23 quotation-ready offers.
+- Follow-up: updated README A1 title to “RD Data Center — ค้นวัสดุและตรวจข้อมูล RM”; first two links now open the exact saved filter views directly. Readback confirmed title and both links. Exact follow-up batch recorded in ignored local-only/RD_UI_FOLLOWUP_2026-09-08.json. Original A1 is already in the before snapshot for rollback.
+- No header renaming, physical row sorting, formula/data/confirmation edits, new master sheets, role changes, PU-PK edits, Apps Script execution or application deployment.
+
+Remaining scope: unified spec/Tier/MOQ/LT selection requires verified source identity/projection mapping; direct refresh versus versioned-file transport remains undecided. These navigation changes do not implement the connection or prove faster RD UAT performance.
+
+files_changed: this report (tracked); before/request/follow-up evidence files (ignored local-only). tests_run: bounded API readback, browser visual/filter check, git diff --check. security/permission/database/dependency impact: none. rollback: restore only these document cells/notes and remove the four created filter views after checking for subsequent user changes. pr_reference: none.
