@@ -1,5 +1,14 @@
 # Task handoff
 
+## RM multi-selection prototype — 2026-09-08
+
+Task cost-calculator-implementation-2026-09-05; issue_id none. Owner authorized continuous multi-material selection before live integration. Scope is the existing synthetic prototype and tests/documentation inside the worktree; production application unchanged. Adds a retained list with independent per-scenario kg quantity, removal, explicit offer replacement and whole-draft in-memory revisions. Material identity uses confirmed inventory item/spec/UOM references; unlinked catalog identities remain distinct. Repeated stock lots merge into the same material line without replacing its price or adding duplicate demand. All AVAILABLE lots for that material appear under the line; quantities do not deduct Reserve. No name-based mapping, inventory reservation or deduction. Revision snapshots remain unchanged after draft edits/removal.
+
+
+status: LOCAL_VERIFIED / HUMAN_GATE (prototype workflow acceptance). Baseline module 416; final module 419 passed, zero failures/skips; prototype browser 16/16 (previous nine retained, selected-lot quantity expectation updated to whole-material AVAILABLE balance as explicitly requested), calculator browser 71/71, parent browser 37/37, SQL 33 PASS checks. Seven new mutations caught: duplicate material, duplicate lot, quantity reset, implicit price replacement, disabled explicit replacement, mismatched replacement, shallow revision copy; source restored. Evidence .runtime/rm-multi-*.log and mutation JSON. Visible local browser verified two retained material rows; HTTP 200. Build 2026-09-08.2-rm-multi.
+
+files_changed: docs/prototypes/rm-picker.js, docs/prototypes/rm-selection.html, tests/rm-picker-demo.test.js, tests/rm-picker-browser.fixture.js, TASK.md, docs/UAT_COST_CALCULATOR.md. Security/permission/database/dependency impact: none to production; no grants, network access, store or schema change. Rollback: revert this commit and refresh served prototype copies; real fs_cost unaffected. open_risks: prototype quantities use kg per scenario (not live formula conversion); all drafts/revisions are in-memory and lost on reload; actual source adapter, confirmed identity mapping, role enforcement and live UAT remain pending. pr_reference: none; no push/deploy/messages. Owner acceptance is not yet recorded.
+
 ## RM unified selection prototype — 2026-09-08
 
 Task: cost-calculator-implementation-2026-09-05; issue_id: none. Owner approved next sequence and confirmed AVAILABLE-only/onhand-without-extra-Reserve-deduction semantics. Scope: synthetic interaction prototype and registry in this worktree only, no production application edits. Gate: G2/G4 prototype, human UAT pending; reviewer @phossatron for eventual integration.

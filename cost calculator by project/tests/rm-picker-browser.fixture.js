@@ -7,13 +7,26 @@
   check('HOLD lot never rendered',!$('results').textContent.includes('LOT-H')&&!$('results').textContent.includes('99.00'));
   query('Alpha');check('similar specifications remain separate',$('results').children.length===5);
   source('stock');query('DEMO-RM1');check('stock lookup preserves both receipt lots',$('results').children.length===2);
-  document.querySelector('[data-pick="S1"]').click();$('demand').value='12';$('demand').dispatchEvent(new Event('input'));
-  check('selected stock lot compares its own quantity',$('comparison').textContent.includes('ขาด 4.00 kg'));
-  check('stock selection never silently chooses IN pricing',$('price').textContent.includes('รอยืนยัน'));
+  document.querySelector('[data-pick="S1"]').click();document.querySelector('[data-quantity="0"]').value='12';document.querySelector('[data-quantity="0"]').dispatchEvent(new Event('input'));
+  check('stock material aggregates AVAILABLE lots once',$('basket').firstElementChild.textContent.includes('ขาด 2.00 kg'));
+  check('stock selection never silently chooses IN pricing',$('basket').firstElementChild.textContent.includes('ฐานราคา: รอยืนยัน'));
   source('rd');query('95%');document.querySelector('[data-pick="R1"]').click();
-  check('verified catalog link combines available lots without subtracting reserve',$('comparison').textContent.includes('ขาด 2.00 kg'));
-  query('98%');document.querySelector('[data-pick="R2"]').click();check('similar names do not create stock mapping',$('comparison').textContent.includes('รอคู่รายการคลัง'));
-  query('Beta');document.querySelector('[data-pick="R3"]').click();$('keep').click();check('new material stays draft without stock code',$('draft').textContent.includes('เก็บตัวเลือกในร่างทดลองแล้ว')&&$('price').textContent.includes('รอรับรอง'));
+  check('verified catalog link combines available lots without subtracting reserve',$('basket').firstElementChild.textContent.includes('ขาด 2.00 kg'));
+  query('98%');document.querySelector('[data-pick="R2"]').click();check('similar names do not create stock mapping',$('basket').children[1].textContent.includes('ยังไม่เชื่อมคลัง'));
+  query('Beta');document.querySelector('[data-pick="R3"]').click();check('new material stays draft without stock code',$('basket').children[2].textContent.includes('ยังไม่เชื่อมคลัง')&&$('basket').children[2].textContent.includes('รอยืนยัน'));
+
+  check('continuous selection retains distinct formula rows',$('basket').children.length===3);
+  source('stock');query('DEMO-RM1');document.querySelector('[data-pick="S2"]').click();
+  check('another lot never adds a formula line',$('basket').children.length===3);
+  const qty=document.querySelector('[data-quantity="0"]');qty.value='12';qty.dispatchEvent(new Event('input'));
+  check('basket quantity compares total stock once',$('basket').firstElementChild.textContent.includes('ขาด 2.00 kg'));
+  $('saveAll').click();const saved=$('revisions').textContent;
+  const choose=$('basket').firstElementChild.querySelector('select');choose.value='R1-B';document.querySelector('[data-replace="0"]').click();
+  check('explicit offer change preserves per-line quantity',document.querySelector('[data-quantity="0"]').value==='12'&&$('basket').firstElementChild.textContent.includes('ฐานราคา R1-B'));
+  document.querySelector('[data-remove="1"]').click();
+  check('removal retains other lines',$('basket').children.length===2&&$('basket').textContent.includes('Beta'));
+  check('saved revision is unchanged by draft edits',$('revisions').textContent===saved);
+  $('saveAll').click();check('entire draft saves as next revision',$('revisions').children.length===2&&$('saveStatus').textContent.includes('2 รายการ'));
  }catch(e){check('unexpected exception '+e.message,false);}
  const report={passed:results.filter(r=>r.pass).length,failed:results.filter(r=>!r.pass).length,results};
  const pre=document.createElement('pre');pre.id='rm-results';pre.textContent=JSON.stringify(report);document.body.append(pre);document.documentElement.dataset.rmTest=report.failed?'failed':'passed';
