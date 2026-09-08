@@ -1,5 +1,15 @@
 # RD Data Center — navigation and filter-view change
 
+## Follow-up: fewer visible sheets (prepared)
+
+Owner requested fewer sheets and accurate, fast system retrieval. Keep four visible tabs: 00_README, 01_Ingredients_Master, 02_Price_Map and 08_Price_Catalog. Hide the other 22, retaining all 26 sheets, names, IDs, formulas and history. Update README A14:B25 to three visible navigation links and instructions for opening hidden supporting sheets. Hiding is not a security boundary. No tabs are added or deleted.
+
+Before snapshot and exact scoped requests: ignored local-only/RD_TAB_CONSOLIDATION_BEFORE_2026-09-08.json. Rollback restores original hidden flags and only A14:B25 values/text runs after checking for intervening edits. No business values or formulas are in the change request.
+
+Source inspection: key-column A2:A1000 is empty in Price of Ingredients, 10_Price_Tier_Child and 11_Procurement_Tier_Queue. This bounded observation does not establish full-sheet emptiness. Raw_Price is an IMPORTRANGE with Thai request/offer headers; it is not the English canonical price contract. Do not connect the calculator to these tables through a guessed mapping.
+
+Connection direction from the owner's request: on-demand system refresh, retaining a validated version locally for fast search. Read only the authoritative mapped RM projection, validate identity/Tier/unit/confirmation/scope and version before replacing a cached snapshot atomically. Failed refresh preserves the previous version and exposes freshness; source changes never replace selected revision data automatically. No additional business master or duplicate costing rules. This is a design direction, not an implemented endpoint or measured performance result. The source adapter and confirmation population still need implementation/review before enabling direct retrieval.
+
 Task: cost-calculator-implementation-2026-09-05; issue/PR: none. Owner explicitly requested RD Data Center first. Scope is reversible document navigation, saved filter views and explanatory notes only. No application script, data schema, formula, price, confirmation, raw data, sharing or production runtime deployment change.
 
 ## Concrete change
