@@ -2,6 +2,45 @@
 วันที่ 2026-09-08 · อ้างอิง source HEAD 3358674 · สถานะ PROPOSED / DECISION_REQUIRED
 งานรอบนี้เป็นการทบทวนและออกแบบ ไม่ได้แก้ application หรือแหล่งข้อมูลจริง
 
+## ตรวจหน้าจอจริงเพิ่มเติม — 2026-09-08
+
+ผู้ใช้ยืนยัน RM เป็น workbook **RD Data Center — Live Ingredients & Costing** และ PK ใช้ PU-PK เดิม เปิดอ่านผ่าน browser แล้ว ไม่แก้ชีต ไม่เปลี่ยนสิทธิ์ ไม่ export ข้อมูลธุรกิจ ลิงก์เก็บเฉพาะ local-only/SOURCE_LINKS.md ซึ่ง Git ignore; ไม่คัดลอกราคา ชื่อวัสดุจริง หรือผู้ขายลงเอกสารนี้
+
+ส่วนนี้แทนข้อความ “ยังไม่เห็นหน้าจอจริง” ในการประเมินรอบแรกด้านล่าง ขอบเขตตรวจคือหน้า README และหัวตาราง/การจัดวางของ 01, 02, 03, 08, 09 และ Price of Ingredients; ไม่ใช่ตรวจข้อมูลครบทุกแถว ไม่ได้รันสูตรหรือรับรองความถูกต้องของข้อมูลทั้ง workbook
+
+### สิ่งที่เห็นและผลต่อ solution design
+
+| หน้าจอ | พบจริง | ข้อเสนอ |
+|---|---|---|
+| 00_README | มี 26 visible sheets; README บอกให้ใช้ 01 เลือก, 02 แก้ alias ราคา, 03 ทำสูตร และ 09 ยืนยันซื้อ รวมทั้งระบุราคาอ้างอิงแบบ conservative | ปรับคู่มือทางเข้าให้ตรงกับระบบปัจจุบันก่อน ผู้ใช้ไม่ควรต้องเลือกเองว่าจะทำสูตรใน Sheet หรือ Cost Calculation |
+| 01_Ingredients_Master | หัวตาราง Category, RD-Code, Ingredient Name, Supplier, Master Remark, Stock In, Balance, Inventory Status, Mapped Price, Price Status, Data Quality; มี filter อยู่แล้ว | ไม่ใช่ปัญหาขาด filter แต่เป็นข้อมูลสำหรับตัดสินใจไม่ครบในมุมมองเดียว ย้าย stock/DQ เป็นรายละเอียดเสริม; ให้ spec, MOQ/Tier/LT/expiry/confirmation เห็นพร้อมกันผ่าน projection ที่ตรวจ mapping แล้ว |
+| 02_Price_Map | master name/vendor และ price-source name/vendor อยู่คู่กัน พร้อม Price Tiers (Raw), Costing Price (Max), Price Date | เป็นหน้าจับคู่ของผู้ดูแล ไม่ใช่หน้าเลือกสำหรับ RD; Max ไม่ใช่ selected Tier ของงาน |
+| 03_Formula_Builder | มีหน้า RD Formula Draft & Costing Guide จริง | ต้องระบุว่าเป็น workflow เดิม/อ้างอิง หรือยังมีคนใช้อยู่ ห้ามลบหรือเปลี่ยนสูตรระหว่าง redesign; คำแนะนำหลักคือให้ทำสูตรที่ Cost Calculation ตามคำตัดสินล่าสุด |
+| 08_Price_Catalog | มี Source/Source Row/Price Date/Ingredient/Supplier/Price Tiers (Raw)/Costing Price (Max)/MOQ/Condition | ข้อมูลที่ RD ต้องเทียบกระจายจาก 01 มาอีกหน้า ควรแสดงข้อมูลข้อเสนอที่ normalize/ยืนยันแล้วใน selector เดียว แสดง raw/evidence เมื่อขอรายละเอียด |
+| 09_Procurement_Review | ยังมีคำแนะนำให้ RD ใช้ Formula Builder และจัดซื้อยืนยันราคา/MOQ/LT; filtered range A9:Q39 | ถ้อยคำยังพาผู้ใช้กลับวงจรใน Sheet ต้องชี้เจ้าของ action และระบบที่ยืนยันจริงให้ชัด ไม่ทำ approval สองชุด |
+| Price of Ingredients | เป็นตาราง Parent ID, ชื่อสารที่ขอมา/เสนอ, Supplier, Source Key/Workbook/Sheet/Row/Table/Date, Raw MOQ/Price/LT/Remark/Spec, Eligible Tier Count ฯลฯ | เป็น parent/raw lineage view ไม่ใช่รายการราคา Name/Supplier/Price/kg/MOQ โดยตรง ให้ผู้ดูแลใช้ตรวจที่มาและสถานะ ไม่เป็นทางเข้าปกติของ RD |
+| Layout บางแท็บ | Sheets แสดงคำเตือนพื้นที่หน้าต่างไม่พอและให้ตรวจ frozen rows/columns | ตรวจ freeze และความกว้างคอลัมน์บนจอ RD จริง; ยังไม่ได้พิสูจน์สาเหตุจาก setting จึงไม่แก้ freeze ทันที |
+
+### ข้อสรุปที่เปลี่ยนจากรอบแรก
+
+ควรปรับ RD Data Center จริง เพราะปัจจุบันมีทั้งหน้าค้น หน้า mapping หลักฐานราคา ทำสูตร และทบทวนจัดซื้อซ้อนกันอยู่ ไม่ใช่เพียงปัญหาความสวยงาม แต่เป็นความสับสนว่าหน้าใดใช้ “เลือก” และหน้าใดใช้ “ยืนยัน”
+
+แนะนำให้ปรับ 00_README เป็นทางเข้าตามหน้าที่, ใช้ 01 เป็นมุมมองค้นสำหรับ RD ที่เน้น spec และข้อเสนอ, ให้ 02/08/parent/tier/raw เป็นงานผู้ดูแล, และกำกับ 03/09 ว่าบทบาทสัมพันธ์กับ Cost Calculation อย่างไรหลังตรวจผู้ใช้งานเดิม ไม่ลบ tab หรือ business rules
+
+### ประเด็น mapping ที่ยังต้องตรวจ ไม่ควรกลบด้วย UI
+
+ผู้ใช้ยืนยัน workbook แล้ว แต่ไม่ได้ยืนยันว่า tab ใดเป็น authoritative offers สำหรับ calculator:
+- code costParseCatalogWorkbook ตรวจ Name/Supplier/Price/kg/MOQ เพื่อเข้า RmPriceSource ก่อน
+- Price of Ingredients ที่เห็นจริงเป็น parent/raw schema คนละรูปทรง จึงไม่ใช่หลักฐานว่าแท็บนี้เข้า direct-price route ได้
+- code ยังมี fallback RD-Code + Price Tiers (Raw) ผ่าน RmCatalogBuild; workbook นี้มี 02_Price_Map รูปทรงดังกล่าว
+- ยังไม่ตรวจ raw tabs ทุกหน้า จึงไม่อ้างว่า workbook จะเข้า route ใดแน่นอน หรือแปลงไม่ได้ทั้งไฟล์
+- ก่อน implementation ให้ตรวจ header mapping + completeness + version/confirmation provenance จาก snapshot ที่ได้รับอนุญาต เปรียบเทียบจำนวน record ตาม route; ไม่กลับไปจับคู่แบบกำกวม ไม่ทำ engine ราคาใหม่
+- การชี้แหล่ง RM ครั้งนี้ไม่เปลี่ยน PK owner หรือกฎ local-first และไม่ได้ authorize เปลี่ยน source/schema/runtime
+
+สถานะ: **design review มีหลักฐานหน้าจอจริงแล้ว**; รอ manual walkthrough และตัดสิน mapping/บทบาทหน้าที่ก่อนแก้ app/Sheet. ไม่มี UAT, live import test, deployment หรือการยืนยันค่าธุรกิจในรอบนี้.
+
+---
+
 ## ข้อสรุป
 
 ควรปรับทั้งหน้าเลือกในสูตรและมุมมองของ RD Data Center แต่ไม่ควรนำ Data Center กลับมาเป็นตัวกลางจับคู่ราคาอีกครั้ง ปัญหาหลักคือ RD ต้องประกอบข้อมูลสำหรับตัดสินใจเองจากหลายตำแหน่ง ทั้งที่การค้นหาเร็วแล้ว
@@ -152,3 +191,5 @@ files_changed: เอกสารนี้, RD_MATERIAL_SELECTION_PROTOTYPE.html
 tests_run: node --check, git diff --check และ browser interaction checks ของ prototype 7/7 ผ่าน (จำนวนผล, ดูทั้งหมด, ปิดตัวเลือกที่รอยืนยัน, เทียบ spec, เลือกแล้วปริมาณคงอยู่, หน้าดูแลข้อมูล, ค้นพบตัวเลือกนอก 5 อันดับแรก). ครั้งแรก Chrome dump-dom timeout; ตรวจซ้ำด้วย bounded CDP polling แล้วผ่านครบ ไม่ลด assertion. ไม่รัน app suite ซ้ำเพราะไม่ได้แก้ application; ผลนี้ไม่ใช่ UAT หรือผลเทียบ manual.
 security/permission/database/dependency impact: none — ไม่มี application/data/role changes; prototype เป็น synthetic local artifact.
 rollback: revert design commit. open_risks: ไม่เห็น live Data Center UI, manual baseline ยังไม่วัด, data completeness/ข้ามเครื่องยังมีข้อจำกัดเดิม.
+
+Live-review verification: browser read-only UI observations ตามรายการข้างต้น, source-route read, git diff --check PASS. เปลี่ยนเอกสาร design เท่านั้น; source URLs อยู่ใน ignored local-only. ไม่มี security/permission/database/dependency change; rollback: revert documentation commit; pr_reference: none.
