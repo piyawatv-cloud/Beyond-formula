@@ -17,6 +17,11 @@ module 419 · calculator browser 71 · parent 37 · SQL 33 · prototype browser 
 **ไม่มีตัวอ่าน Stock onhand ในโค้ดเลย** ทั้ง `apps_script/*.gs` และ `index.html` · ที่มีคือหัวตารางและข้อยืนยันเชิง workflow เท่านั้น
 ตัวบล็อกแรกคือช่องทางอ่านข้อมูลซึ่งยังเป็น DECISION_REQUIRED ของเจ้าของระบบ
 
+**เพิ่ม 2026-09-09:** เจ้าของสั่งทำตัวอ่าน Stock onhand ต่อตรง · สร้าง `apps_script/StockOnhandSource.gs`
+เป็นโดเมนเดียว ฝังเข้าเบราว์เซอร์ผ่าน sync tool · หน้าทดลองอ่านผ่านตัวนี้แล้ว ไม่มีกฎชุดที่สอง ·
+ทางเข้าฝั่ง Apps Script อ่าน id จาก Script Properties ไม่ฝังในโค้ด ยังไม่ได้อ่านชีตจริง
+รายละเอียดสัญญาและสิ่งที่ยังขาดอยู่ใน [RM_PK_CONNECTION_DESIGN.md ข้อ 9](docs/design/RM_PK_CONNECTION_DESIGN.md)
+
 status: LOCAL_VERIFIED (หน้าทดลอง) · หน้าหลายรายการยังไม่ผ่าน UAT ของเจ้าของ · ไม่แตะ fs_cost ไม่จอง ไม่ตัดสต็อก
 
 ## RM multi-selection prototype — 2026-09-08

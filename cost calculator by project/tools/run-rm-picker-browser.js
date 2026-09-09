@@ -5,6 +5,7 @@ fs.mkdirSync(runtime,{recursive:true});const dir=fs.mkdtempSync(path.join(runtim
 try{
  const src=path.join(__dirname,'../docs/prototypes');
  fs.copyFileSync(path.join(src,'rm-picker.js'),path.join(dir,'rm-picker.js'));
+ fs.copyFileSync(path.join(__dirname,'../apps_script/StockOnhandSource.gs'),path.join(dir,'stock-onhand.js')); // โดเมนเดียว ไม่ทำสำเนาที่แก้แยก
  fs.copyFileSync(path.join(__dirname,'../tests/rm-picker-browser.fixture.js'),path.join(dir,'fixture.js'));
  fs.writeFileSync(path.join(dir,'index.html'),fs.readFileSync(path.join(src,'rm-selection.html'),'utf8').replace('</body>','<script src="fixture.js"></script></body>'));
  const r=spawnSync(process.env.CHROME_BIN||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',['--headless=new','--no-first-run','--no-default-browser-check','--disable-gpu','--disable-background-networking','--user-data-dir='+path.join(dir,'profile'),'--virtual-time-budget=2000','--dump-dom','file://'+path.join(dir,'index.html')],{encoding:'utf8',timeout:25000,maxBuffer:8*1024*1024});

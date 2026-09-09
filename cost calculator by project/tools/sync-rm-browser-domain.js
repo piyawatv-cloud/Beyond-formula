@@ -2,7 +2,7 @@
 // Keep the standalone Apps Script adapters and the single-file browser identical.
 // Run after domain edits; the parity test rejects drift. No business rule lives here.
 const fs=require('node:fs'),path=require('node:path');
-const root=path.resolve(__dirname,'../..'),files=['RmSourceMap.gs','RmCatalogBuild.gs','RmPriceSource.gs'];
+const root=path.resolve(__dirname,'../..'),files=['RmSourceMap.gs','RmCatalogBuild.gs','RmPriceSource.gs','StockOnhandSource.gs'];
 const start='// COST_RM_SOURCE_DOMAIN_START',end='// COST_RM_SOURCE_DOMAIN_END';
 function expected(){return start+'\n'+files.map(name=>fs.readFileSync(path.join(root,'cost calculator by project/apps_script',name),'utf8').trim()).join('\n\n')+'\n'+end;}
 if(require.main===module){

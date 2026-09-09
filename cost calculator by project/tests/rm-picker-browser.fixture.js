@@ -5,9 +5,12 @@
  try{
   check('unified view contains four offers and three AVAILABLE lots',$('results').children.length===7);
   check('HOLD lot never rendered',!$('results').textContent.includes('LOT-H')&&!$('results').textContent.includes('99.00'));
+  // ชีตบอกหมวดมาแล้วไม่ใช่ RM ต้องไม่โผล่ในรายการ RM (อ่านผ่าน StockOnhandSource)
+  check('PK lot from the same sheet is not offered as RM',!$('results').textContent.includes('LOT-P')&&!$('results').textContent.includes('ซองสังเคราะห์'));
+  check('read reports source counts and read time instead of assuming freshness',$('count').textContent.includes('อ่านต้นทางเมื่อ')&&$('count').textContent.includes('อ่านมา 4 lot')&&$('count').textContent.includes('ใช้เป็น RM ได้ 3'));
   query('Alpha');check('similar specifications remain separate',$('results').children.length===6);
   source('stock');query('DEMO-RM1');check('stock lookup preserves both receipt lots',$('results').children.length===2);
-  document.querySelector('[data-pick="S1"]').click();document.querySelector('[data-quantity="0"]').value='12';document.querySelector('[data-quantity="0"]').dispatchEvent(new Event('input'));
+  document.querySelector('[data-pick="LOT-A"]').click();document.querySelector('[data-quantity="0"]').value='12';document.querySelector('[data-quantity="0"]').dispatchEvent(new Event('input'));
   check('stock material aggregates AVAILABLE lots once',$('basket').firstElementChild.textContent.includes('ขาด 2.00 kg'));
   check('stock selection never silently chooses IN pricing',$('basket').firstElementChild.textContent.includes('ฐานราคา: รอยืนยัน'));
   source('rd');query('95%');document.querySelector('[data-pick="R1"]').click();
@@ -17,7 +20,7 @@
   query('Beta');document.querySelector('[data-pick="R3"]').click();check('new material stays draft without stock code',$('basket').children[2].textContent.includes('ยังไม่เชื่อมคลัง')&&$('basket').children[2].textContent.includes('รอยืนยัน'));
 
   check('continuous selection retains distinct formula rows',$('basket').children.length===3);
-  source('stock');query('DEMO-RM1');document.querySelector('[data-pick="S2"]').click();
+  source('stock');query('DEMO-RM1');document.querySelector('[data-pick="LOT-B"]').click();
   check('another lot never adds a formula line',$('basket').children.length===3);
   const qty=document.querySelector('[data-quantity="0"]');qty.value='12';qty.dispatchEvent(new Event('input'));
   check('basket quantity compares total stock once',$('basket').firstElementChild.textContent.includes('ขาด 2.00 kg'));

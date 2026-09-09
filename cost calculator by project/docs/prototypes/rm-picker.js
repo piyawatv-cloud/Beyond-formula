@@ -1,5 +1,8 @@
 'use strict';
-// Synthetic interaction prototype only. No production adapter, price policy or persistence.
+// หน้าทดลองการโต้ตอบ · ข้อมูลสังเคราะห์ · ไม่มี price policy และไม่บันทึกลงระบบจริง
+// กฎการอ่านคลัง (AVAILABLE-only · ไม่หัก Reserve · ยอดที่อ่านไม่ได้ไม่กลายเป็นศูนย์)
+// อยู่ใน StockOnhandSource ที่เดียว หน้านี้ไม่มีกฎชุดที่สอง
+const StockSource=typeof StockOnhandSource!=='undefined'?StockOnhandSource:require('../../apps_script/StockOnhandSource.gs');
 const RmPickerDemo={
  key(kind,r){const link=kind==='stock'?r:r.link?.confirmed?r.link:null;return JSON.stringify(link?[link.item,link.spec,link.uom]:['offer',r.materialId||r.id,r.spec]);},
  // ตัวตนของสารคือ materialId ที่ระบบกำหนด (REGISTRY) ไม่ใช่การเดาจากชื่อคล้ายกัน
@@ -24,27 +27,33 @@ const RmPickerDemo={
   line.kind='rd';line.row=JSON.parse(JSON.stringify(offer));
  },
  snapshot(lines,revisions){if(!lines.length)throw Error('ยังไม่มี RM');const rev={revision:revisions.length+1,lines:JSON.parse(JSON.stringify(lines))};revisions.push(rev);return rev;},
- visible:rows=>rows.filter(r=>r.category==='RM'&&r.status==='AVAILABLE'),
+ visible(rows){return rows.filter(r=>this.categoryOk(r)&&r.status===StockSource.AVAILABLE);},
  chooseStock(rows,id){const r=this.visible(rows).find(r=>r.id===id);if(!r)throw Error('เลือกได้เฉพาะ RM AVAILABLE');return r;},
+ // ชีตที่ไม่มีคอลัมน์หมวด (category=null) ยังแสดงได้ เพราะการผูกยอดใช้ reference ที่ยืนยันแล้ว
+ // แต่ถ้าชีตบอกหมวดมาแล้วไม่ใช่ RM ต้องไม่แสดงในรายการ RM
+ categoryOk:r=>r.category==null||r.category==='RM',
  // 0 = มีรายการคลังตัวนี้จริงแต่ไม่มี lot AVAILABLE · null = reference ยังชี้ไม่ถึงรายการคลังใด
- // (ข้อยืนยันเจ้าของข้อ 3: ยังไม่เชื่อมคลัง ต้องไม่แสดงเป็นยอดศูนย์ เพราะ RD จะสั่งซื้อทั้งที่อาจมีของอยู่)
- matches(rows,link){return rows.filter(r=>r.category==='RM'&&r.item===link.item&&r.spec===link.spec&&r.uom===link.uom);},
  balance(rows,link){
-  if(!link||link.confirmed!==true)return null;
-  if(!this.matches(rows,link).length)return null;
-  const lots=this.visible(rows).filter(r=>r.item===link.item&&r.spec===link.spec&&r.uom===link.uom);
-  if(lots.some(r=>typeof r.qty!=='number'||!Number.isFinite(r.qty)||r.qty<0))return null;
-  return lots.reduce((total,r)=>total+r.qty,0);
+  const known=rows.filter(r=>this.categoryOk(r)).map(StockSource.refKey);
+  return StockSource.balance(this.visible(rows),link,{known});
  }
 };
 if(typeof module!=='undefined')module.exports=RmPickerDemo;
 if(typeof document!=='undefined'){
- const stocks=[
-  {id:'S1',item:'DEMO-RM1',category:'RM',status:'AVAILABLE',name:'สารตัวอย่าง Alpha',spec:'95%',qty:8,uom:'kg',lot:'LOT-A',expiry:'2027-06-30',location:'DEMO-A'},
-  {id:'S2',item:'DEMO-RM1',category:'RM',status:'AVAILABLE',name:'สารตัวอย่าง Alpha',spec:'95%',qty:2,uom:'kg',lot:'LOT-B',expiry:'2027-12-31',location:'DEMO-B'},
-  {id:'S3',item:'DEMO-RM1',category:'RM',status:'HOLD',name:'ห้ามแสดงในรายการ',spec:'95%',qty:99,uom:'kg',lot:'LOT-H'},
-  {id:'S4',item:'DEMO-RM2',category:'RM',status:'AVAILABLE',name:'สารตัวอย่าง Alpha',spec:'98%',qty:4,uom:'kg',lot:'LOT-C',expiry:'2027-09-30',location:'DEMO-A'}
+ // ตารางสังเคราะห์ที่มีรูปทรงเหมือนชีต Stock onhand จริง (หัวตารางไม่ได้อยู่แถวแรก)
+ // อ่านผ่าน StockOnhandSource ตัวเดียวกับที่ Apps Script ใช้ · หน้านี้ไม่มีกฎการอ่านของตัวเอง
+ const stockGrid=[
+  ['รายงานคงเหลือคลัง (ข้อมูลสังเคราะห์)','','','','','','','',''],
+  ['','','','','','','','',''],
+  ['New Code','Trade name','Spec','คงเหลือ','UOM','status','Lot','Location','Exp. date','Category'],
+  ['DEMO-RM1','สารตัวอย่าง Alpha','95%','8','kg','AVAILABLE','LOT-A','DEMO-A','2027-06-30','RM'],
+  ['DEMO-RM1','สารตัวอย่าง Alpha','95%','2','kg','AVAILABLE','LOT-B','DEMO-B','2027-12-31','RM'],
+  ['DEMO-RM1','ห้ามแสดงในรายการ','95%','99','kg','HOLD','LOT-H','DEMO-C','2027-01-01','RM'],
+  ['DEMO-RM2','สารตัวอย่าง Alpha','98%','4','kg','AVAILABLE','LOT-C','DEMO-A','2027-09-30','RM'],
+  ['DEMO-PK1','ซองสังเคราะห์','—','500','ชิ้น','AVAILABLE','LOT-P','DEMO-D','','PK']
  ];
+ const stockRead=StockOnhandSource.read(stockGrid,{readAt:new Date().toISOString()});
+ const stocks=stockRead.lots;
  const offers=[
   {id:'R1',materialId:'DEMO-MAT-1',name:'สารตัวอย่าง Alpha',spec:'95%',price:450,moq:5,lt:7,confirmed:true,link:{item:'DEMO-RM1',spec:'95%',uom:'kg',confirmed:true}},
   {id:'R1-OLD',materialId:'DEMO-MAT-1',name:'สารตัวอย่าง Alpha',spec:'95%',price:470,moq:1,lt:5,confirmed:true,link:null},
@@ -67,7 +76,7 @@ if(typeof document!=='undefined'){
    detail.textContent=kind==='rd'?'ราคา '+money(r.price)+' THB/kg · MOQ '+(r.moq??'รอข้อมูล')+' kg · LT '+(r.lt??'รอข้อมูล')+' วัน':'Lot '+r.lot+' · หมดอายุ '+r.expiry+' · ตำแหน่ง '+r.location;el.append(detail);
    const qty=document.createElement('p');qty.className='balance';qty.textContent=balance==null?'ยังไม่เชื่อมรายการคลัง — ไม่ใช่ยอดศูนย์':'คงเหลือ AVAILABLE '+money(balance)+' kg'+(kind==='rd'?' · คู่รายการยืนยันแล้ว':'');el.append(qty);
    if(kind==='stock'){const p=document.createElement('p');p.textContent='ฐานราคาคำนวณ: รอยืนยัน · ไม่ใช้ราคา IN อัตโนมัติ';el.append(p);}
-   const b=document.createElement('button');b.textContent=kind==='rd'?'เพิ่มข้อเสนอในรายการ RM':'เพิ่มรายการคลังใน RM';b.dataset.pick=r.id;b.onclick=()=>{selected={kind,row:kind==='stock'?RmPickerDemo.chooseStock(stocks,r.id):r};
+   const b=document.createElement('button');b.textContent=kind==='rd'?'เพิ่มข้อเสนอในรายการ RM':'เพิ่มรายการคลังใน RM';b.dataset.pick=r.lot||r.id;b.onclick=()=>{selected={kind,row:kind==='stock'?RmPickerDemo.chooseStock(stocks,r.id):r};
     const before=lines.length,line=RmPickerDemo.add(lines,kind,selected.row),created=lines.length>before;
     renderBasket();
     // กดเพิ่มข้อเสนอลงแถวที่ยังไม่มีฐานราคา = ไม่มีอะไรเปลี่ยน ต้องบอกตรง ๆ ไม่ใช่ขึ้นว่าอัปเดตแล้ว
@@ -78,7 +87,11 @@ if(typeof document!=='undefined'){
   }
   if(source!=='stock')offers.filter(match).forEach(r=>card(r,'rd'));
   if(source!=='rd')RmPickerDemo.visible(stocks).filter(match).forEach(r=>card(r,'stock'));
-  $('count').textContent='พบ '+rows.childElementCount+' ตัวเลือก · คลังแสดงเฉพาะ AVAILABLE';
+  // แยกจำนวนที่อ่านมาจากชีต ออกจากจำนวนที่แสดงเป็น RM เพื่อไม่ให้เข้าใจว่าของหายไป
+  $('count').textContent='พบ '+rows.childElementCount+' ตัวเลือก · คลังอ่านมา '+stockRead.summary.available
+   +' lot AVAILABLE จาก '+stockRead.summary.rows+' แถว (ข้าม '+stockRead.summary.skipped+')'
+   +' · ใช้เป็น RM ได้ '+RmPickerDemo.visible(stocks).length
+   +' · อ่านต้นทางเมื่อ '+stockRead.readAt.slice(0,16).replace('T',' ');
  }
  function renderBasket(){
   const box=$('basket');box.replaceChildren();$('basketCount').textContent='รายการ RM ที่เลือก '+lines.length+' รายการ';$('basketJump').textContent='ดู RM ที่เลือก ('+lines.length+')';
