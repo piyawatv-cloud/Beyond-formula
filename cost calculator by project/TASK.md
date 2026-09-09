@@ -1,5 +1,24 @@
 # Task handoff
 
+## RM prototype review — 2026-09-09 (Claude Code)
+
+ทวน workflow หลายรายการตามที่ส่งต่อ (HEAD ที่รับมา `6c7d0a3`) · baseline รันเองแล้วตรงทุกชุด:
+module 419 · calculator browser 71 · parent 37 · SQL 33 · prototype browser 16 · diff สะอาด
+
+หกข้อที่ให้ทวนผ่านสี่ข้อ (เพิ่มหลายสารไม่เสียปริมาณ · หลาย lot ไม่เพิ่มแถว · spec ต่างแยกแถว · revision เดิมคงที่)
+พบข้อบกพร่องสามจุด แก้แล้วใน `8cf59b9`:
+1. `balance()` คืนยอดศูนย์เมื่อ reference ชี้ไม่ถึงรายการคลังใดเลย (เช่นผูกหน่วยผิด) — ละเมิดข้อยืนยันเจ้าของข้อ 3 · ตอนนี้แยก null (ยังไม่เชื่อมคลัง) ออกจาก 0 (มีรายการแต่ไม่มี lot AVAILABLE)
+2. ข้อเสนอของสารเดียวกัน (materialId เดียวกัน) ที่ผูก/ไม่ผูกคลังแตกเป็นสองแถว = demand ซ้ำ · รวมด้วย materialId ที่ระบบกำหนด ไม่ใช่ชื่อคล้ายกัน
+3. กดเพิ่มข้อเสนอลงแถวที่ยังไม่มีฐานราคา ไม่มีอะไรเปลี่ยน (ถูกตามข้อ 5) แต่ข้อความบอกว่าอัปเดตแล้ว · แก้ข้อความให้ตรงความจริง
+
+ผลหลังแก้: module 423 · prototype browser 21 · ชุดอื่นเท่าเดิม · mutation 8 แบบ จับได้ 8
+
+ตรวจหลักฐานตัวเชื่อม (งานข้อ 5) แล้ว — รายละเอียดอยู่ใน [RM_PK_CONNECTION_DESIGN.md ข้อ 8](docs/design/RM_PK_CONNECTION_DESIGN.md)
+**ไม่มีตัวอ่าน Stock onhand ในโค้ดเลย** ทั้ง `apps_script/*.gs` และ `index.html` · ที่มีคือหัวตารางและข้อยืนยันเชิง workflow เท่านั้น
+ตัวบล็อกแรกคือช่องทางอ่านข้อมูลซึ่งยังเป็น DECISION_REQUIRED ของเจ้าของระบบ
+
+status: LOCAL_VERIFIED (หน้าทดลอง) · หน้าหลายรายการยังไม่ผ่าน UAT ของเจ้าของ · ไม่แตะ fs_cost ไม่จอง ไม่ตัดสต็อก
+
 ## RM multi-selection prototype — 2026-09-08
 
 Task cost-calculator-implementation-2026-09-05; issue_id none. Owner authorized continuous multi-material selection before live integration. Scope is the existing synthetic prototype and tests/documentation inside the worktree; production application unchanged. Adds a retained list with independent per-scenario kg quantity, removal, explicit offer replacement and whole-draft in-memory revisions. Material identity uses confirmed inventory item/spec/UOM references; unlinked catalog identities remain distinct. Repeated stock lots merge into the same material line without replacing its price or adding duplicate demand. All AVAILABLE lots for that material appear under the line; quantities do not deduct Reserve. No name-based mapping, inventory reservation or deduction. Revision snapshots remain unchanged after draft edits/removal.
