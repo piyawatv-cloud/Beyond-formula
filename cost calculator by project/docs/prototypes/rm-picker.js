@@ -2,19 +2,36 @@
 // Synthetic interaction prototype only. No production adapter, price policy or persistence.
 const RmPickerDemo={
  key(kind,r){const link=kind==='stock'?r:r.link?.confirmed?r.link:null;return JSON.stringify(link?[link.item,link.spec,link.uom]:['offer',r.materialId||r.id,r.spec]);},
+ // ตัวตนของสารคือ materialId ที่ระบบกำหนด (REGISTRY) ไม่ใช่การเดาจากชื่อคล้ายกัน
+ // ข้อเสนอสองตัวของสารเดียวกันที่ตัวหนึ่งผูกคลังแล้ว อีกตัวยังไม่ผูก ต้องไม่กลายเป็นสองแถว
+ // มิฉะนั้น demand ของสารนั้นถูกนับซ้ำ
+ materialOf(line){return line.materialId||line.row.materialId||null;},
+ sameMaterial(line,r){return !!r.materialId&&this.materialOf(line)===r.materialId;},
  add(lines,kind,r){
   if(kind==='stock')this.chooseStock([r],r.id);
-  const key=this.key(kind,r);let line=lines.find(l=>l.key===key);
+  const key=this.key(kind,r);
+  let line=lines.find(l=>l.key===key)||(kind==='rd'?lines.find(l=>this.sameMaterial(l,r)):null);
   if(!line){line={key,kind,row:JSON.parse(JSON.stringify(r)),quantity:'',lots:[]};lines.push(line);}
+  // แถวที่เกิดจากรายการคลังยังไม่รู้ materialId ของตัวเอง · ข้อเสนอที่ผูกคลังยืนยันแล้วและตรงคีย์เดียวกัน
+  // เป็นหลักฐานว่าเป็นสารใด จึงบันทึกตัวตนไว้ (ไม่เปลี่ยนฐานราคา) ข้อเสนออื่นของสารเดียวกันจะได้ไม่แตกแถว
+  if(kind==='rd'&&r.materialId&&!line.materialId)line.materialId=r.materialId;
   if(kind==='stock'&&!line.lots.some(l=>l.id===r.id))line.lots.push(JSON.parse(JSON.stringify(r)));
   return line;
  },
- replace(line,offer){if(this.key('rd',offer)!==line.key)throw Error('ต้องเป็นสารและ spec เดียวกันที่ยืนยันแล้ว');line.kind='rd';line.row=JSON.parse(JSON.stringify(offer));},
+ // ยอมให้เปลี่ยนไปข้อเสนอของสารเดียวกันที่ยังไม่ผูกคลัง (materialId เดียวกัน) แต่ยังห้ามข้ามสารหรือ spec
+ replace(line,offer){
+  if(this.key('rd',offer)!==line.key&&!this.sameMaterial(line,offer))throw Error('ต้องเป็นสารและ spec เดียวกันที่ยืนยันแล้ว');
+  line.kind='rd';line.row=JSON.parse(JSON.stringify(offer));
+ },
  snapshot(lines,revisions){if(!lines.length)throw Error('ยังไม่มี RM');const rev={revision:revisions.length+1,lines:JSON.parse(JSON.stringify(lines))};revisions.push(rev);return rev;},
  visible:rows=>rows.filter(r=>r.category==='RM'&&r.status==='AVAILABLE'),
  chooseStock(rows,id){const r=this.visible(rows).find(r=>r.id===id);if(!r)throw Error('เลือกได้เฉพาะ RM AVAILABLE');return r;},
+ // 0 = มีรายการคลังตัวนี้จริงแต่ไม่มี lot AVAILABLE · null = reference ยังชี้ไม่ถึงรายการคลังใด
+ // (ข้อยืนยันเจ้าของข้อ 3: ยังไม่เชื่อมคลัง ต้องไม่แสดงเป็นยอดศูนย์ เพราะ RD จะสั่งซื้อทั้งที่อาจมีของอยู่)
+ matches(rows,link){return rows.filter(r=>r.category==='RM'&&r.item===link.item&&r.spec===link.spec&&r.uom===link.uom);},
  balance(rows,link){
   if(!link||link.confirmed!==true)return null;
+  if(!this.matches(rows,link).length)return null;
   const lots=this.visible(rows).filter(r=>r.item===link.item&&r.spec===link.spec&&r.uom===link.uom);
   if(lots.some(r=>typeof r.qty!=='number'||!Number.isFinite(r.qty)||r.qty<0))return null;
   return lots.reduce((total,r)=>total+r.qty,0);
@@ -29,7 +46,8 @@ if(typeof document!=='undefined'){
   {id:'S4',item:'DEMO-RM2',category:'RM',status:'AVAILABLE',name:'สารตัวอย่าง Alpha',spec:'98%',qty:4,uom:'kg',lot:'LOT-C',expiry:'2027-09-30',location:'DEMO-A'}
  ];
  const offers=[
-  {id:'R1',name:'สารตัวอย่าง Alpha',spec:'95%',price:450,moq:5,lt:7,confirmed:true,link:{item:'DEMO-RM1',spec:'95%',uom:'kg',confirmed:true}},
+  {id:'R1',materialId:'DEMO-MAT-1',name:'สารตัวอย่าง Alpha',spec:'95%',price:450,moq:5,lt:7,confirmed:true,link:{item:'DEMO-RM1',spec:'95%',uom:'kg',confirmed:true}},
+  {id:'R1-OLD',materialId:'DEMO-MAT-1',name:'สารตัวอย่าง Alpha',spec:'95%',price:470,moq:1,lt:5,confirmed:true,link:null},
   {id:'R2',name:'สารตัวอย่าง Alpha',spec:'98%',price:620,moq:10,lt:21,confirmed:true,link:null},
   {id:'R3',name:'สารใหม่ Beta',spec:'สารสกัด 10:1',price:null,moq:null,lt:null,confirmed:false,link:null}
  ];
@@ -49,7 +67,14 @@ if(typeof document!=='undefined'){
    detail.textContent=kind==='rd'?'ราคา '+money(r.price)+' THB/kg · MOQ '+(r.moq??'รอข้อมูล')+' kg · LT '+(r.lt??'รอข้อมูล')+' วัน':'Lot '+r.lot+' · หมดอายุ '+r.expiry+' · ตำแหน่ง '+r.location;el.append(detail);
    const qty=document.createElement('p');qty.className='balance';qty.textContent=balance==null?'ยังไม่เชื่อมรายการคลัง — ไม่ใช่ยอดศูนย์':'คงเหลือ AVAILABLE '+money(balance)+' kg'+(kind==='rd'?' · คู่รายการยืนยันแล้ว':'');el.append(qty);
    if(kind==='stock'){const p=document.createElement('p');p.textContent='ฐานราคาคำนวณ: รอยืนยัน · ไม่ใช้ราคา IN อัตโนมัติ';el.append(p);}
-   const b=document.createElement('button');b.textContent=kind==='rd'?'เพิ่มข้อเสนอในรายการ RM':'เพิ่มรายการคลังใน RM';b.dataset.pick=r.id;b.onclick=()=>{selected={kind,row:kind==='stock'?RmPickerDemo.chooseStock(stocks,r.id):r};RmPickerDemo.add(lines,kind,selected.row);renderBasket();$('saveStatus').textContent='อัปเดตรายการ RM แล้ว · รายการเดิมไม่เพิ่มซ้ำ · ยังไม่บันทึก revision ใหม่';};el.append(b);rows.append(el);
+   const b=document.createElement('button');b.textContent=kind==='rd'?'เพิ่มข้อเสนอในรายการ RM':'เพิ่มรายการคลังใน RM';b.dataset.pick=r.id;b.onclick=()=>{selected={kind,row:kind==='stock'?RmPickerDemo.chooseStock(stocks,r.id):r};
+    const before=lines.length,line=RmPickerDemo.add(lines,kind,selected.row),created=lines.length>before;
+    renderBasket();
+    // กดเพิ่มข้อเสนอลงแถวที่ยังไม่มีฐานราคา = ไม่มีอะไรเปลี่ยน ต้องบอกตรง ๆ ไม่ใช่ขึ้นว่าอัปเดตแล้ว
+    $('saveStatus').textContent=created?'เพิ่มสารใหม่ในรายการ RM แล้ว · ยังไม่บันทึก revision ใหม่'
+      :kind==='rd'&&line.kind!=='rd'?'สารนี้มีอยู่ในรายการแล้ว · ฐานราคายังไม่ถูกตั้ง — ใช้ปุ่ม "เปลี่ยนข้อเสนอ" ในแถวนั้นเพื่อเลือกฐานราคา'
+      :kind==='rd'&&line.row.id!==selected.row.id?'สารนี้มีอยู่ในรายการแล้ว · ฐานราคาเดิม '+line.row.id+' ไม่ถูกเปลี่ยนเอง — ใช้ปุ่ม "เปลี่ยนข้อเสนอ" ถ้าต้องการเปลี่ยน'
+      :'รายการเดิมไม่เพิ่มซ้ำ · ยังไม่บันทึก revision ใหม่';};el.append(b);rows.append(el);
   }
   if(source!=='stock')offers.filter(match).forEach(r=>card(r,'rd'));
   if(source!=='rd')RmPickerDemo.visible(stocks).filter(match).forEach(r=>card(r,'stock'));
@@ -72,7 +97,7 @@ if(typeof document!=='undefined'){
    summary.textContent='ดู lot AVAILABLE ('+lots.length+') · ไม่จองหรือตัดสต็อก';details.append(summary);
    lots.forEach(l=>{const p=document.createElement('p');p.textContent=l.lot+' · '+money(l.qty)+' '+l.uom+' · หมดอายุ '+l.expiry;details.append(p);});card.append(details);
    const price=document.createElement('p');price.textContent=line.kind==='rd'?'ฐานราคา '+line.row.id+' · '+money(line.row.price)+' THB/kg · MOQ '+(line.row.moq??'รอข้อมูล')+' kg · LT '+(line.row.lt??'รอข้อมูล')+' วัน':'ฐานราคา: รอยืนยัน';card.append(price);
-   const choices=alternatives.filter(o=>RmPickerDemo.key('rd',o)===line.key);
+   const choices=alternatives.filter(o=>RmPickerDemo.key('rd',o)===line.key||RmPickerDemo.sameMaterial(line,o));
    if(choices.length){const select=document.createElement('select');select.setAttribute('aria-label','ข้อเสนอสำหรับ '+line.row.name+' '+line.row.spec);choices.forEach(o=>{const option=document.createElement('option');option.value=o.id;option.textContent=o.id+' · '+money(o.price)+' THB/kg · MOQ '+(o.moq??'รอข้อมูล')+' kg · LT '+(o.lt??'รอข้อมูล')+' วัน';select.append(option);});if(line.kind==='rd')select.value=line.row.id;card.append(select);
     const change=document.createElement('button');change.textContent='เปลี่ยนข้อเสนอ';change.dataset.replace=index;change.onclick=()=>{RmPickerDemo.replace(line,choices.find(o=>o.id===select.value));renderBasket();$('saveStatus').textContent='เปลี่ยนข้อเสนอในร่างแล้ว — revision เดิมไม่เปลี่ยน';};card.append(change);
    }
