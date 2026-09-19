@@ -1,6 +1,9 @@
 #!/bin/sh
 set -eu
 
+# macOS: postmaster ไม่ยอมเริ่มถ้าไม่มี locale ("postmaster became multithreaded during startup")
+export LC_ALL="${LC_ALL:-C}"
+
 FS_SQL_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 FS_SQL_TMP=$(mktemp -d "${TMPDIR:-/tmp}/beyond-formula-sql.XXXXXX")
 FS_SQL_PORT=$((50000 + ($$ % 10000)))
