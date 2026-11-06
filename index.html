@@ -655,6 +655,8 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
 }
 @media(max-width:960px){.fg5{grid-template-columns:1fr 1fr}.fg4{grid-template-columns:1fr 1fr}.fg4 .span2{grid-column:span 2}}
 @media(max-width:700px){.fg,.fg3,.fg4,.fg5,.dbg,.spg,.sign-wrap{grid-template-columns:1fr}.fg4 .span2{grid-column:span 1}}
+/* popup บันทึก: บนจอแคบย้ายไปไว้บนสุด ไม่บังปุ่ม/ช่องกรอกด้านล่าง */
+@media (max-width:600px){#saveQPanel{top:8px!important;bottom:auto!important;left:8px!important;right:8px!important;width:auto!important;max-height:40vh;overflow:auto}}
 </style>
 </head>
 <body>
@@ -677,7 +679,7 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
   <div class="logo"><svg viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-1.73-3L9 11.35V4H8a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2h-1v7.35L19.73 19A2 2 0 0 1 18 22H6Zm5-10.11L8.31 16.5h7.38L13 11.89V4h-2v7.89Z"/></svg></div>
   <div>
     <div class="hdr-title">Formula Studio</div>
-    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-10-07.1</div>
+    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-11-06.5</div>
   </div>
   <div class="sync-chip" id="syncChip" onclick="sbManualSync()" title="สถานะการซิงก์ข้อมูลกับเซิร์ฟเวอร์กลาง"></div>
 </div>
@@ -2271,6 +2273,7 @@ function switchView(v) {
       return;
     }
   }
+  if(v!=='modify' && !saveQNavOK()) return;      // มีการบันทึกสูตรที่ยังไม่ยืนยัน
   if(v==='act' && !can('manageUsers')){ alert('Activities log เปิดดูได้เฉพาะ Role: Admin'); return; }
   if(v==='input' && currentUser && !can('createData')){
     alert('เมนู Customer Data ใช้ได้เฉพาะ Role: Admin, Sales, OPC, MKT\nRole ของคุณ: ' + (roleLabel(currentRole())||'ไม่ระบุ'));
@@ -3545,6 +3548,7 @@ function loginUserAt(i){
   if(sbOn()){ alert('ต้องออกจากระบบแล้วเข้าใช้บัญชี Supabase Auth ที่ต้องการ'); return; }
   const u = userList[i];
   if(u.pass && u.name !== currentUser){ askLoginPassword(i); return; }
+  if(u.name!==currentUser){ if(!saveQNavOK()) return; saveQReset(); }
   currentUser = u.name;
   logAct('auth','เข้าใช้งาน', u.name+' · Role '+roleLabel(u.role));
   afterUserChange(); closeUserModal();
@@ -3575,6 +3579,8 @@ function sideLogout(){
   });
 }
 async function logoutUser(){
+  if(!saveQNavOK()) return;       // มีการบันทึกสูตรที่ยังไม่ยืนยัน
+  saveQReset();
   // ออกจากระบบระหว่างสวมบทบาท ต้องล้างสถานะสวมบทบาทด้วย ไม่งั้นค้างเป็นสถานะกำกวม
   if(impersonator){
     logAct('auth','ออกจากการสวมบทบาท', currentUser + ' → ' + impersonator);
@@ -3626,11 +3632,108 @@ function buildModifyData(){
   add('ข้อจำกัด', (d.cons||[]).join(', '));
   add('หมายเหตุ / Notes', d.notes);
   modifyFields = f;
-  modifyIngs = (d.rows||[]).map(r=>({
+  modifyIngs = (d.rows||[]).map(rowToModifyIng);
+}
+// แถวของ record -> แถวในตารางแก้ไข (ตราตรวจ/แก้ไขอยู่เฉพาะในหน้านี้ ไม่ถูกเก็บลง record)
+function rowToModifyIng(r){
+  return {
     name:r.name, w:r.w.toFixed(2), o:r.o||'', p:String(r.p), actual:r.actual.toFixed(2), note:r.note||'',
     hero:r.hero, fdaIcon:r.fda.icon,
     editedBy:'', editedAt:'', verifiedBy:'', verifiedAt:''
-  }));
+  };
+}
+// ---- กันออบเจ็กต์ค้าง (stale) ของ PD Modify ----
+// sbApply / storage event / loadRecords แทน records[] ด้วยออบเจ็กต์ใหม่ ถ้า modifyRec ยังชี้ตัวเก่า
+// การบันทึกครั้งถัดไปจะเขียนทับข้อมูลที่ใหม่กว่าจากเซิร์ฟเวอร์ แล้วเซิร์ฟเวอร์ (PD guard) ปฏิเสธทั้งก้อน
+let modifyNotice = '';       // ข้อความแจ้งผู้ใช้ในหน้า PD Modify (เช่น ข้อมูลถูกอัปเดตจากเซิร์ฟเวอร์)
+let modifyRerender = false;  // มีการรีเฟรชตารางจาก record ใหม่ รอวาดใหม่ตอนไม่มีช่องที่กำลังพิมพ์
+function modifyFresh(){
+  if(!modifyRec) return null;
+  const f = records.find(x=>x.id===modifyRec.id);
+  if(!f) return null;
+  modifyRec = f;
+  if(window._lastDash && window._lastDash.id===f.id) window._lastDash = f;
+  return f;
+}
+function modifyIngsDiffer(f){
+  const rows = f.rows||[];
+  if(rows.length!==modifyIngs.length) return true;
+  const eq = (x,y)=>Math.abs(x-y) < 0.005;     // ตารางแสดงทศนิยม 2 ตำแหน่ง
+  return rows.some((r,j)=>{
+    const mi = modifyIngs[j], m = modifyIngToRow(mi, j);
+    return String(r.name||'')!==String(m.name||'') || !eq(Number(r.w)||0, m.w) || String(r.o||'')!==String(m.o||'')
+      || !eq(Number(r.p)||0, m.p) || !eq(Number(r.actual)||0, m.actual) || String(r.note||'')!==String(m.note||'')
+      || !!r.hero!==!!m.hero;
+  });
+}
+// สร้างตารางแก้ไขใหม่จาก record ล่าสุด · คงตราตรวจ/แก้ไขไว้เมื่อแถวนั้นชื่อเดิม · keepIdx = แถวที่ผู้ใช้เพิ่งแก้
+function modifyRefreshIngs(f, keepIdx){
+  const old = modifyIngs;
+  modifyIngs = (f.rows||[]).map((r,j)=>{
+    if(j===keepIdx && old[j]) return old[j];
+    const n = rowToModifyIng(r);
+    if(old[j] && old[j].name===n.name){
+      n.editedBy=old[j].editedBy; n.editedAt=old[j].editedAt; n.verifiedBy=old[j].verifiedBy; n.verifiedAt=old[j].verifiedAt;
+    }
+    return n;
+  });
+}
+function modifyRebind(){
+  if(window._lastDash){
+    const l = records.find(x=>x.id===window._lastDash.id);
+    if(l && l!==window._lastDash) window._lastDash = l;
+  }
+  if(!modifyRec) return false;
+  const before = modifyRec;
+  const f = modifyFresh();
+  if(!f || f===before) return false;
+  if(modifyIngsDiffer(f)){
+    modifyRefreshIngs(f);
+    modifyNotice = 'สูตรของใบงานนี้ถูกอัปเดตจากเซิร์ฟเวอร์ — ตารางด้านล่างแสดงค่าล่าสุดแล้ว';
+    modifyRerender = true;
+    return true;
+  }
+  return false;
+}
+// renderDashboard() เขียนค่าที่คำนวณได้ (totW, totA, heroes, fda) ลงใน record ด้วย · ฟิลด์เหล่านี้ไม่อยู่ใน
+// pd_keys ของ PD guard (supabase/schema.sql) ถ้า PD แก้น้ำหนักแล้วค่าเหล่านี้เปลี่ยน เซิร์ฟเวอร์จะปฏิเสธ 42501
+// จึงวาดหน้าจอตามปกติ แต่คืนค่าเดิมของฟิลด์คำนวณก่อนบันทึก (ค่าเหล่านี้คำนวณใหม่ทุกครั้งที่วาด Dashboard)
+const DERIVED_KEYS = ['totW','totA','heroes','fda'];
+// ฟิลด์ที่ PD แก้ได้ฝั่งเซิร์ฟเวอร์ — ต้องตรงกับ pd_keys ใน supabase/schema.sql (fs_guard_record_json)
+const PD_WRITABLE_KEYS = ['rows','rdUpdated','modNote','lastActivityAt','conceptStr','form','size','sizeUnit','uw','uwUnit',
+  'cat','subcat','color','scent','flavor','packType','widthCm','lengthCm','finalTarget','gender','price','priority','fdaType',
+  'allBenefits','cons','notes','benefits'];
+// Role PD: ทุกฟิลด์นอก pd_keys ต้องเท่ากับสำเนาที่เซิร์ฟเวอร์ยืนยันล่าสุด (sbSnap.records) · ถ้าไม่เท่าเซิร์ฟเวอร์ปฏิเสธ 42501
+// (เช่น totW/totA/heroes/fda ที่ renderDashboard เขียนทับตอนดู/พิมพ์) · คืน record ใหม่ ไม่แตะต้นฉบับ
+function sbPdComparable(r){
+  if(!r || sbRoleForServer()!=='pd' || !sbSnap || !sbSnap.records || !sbSnap.records[r.id]) return r;
+  let base; try{ base = JSON.parse(sbSnap.records[r.id]); }catch(err){ return r; }
+  const out = {};
+  Object.keys(base).forEach(k=>{ if(!PD_WRITABLE_KEYS.includes(k)) out[k] = base[k]; });
+  Object.keys(r).forEach(k=>{ if(PD_WRITABLE_KEYS.includes(k)) out[k] = r[k]; });
+  return out;
+}
+// ปรับ record ในเครื่องให้ตรงเงื่อนไขข้างบนก่อนส่ง (ค่าที่คำนวณได้จะถูกคำนวณใหม่ทุกครั้งที่วาด Dashboard)
+function sbPdNormalizeLocal(r){
+  const c = sbPdComparable(r);
+  if(c===r) return;
+  Object.keys(r).forEach(k=>{ if(!PD_WRITABLE_KEYS.includes(k) && !(k in c)) delete r[k]; });
+  Object.keys(c).forEach(k=>{ if(!PD_WRITABLE_KEYS.includes(k)) r[k] = c[k]; });
+}
+function renderDashboardKeepDerived(d){
+  const had = {}, old = {};
+  DERIVED_KEYS.forEach(k=>{ had[k] = Object.prototype.hasOwnProperty.call(d,k); old[k] = d[k]; });
+  renderDashboard(d);
+  DERIVED_KEYS.forEach(k=>{ if(had[k]) d[k] = old[k]; else delete d[k]; });
+}
+// เฉพาะ Role pd ที่ต้องคืนฟิลด์คำนวณก่อนบันทึก (PD guard ฝั่งเซิร์ฟเวอร์) · Role อื่นให้ renderDashboard ปรับค่าตามเดิม
+function renderDashboardForActor(d){
+  if(sbRoleForServer()==='pd') renderDashboardKeepDerived(d); else renderDashboard(d);
+}
+function modifyPersist(f, label){
+  const ok = saveRecordsStore();
+  saveQTrack(f.id, label, ok);
+  return ok;
 }
 
 // รายการรหัสชุดข้อมูลใน PD Modify Data (คลิกเข้าไปแก้สูตร)
@@ -3670,13 +3773,17 @@ function openModifyFromPopup(id){
 function openModifyRecord(id){
   const r = records.find(x=>x.id===id);
   if(!r) return;
+  if(modifyRec && modifyRec.id!==id && !saveQNavOK()) return;
   modifyRec = r;
+  modifyNotice = '';
   buildModifyData();
   renderModify();
   window.scrollTo({top:0,behavior:'auto'});
 }
 function backToModifyList(){
+  if(!saveQNavOK()) return;
   modifyRec = null;
+  modifyNotice = '';
   renderModify();
 }
 
@@ -3743,6 +3850,8 @@ function renderModify(){
       <div class="db-sub">${esc(d.brand||d.customer||'Formula')} · สร้างเมื่อ ${esc(d.date)}</div>
     </div>
     ${userBar}
+    ${modifyNotice?`<div class="mod-userbar warn" role="status">${esc(modifyNotice)}</div>`:''}
+    ${sbConflicts[d.id]?`<div class="mod-userbar warn" role="alert">ใบงาน ${esc(d.id)} ถูกแก้ไขบนเซิร์ฟเวอร์โดยผู้อื่นระหว่างที่การบันทึกของคุณยังไม่ยืนยัน — เซิร์ฟเวอร์อาจปฏิเสธการบันทึก ข้อมูลของคุณยังเก็บไว้ในเครื่อง ตรวจสูตรอีกครั้งก่อนลองใหม่</div>`:''}
     <div class="mod-sec-t">ข้อมูลทั่วไป</div>
     <div class="msg-grid">${cards}</div>
     <div class="mod-sec-t">สารสกัด <span style="font-size:12px;font-weight:400;color:var(--muted)">(เพิ่ม / ลด / แก้ไขได้)</span></div>
@@ -3769,8 +3878,9 @@ function modNoteHTML(d){
 }
 
 function saveModNote(){
-  const d = modifyRec;
-  if(!d) return;
+  if(!requirePerm('editFormula','บันทึกหมายเหตุได้เฉพาะ Role: Admin, PD')) return;
+  const d = modifyFresh();
+  if(!d){ modifyNotice='ไม่พบใบงานนี้แล้ว (อาจถูกลบ) — บันทึกหมายเหตุไม่ได้'; return; }
   d.modNote = {
     text: document.getElementById('modNote').value,
     savedBy: currentUser || '',
@@ -3778,8 +3888,7 @@ function saveModNote(){
   };
   d.rdUpdated = true;                          // มีการอัพเดทใน PD Modify Data
   logAct('formula','บันทึกหมายเหตุหลังปรับสูตร', (d.modNote.text||'').slice(0,160), d.id);
-  const idx = records.findIndex(x=>x.id===d.id);
-  if(idx>=0){ records[idx]=d; saveRecordsStore(); }
+  modifyPersist(d,'บันทึกหมายเหตุ');
   document.getElementById('modNoteSaved').textContent =
     `บันทึกล่าสุด: ${d.modNote.savedAt}${currentUser?` · โดย ${currentUser}`:''}`;
   renderRecordsList();
@@ -3812,26 +3921,27 @@ function modifyIngToRow(mi, i){
   return {num:i+1, name:mi.name||'', w, o:mi.o||'', p, actual,
           note:mi.note||'', hero:!!mi.hero, fda:checkFDA(mi.name||'', actual)};
 }
-function syncModifyRows(){
-  const d = modifyRec;
+function syncModifyRows(label){
+  const d = modifyFresh();
   if(!d) return;
   d.rows = modifyIngs.map(modifyIngToRow);
   modifyIngs.forEach((mi,i)=>{ mi.fdaIcon = d.rows[i].fda.icon; });
   d.rdUpdated = true;
   window._lastDash = d;
-  renderDashboard(d);
-  const idx = records.findIndex(x=>x.id===d.id);
-  if(idx>=0){ records[idx]=d; saveRecordsStore(); }
+  renderDashboardForActor(d);
+  modifyPersist(d, label||'แก้ไขรายการสาร');
   renderRecordsList();
 }
 function addModifyIng(){
   if(!requirePerm('editFormula','เพิ่มสารได้เฉพาะ Role: Admin, PD')) return;
+  const base = modifyFresh();
+  if(base && modifyIngsDiffer(base)) modifyRefreshIngs(base);   // เริ่มจากสูตรล่าสุด ไม่ใช่ตารางค้าง
   modifyIngs.push({
     name:'', w:'0.00', o:'', p:'100', actual:'0.00', note:'', hero:false, fdaIcon:'⚪',
     editedBy:currentUser, editedAt:new Date().toLocaleString('th-TH'), verifiedBy:'', verifiedAt:''
   });
   logAct('formula','เพิ่มสารในสูตร (PD Modify Data)', 'แถวที่ '+modifyIngs.length, modifyRec?modifyRec.id:'');
-  syncModifyRows();
+  syncModifyRows('เพิ่มสาร');
   renderModify();
   const tr = document.getElementById('ingrow-'+(modifyIngs.length-1));
   if(tr){
@@ -3842,11 +3952,13 @@ function addModifyIng(){
 }
 function delModifyIng(i){
   if(!requirePerm('editFormula','ลบสารได้เฉพาะ Role: Admin, PD')) return;
+  const base = modifyFresh();
+  if(base && modifyIngsDiffer(base)) modifyRefreshIngs(base);
   const nm = (modifyIngs[i] && modifyIngs[i].name) || '';
   if(!confirm(`ลบสาร "${nm||'(ยังไม่ระบุชื่อ)'}" ออกจากสูตร?`)) return;
   logAct('formula','ลบสารออกจากสูตร (PD Modify Data)', nm, modifyRec?modifyRec.id:'');
   modifyIngs.splice(i,1);
-  syncModifyRows();
+  syncModifyRows('ลบสาร');
   renderModify();
 }
 
@@ -3864,9 +3976,13 @@ function editIng(i, field, value){
 
 // นำค่าที่แก้ในตาราง PD Modify Data กลับไปอัพเดต snapshot ของ record + Dashboard
 function applyIngToRecord(i){
-  const d = modifyRec;
-  if(!d || !d.rows || !d.rows[i]) return;
-  const mi = modifyIngs[i], row = d.rows[i];
+  const d = modifyFresh();           // แก้บนสำเนาล่าสุดใน records[] เสมอ ไม่ใช่ออบเจ็กต์ที่ถือค้าง
+  if(!d){ modifyNotice='ไม่พบใบงานนี้แล้ว (อาจถูกลบ) — การแก้ไขไม่ถูกบันทึก'; return; }
+  if(!d.rows) d.rows = [];
+  const mi = modifyIngs[i];
+  if(!mi) return;
+  let row = d.rows[i];
+  if(!row){ row = d.rows[i] = modifyIngToRow(mi, i); modifyNotice='จำนวนสารบนเซิร์ฟเวอร์เปลี่ยนไประหว่างแก้ไข — ตรวจสูตรอีกครั้ง'; }
   row.name = mi.name;
   row.w = parseFloat(mi.w)||0;
   row.o = mi.o;
@@ -3876,9 +3992,9 @@ function applyIngToRecord(i){
   row.fda = checkFDA(row.name, row.actual);   // ตรวจ อย. ใหม่ตามค่าที่แก้
   d.rdUpdated = true;                          // มีการอัพเดทใน PD Modify Data
   window._lastDash = d;
-  renderDashboard(d);                          // recompute ยอดรวม/hero/อย.
-  const idx = records.findIndex(x=>x.id===d.id);
-  if(idx>=0){ records[idx]=d; saveRecordsStore(); }
+  renderDashboardForActor(d);                  // recompute ยอดรวม/hero/อย. บนหน้าจอ (ไม่เขียนฟิลด์คำนวณลง record)
+  if(modifyIngsDiffer(d)) modifyRefreshIngs(d, i);   // แถวอื่นที่เซิร์ฟเวอร์เปลี่ยน ให้ตารางตามสำเนาล่าสุด
+  modifyPersist(d, 'แก้สูตรแถวที่ '+(i+1));
   renderRecordsList();
 }
 
@@ -3889,6 +4005,201 @@ function verifyIng(i){
   r.verifiedAt = new Date().toLocaleString('th-TH');
   logAct('formula','ยืนยันการตรวจสาร', r.name||'(ไม่มีชื่อ)', modifyRec?modifyRec.id:'');
   refreshIngStatus(i);
+}
+
+
+// ========== PD Modify: คิวสถานะการบันทึก (ฝั่ง client เท่านั้น) ==========
+// หนึ่งใบงาน = หนึ่งรายการในคิว · สถานะ queued -> local(25%) -> sending(50%) -> confirmed(100%) | failed
+// สำเร็จ = เขียน localStorage สำเร็จ "และ" เซิร์ฟเวอร์ตอบแถวที่ fingerprint ตรงกับสำเนาในเครื่อง
+// (ใช้ sbConfirmedRecords เดียวกับการล็อกแชต) · ล้มเหลวแล้วไม่ทิ้งข้อมูล เก็บในเครื่องและให้กดลองใหม่
+let saveQ = [];
+let saveQSeq = 0;
+let saveQRunning = false;
+let saveQHidden = false;
+let saveQCloseTimer = null;
+let saveQEpoch = 0;     // เพิ่มเมื่อรีเซ็ตคิว เพื่อให้งานรอที่ค้างอยู่เลิกวน
+const SAVEQ_WAIT_MS = 15000;
+let SAVEQ_DEADLINE_MS = 45000;   // เพดานเวลารอเซิร์ฟเวอร์ต่อหนึ่งการบันทึก ไม่ว่าคำขอย่อยจะค้างที่ใด
+function saveQReset(keepNotice){
+  saveQ = []; saveQRunning = false; saveQHidden = false; sbConflicts = {}; saveQEpoch++;
+  clearTimeout(saveQCloseTimer);
+  const el = document.getElementById('saveQPanel'); if(el) el.remove();
+  if(!keepNotice){ const lost = document.getElementById('saveQLostNotice'); if(lost) lost.remove(); }
+}
+// เซสชันหลุดระหว่างมีงานค้าง: คิวถูกล้าง แต่ต้องบอกผู้ใช้ว่าข้อมูลยังอยู่ในเครื่อง
+function saveQShowLostNotice(){
+  const old = document.getElementById('saveQLostNotice'); if(old) old.remove();
+  const el = document.createElement('div');
+  el.id = 'saveQLostNotice'; el.setAttribute('role','alert');
+  el.style.cssText = 'position:fixed;left:16px;right:16px;bottom:16px;z-index:2600;max-width:520px;background:#fff7ed;color:#7c2d12;border:1px solid #fdba74;border-radius:12px;padding:12px 14px;font-size:13px;box-shadow:0 8px 28px rgba(0,0,0,.22)';
+  el.innerHTML = '<b>มีงานที่ยังไม่ยืนยันการบันทึก</b> — ข้อมูลยังอยู่ในเครื่อง จะส่งหลังเข้าสู่ระบบใหม่ <button class="btn btn-g btn-sm" style="margin-left:8px" onclick="this.parentNode.remove()">ปิด</button>';
+  document.body.appendChild(el);
+}
+function saveQMine(){ return saveQ.filter(x=>x.user===currentUser); }
+function saveQPending(){ return saveQMine().filter(x=>x.state!=='confirmed'); }
+function saveQHasPending(jobId){ return saveQPending().some(x=>x.jobId===jobId); }
+function jobServerConfirmed(r){
+  const scope = jobConfirmationScope();
+  return !!(r && scope && !sbErr && sbConfirmedScope===scope && sbConfirmedRecords[r.id]===jobRecordFingerprint(sbPdComparable(r)));
+}
+function saveQTrack(jobId, label, localOk){
+  const rec = records.find(x=>x.id===jobId);
+  let it = saveQ.find(x=>x.jobId===jobId && x.user===currentUser && x.state!=='confirmed');
+  if(it){
+    it.label = label; it.localOk = localOk;
+    if(it.state==='failed'){ it.state='queued'; it.pct=0; it.error=''; }
+  }else{
+    saveQ = saveQ.filter(x=>!(x.jobId===jobId && x.user===currentUser));
+    it = {seq:++saveQSeq, jobId:jobId, label:label, user:currentUser, state:'queued', pct:0, error:'', localOk:localOk, localOnly:false};
+    saveQ.push(it);
+  }
+  it.fp = rec ? jobRecordFingerprint(rec) : '';
+  saveQHidden = false;
+  clearTimeout(saveQCloseTimer);
+  saveQRender();
+  saveQProcess();
+  return it;
+}
+async function saveQProcess(){
+  if(saveQRunning) return;
+  saveQRunning = true;
+  try{
+    for(let guard=0; guard<100; guard++){
+      const it = saveQ.find(x=>x.state==='queued');
+      if(!it) break;
+      try{ await saveQRun(it); }
+      catch(err){ it.state='failed'; it.error=safeError(err); }
+      saveQRender();
+    }
+  }finally{ saveQRunning = false; saveQRender(); }
+}
+function saveQSet(it, state, pct, error){
+  it.state = state; it.pct = pct; it.error = error || '';
+  if(state==='failed') saveQHidden = false;       // ความล้มเหลวต้องไม่ถูกซ่อน
+  saveQRender();
+}
+async function saveQRun(it){
+  const rec = records.find(x=>x.id===it.jobId);
+  if(!rec){ saveQSet(it,'failed',0,'ไม่พบใบงานนี้ในเครื่อง'); return; }
+  // ขั้น 1: เขียนลงเครื่อง
+  if(it.localOk!==true) it.localOk = storeRecordsLocal();
+  if(!it.localOk){
+    saveQSet(it,'failed',0,'บันทึกลงเครื่องไม่สำเร็จ (พื้นที่เก็บข้อมูลของเบราว์เซอร์เต็มหรือถูกบล็อก) — ข้อมูลยังอยู่ในหน้านี้ อย่าปิดหน้าจนกว่าจะลองใหม่สำเร็จ');
+    return;
+  }
+  saveQSet(it,'local',25);
+  if(!sbOn()){ it.localOnly = true; saveQSet(it,'confirmed',100); return; }   // โหมดเครื่องเดียว: ไม่มีเซิร์ฟเวอร์ให้ยืนยัน
+  if(!authSession){ saveQSet(it,'failed',25,'ยังไม่ได้เข้าสู่ระบบเซิร์ฟเวอร์ — เก็บในเครื่องแล้ว เข้าสู่ระบบแล้วกดลองใหม่'); return; }
+  if(!sbReady){
+    saveQSet(it,'waiting',25);
+    const t0 = Date.now(), epoch = saveQEpoch;
+    while(!sbReady && epoch===saveQEpoch && Date.now()-t0 < SAVEQ_WAIT_MS) await new Promise(res=>setTimeout(res,250));
+    if(epoch!==saveQEpoch) return;
+    if(!sbReady){ saveQSet(it,'failed',25,'ยังเชื่อมต่อเซิร์ฟเวอร์ไม่เสร็จ — เก็บในเครื่องแล้ว กดลองใหม่'); return; }
+  }
+  // ขั้น 2: ส่งขึ้นเซิร์ฟเวอร์ แล้วรอคำตอบที่ยืนยันแถวนี้
+  saveQSet(it,'sending',50);
+  for(let attempt=0; attempt<3; attempt++){
+    clearTimeout(sbPushTimer);
+    let dlTimer = null;
+    const expired = await Promise.race([
+      sbCycle().then(()=>false, ()=>false),
+      new Promise(res=>{ dlTimer = setTimeout(()=>res(true), SAVEQ_DEADLINE_MS); })
+    ]);
+    clearTimeout(dlTimer);
+    if(expired){ saveQSet(it,'failed',50,'หมดเวลารอเซิร์ฟเวอร์ — เก็บในเครื่องแล้ว กดลองใหม่ได้'); return; }
+    const cur = records.find(x=>x.id===it.jobId);
+    if(!cur){ saveQSet(it,'failed',50,'ใบงานหายไปจากเครื่องระหว่างบันทึก'); return; }
+    it.fp = jobRecordFingerprint(cur);
+    if(jobServerConfirmed(cur)){ delete sbConflicts[it.jobId]; saveQSet(it,'confirmed',100); return; }
+    if(sbErr) break;           // ซิงก์ล้มเหลว ไม่ต้องวนซ้ำ
+  }
+  const why = sbErr ? 'เซิร์ฟเวอร์ปฏิเสธหรือเชื่อมต่อไม่ได้: '+safeError(sbErr)
+    : (sbReadOnlyNote || 'เซิร์ฟเวอร์ยังไม่ยืนยันข้อมูลชุดนี้');
+  saveQSet(it,'failed',50,why+' — เก็บในเครื่องแล้ว กดลองใหม่ได้');
+}
+// จบทุกรอบซิงก์: รายการที่ค้าง/ล้มเหลวอาจยืนยันได้แล้วจากรอบ poll/manual
+function saveQRecheck(){
+  let changed = false;
+  saveQ.forEach(it=>{
+    if(it.state!=='failed' && it.state!=='waiting') return;
+    const rec = records.find(x=>x.id===it.jobId);
+    if(rec && jobServerConfirmed(rec)){ it.state='confirmed'; it.pct=100; it.error=''; delete sbConflicts[it.jobId]; changed = true; }
+  });
+  if(changed) saveQRender();
+}
+function saveQRetry(seq){
+  if(!requirePerm('editFormula','บันทึกสูตรได้เฉพาะ Role: Admin, PD')) return;
+  saveQRetryOne(seq);
+}
+function saveQRetryOne(seq){
+  const it = saveQ.find(x=>x.seq===seq);
+  if(!it || it.state!=='failed') return;
+  it.state='queued'; it.pct=0; it.error=''; it.localOk=null;
+  saveQHidden = false;
+  saveQRender();
+  saveQProcess();
+}
+function saveQRetryAll(){
+  if(!requirePerm('editFormula','บันทึกสูตรได้เฉพาะ Role: Admin, PD')) return;
+  saveQMine().filter(x=>x.state==='failed').forEach(x=>saveQRetryOne(x.seq));
+}
+function saveQHide(){
+  saveQHidden = true;
+  if(!saveQPending().length) saveQ = saveQ.filter(x=>x.user!==currentUser || x.state!=='confirmed');
+  saveQRender();
+}
+// ทางออกจากหน้า: กำลังบันทึกอยู่ = กันไว้ · ล้มเหลวแล้ว = ถามยืนยัน (ไม่ขังผู้ใช้ ข้อมูลยังอยู่ในเครื่อง)
+function saveQNavOK(){
+  const pending = saveQPending();
+  if(!pending.length) return true;
+  saveQHidden = false; saveQRender();
+  if(pending.some(x=>x.state!=='failed')){
+    alert('กำลังบันทึกสูตรขึ้นเซิร์ฟเวอร์ — รอจนขึ้นสถานะ "บันทึกสำเร็จ" ก่อนออกจากหน้านี้');
+    return false;
+  }
+  return confirm('มีการบันทึกที่ยังไม่สำเร็จ ('+pending.length+' ใบงาน) ข้อมูลยังเก็บอยู่ในเครื่องและกดลองใหม่ได้จากกล่องมุมขวาล่าง\nต้องการออกจากหน้านี้ต่อหรือไม่?');
+}
+window.addEventListener('beforeunload', function(e){
+  if(!saveQPending().length) return;
+  e.preventDefault();
+  e.returnValue = 'มีการบันทึกสูตรที่ยังไม่ยืนยัน';
+  return e.returnValue;
+});
+const SAVEQ_STATE_TEXT = {queued:'รอคิว', local:'บันทึกในเครื่องแล้ว', waiting:'รอเชื่อมต่อเซิร์ฟเวอร์', sending:'กำลังส่งขึ้นเซิร์ฟเวอร์', confirmed:'เซิร์ฟเวอร์ยืนยันแล้ว', failed:'ไม่สำเร็จ'};
+function saveQRender(){
+  const mine = saveQMine();
+  let el = document.getElementById('saveQPanel');
+  if(!mine.length || saveQHidden){ if(el) el.style.display='none'; return; }
+  if(!el){
+    el = document.createElement('div');
+    el.id = 'saveQPanel'; el.setAttribute('role','status'); el.setAttribute('aria-live','polite');
+    el.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:2500;width:min(360px,calc(100vw - 32px));background:var(--card,#fff);color:var(--text,#222);border:1px solid var(--border,#ccc);border-radius:12px;box-shadow:0 8px 28px rgba(0,0,0,.22);padding:14px 16px;font-size:13px';
+    document.body.appendChild(el);
+  }
+  el.style.display = 'block';
+  const pending = mine.filter(x=>x.state!=='confirmed').sort((a,b)=>a.seq-b.seq);
+  const failed = mine.filter(x=>x.state==='failed');
+  const allOk = !pending.length;
+  const pct = allOk ? 100 : Math.min.apply(null, pending.map(x=>x.pct));
+  const title = failed.length ? 'บันทึกไม่สำเร็จ - ลองใหม่' : (allOk ? 'บันทึกสำเร็จ' : 'กำลังบันทึก…');
+  const color = failed.length ? '#c0392b' : (allOk ? '#1e8e3e' : '#2563eb');
+  const rows = mine.sort((a,b)=>a.seq-b.seq).map(it=>{
+    const pos = pending.indexOf(it);
+    const q = pos>=0 ? `คิวที่ ${pos+1}/${pending.length} · ` : '';
+    const st = it.state==='confirmed' && it.localOnly ? 'บันทึกในเครื่องแล้ว (ไม่ได้เชื่อมเซิร์ฟเวอร์)' : SAVEQ_STATE_TEXT[it.state];
+    return `<div style="margin-top:8px"><b>${esc(it.jobId)}</b> · ${esc(it.label)}<br>
+      <span>${esc(q)}${esc(st)} · ${it.pct}%</span>
+      ${it.error?`<div style="color:#c0392b;margin-top:2px">${esc(it.error)}</div>`:''}
+      ${sbConflicts[it.jobId] && it.state!=='confirmed'?`<div style="color:#b45309;margin-top:2px">ใบงานนี้ถูกแก้ไขบนเซิร์ฟเวอร์โดยผู้อื่นระหว่างที่การบันทึกของคุณยังไม่ยืนยัน — เซิร์ฟเวอร์อาจปฏิเสธ ข้อมูลของคุณยังเก็บไว้ในเครื่อง</div>`:''}
+      ${it.state==='failed'?`<button class="btn btn-p btn-sm" style="margin-top:4px" onclick="saveQRetry(${it.seq})">ลองใหม่</button>`:''}</div>`;
+  }).join('');
+  el.innerHTML = `<div style="font-weight:700;color:${color}">${esc(title)}</div>
+    <div style="height:8px;border-radius:4px;background:#e5e7eb;margin-top:8px;overflow:hidden"><div id="saveQBar" style="height:100%;width:${pct}%;background:${color}"></div></div>
+    <div style="margin-top:4px">${pct}%</div>${rows}
+    <div style="margin-top:10px;text-align:right">${failed.length>1?'<button class="btn btn-p btn-sm" onclick="saveQRetryAll()">ลองใหม่ทั้งหมด</button> ':''}<button class="btn btn-g btn-sm" onclick="saveQHide()">${allOk?'ปิด':'ซ่อน'}</button></div>`;
+  clearTimeout(saveQCloseTimer);
+  if(allOk && !window.__FS_TEST__) saveQCloseTimer = setTimeout(saveQHide, 3000);
 }
 
 // ========== CUSTOMER DATA RECORDS (บันทึก + แสดงใน Dashboard) ==========
@@ -3904,12 +4215,24 @@ function loadRecords(){
   }catch(e){ records=[]; recCounter=0; }
   syncRecCounter();
 }
-function saveRecordsStore(){
+// เขียน records ลง localStorage · คืน true เมื่อสำเร็จจริง · ล้มเหลว (เช่นโควตาเต็ม) ต้องไม่เงียบ
+let lastStoreError = '';
+function storeRecordsLocal(){
   try{
     localStorage.setItem('fs_records', JSON.stringify(records));
     localStorage.setItem('fs_reccounter', String(recCounter));
-  }catch(e){}
-  sbQueue();
+    lastStoreError = '';
+    return true;
+  }catch(e){
+    lastStoreError = (e && (e.name||e.message)) ? String(e.name||e.message) : 'localStorage';
+    console.warn('[store] บันทึกลงเครื่องไม่สำเร็จ', lastStoreError);
+    return false;
+  }
+}
+function saveRecordsStore(){
+  const ok = storeRecordsLocal();
+  sbQueue();            // ล้มเหลวในเครื่องก็ยังส่งขึ้นเซิร์ฟเวอร์ เพราะเป็นทางกู้เดียว
+  return ok;
 }
 // ---------- รหัสชุดข้อมูล: A00001 … A99999 → B00001 … Z99999 → AA00001 … ----------
 // recCounter = ลำดับที่รันไปเรื่อย ๆ ไม่ย้อนกลับ แม้งานจะถูกลบไปแล้ว (จึงไม่มีรหัสซ้ำ)
@@ -4017,7 +4340,7 @@ function jobChatBlockReason(r){
   if(!scope) return 'กรุณาเข้าสู่ระบบเพื่อยืนยันการบันทึกใบงาน';
   if(!navigator.onLine) return 'ออฟไลน์ — รอเชื่อมต่อและยืนยันการบันทึกใบงาน';
   if(sbErr) return 'เชื่อมต่อหรือบันทึกไม่สำเร็จ — รอยืนยันใบงานก่อนใช้แชต';
-  if(sbConfirmedScope!==scope || sbConfirmedRecords[r.id]!==jobRecordFingerprint(r))
+  if(sbConfirmedScope!==scope || sbConfirmedRecords[r.id]!==jobRecordFingerprint(sbPdComparable(r)))
     return 'รอยืนยันการบันทึกใบงานจากเซิร์ฟเวอร์ — ยังใช้แชตไม่ได้';
   return '';
 }
@@ -4032,9 +4355,17 @@ function jobSaveStatusHTML(r){
   const why=jobChatBlockReason(r);
   return `<span class="job-save${why?'':' saved'}">${why?'🔒 '+esc(why):'✓ บันทึกสำเร็จ · ใช้แชตได้'}</span>`;
 }
+// สถานะการบันทึกสูตรของใบงานนี้ที่แสดงในหน้าล็อกแชต (ใช้ข้อมูลจากคิวบันทึก ไม่เปลี่ยนกติกาล็อกเดิม)
+function jobLockedSaveNote(id){
+  const it = saveQMine().filter(x=>x.jobId===id && x.state!=='confirmed').sort((a,b)=>b.seq-a.seq)[0];
+  if(!it) return '';
+  if(it.state==='failed')
+    return `<div class="job-lock-note" style="margin-top:8px;color:#c0392b">บันทึกสูตรไม่สำเร็จ — ข้อมูลยังอยู่ในเครื่อง กด "ลองใหม่" ที่กล่องมุมจอ หรือแก้ในเมนู PD Modify</div>`;
+  return `<div class="job-lock-note" style="margin-top:8px;color:#2563eb">กำลังบันทึกสูตร… ${Number(it.pct)||0}% — แชตจะกลับมาใช้ได้เมื่อเซิร์ฟเวอร์ยืนยัน</div>`;
+}
 function jobLockedHTML(r){
   const id=String(r && r.id || ''), linkable=/^[A-Z]+\d{5}$/.test(id);
-  return `<div class="job-lock" role="status"><b>แชตใบงาน ${esc(id)} ยังไม่พร้อมใช้งาน</b><br>${esc(jobChatBlockReason(r))}
+  return `<div class="job-lock" role="status"><b>แชตใบงาน ${esc(id)} ยังไม่พร้อมใช้งาน</b><br>${esc(jobChatBlockReason(r))}${jobLockedSaveNote(id)}
     ${sbErr?`<br>ซิงก์ไม่สำเร็จ: ${esc(safeError(sbErr))}`:''}
     <br>ตรวจและบันทึกใบงานให้สำเร็จก่อน แล้วจึงเข้าแชตได้
     <div style="margin-top:10px">${linkable?`<button class="btn btn-s btn-sm" onclick="openRecordPopup('${id}')">ตรวจใบงาน</button>`:''}
@@ -5239,17 +5570,20 @@ function chatRoomHTML(c, r){
 const CF_FIELDS = {name:'ชื่อสาร', w:'ปริมาณที่ชั่ง', o:'แหล่งกำเนิด', p:'ความเข้มข้น %', note:'หมายเหตุ'};
 
 // ตารางสูตรแบบแก้ไขได้ — ใช้แทนตารางอ่านอย่างเดียวเมื่อผู้ใช้มีสิทธิ์
+// ตัวตนของแถวสูตร ณ ตอนวาดหน้าจอ — ใช้เทียบก่อนแก้/ลบ เพื่อไม่ให้แก้ผิดแถวเมื่อข้อมูลถูกสลับจากเซิร์ฟเวอร์
+function chatRowKey(x){ return [String(x&&x.name||''), Number(x&&x.w).toFixed(2), String(x&&x.p)].join('|'); }
+function chatRowChangedNotice(i){ return {abort:'แถวที่ '+(i+1)+' ของสูตรถูกเปลี่ยนจากเซิร์ฟเวอร์ระหว่างที่คุณแก้ไข — ไม่ได้บันทึกการแก้ไขนี้ ตารางแสดงค่าล่าสุดแล้ว กรุณาตรวจและแก้ใหม่'}; }
 function chatFormulaEditorHTML(r){
   const rows = (r.rows||[]).map((x,i)=>`
-    <tr>
+    <tr data-rk="${esc(chatRowKey(x))}">
       <td style="color:var(--muted);text-align:center">${i+1}</td>
       <td style="text-align:center;white-space:nowrap" id="cffda-${i}">${x.fda?x.fda.icon:''}${x.hero?' ⭐':''}</td>
-      <td><input value="${esc(x.name)}" onchange="chatIngEdit('${r.id}',${i},'name',this.value)"></td>
-      <td><input value="${Number(x.w).toFixed(2)}" onchange="chatIngEdit('${r.id}',${i},'w',this.value)" style="max-width:90px"></td>
-      <td><input value="${esc(x.o||'')}" onchange="chatIngEdit('${r.id}',${i},'o',this.value)"></td>
-      <td><input value="${x.p}" onchange="chatIngEdit('${r.id}',${i},'p',this.value)" style="max-width:70px"></td>
+      <td><input value="${esc(x.name)}" onchange="chatIngEdit('${r.id}',${i},'name',this.value,this.closest('tr').dataset.rk)"></td>
+      <td><input value="${Number(x.w).toFixed(2)}" onchange="chatIngEdit('${r.id}',${i},'w',this.value,this.closest('tr').dataset.rk)" style="max-width:90px"></td>
+      <td><input value="${esc(x.o||'')}" onchange="chatIngEdit('${r.id}',${i},'o',this.value,this.closest('tr').dataset.rk)"></td>
+      <td><input value="${x.p}" onchange="chatIngEdit('${r.id}',${i},'p',this.value,this.closest('tr').dataset.rk)" style="max-width:70px"></td>
       <td class="cf-actual" id="cfact-${i}">${Number(x.actual).toFixed(2)}</td>
-      <td><input value="${esc(x.note||'')}" onchange="chatIngEdit('${r.id}',${i},'note',this.value)"></td>
+      <td><input value="${esc(x.note||'')}" onchange="chatIngEdit('${r.id}',${i},'note',this.value,this.closest('tr').dataset.rk)"></td>
       <td style="text-align:center"><button class="btn-del" title="ลบสารนี้" onclick="chatIngDel('${r.id}',${i})">🗑</button></td>
     </tr>`).join('');
   const body = rows || `<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:12px">ยังไม่มีสาร — กด “+ เพิ่มสาร”</td></tr>`;
@@ -5269,65 +5603,80 @@ function chatFormulaEditorHTML(r){
     </div>`;
 }
 
-// เขียนค่ากลับเข้า record + คำนวณใหม่ + บันทึกลงแชทเป็น log
-function chatSaveFormula(r, logText){
+// แก้สูตรจากห้องแชท: อ่าน record ล่าสุดจาก records[] ตาม id ทุกครั้ง แล้วให้ mutate() แก้บนสำเนานั้น
+// (sbApply / storage event อาจแทนที่ออบเจ็กต์ระหว่างรอ — ห้ามเขียน records[idx]=ออบเจ็กต์ค้าง)
+// mutate(r) คืน false = ไม่ทำอะไร · หรือ {log, act:[cat,action,detail]} · ฟิลด์คำนวณ (totW ฯลฯ) ไม่ถูกเขียนลง record
+// การบันทึกถูกใส่คิว saveQ เหมือน PD Modify (ป๊อปอัปแสดงความคืบหน้า + กันออกจากหน้าจนกว่าเซิร์ฟเวอร์ยืนยัน)
+function chatSaveFormula(jobId, mutate, label){
+  if(!requirePerm('editFormula','แก้สูตรได้เฉพาะ Role: Admin, PD')) return false;
+  const r = records.find(x=>x.id===jobId);
+  if(!r){ alert('ไม่พบใบงานนี้แล้ว (อาจถูกลบ) — การแก้ไขไม่ถูกบันทึก'); renderChat(); return false; }
+  const res = mutate(r);
+  if(!res) return false;                         // ไม่มีอะไรเปลี่ยน: ไม่วาดแชตใหม่ (กันข้อความที่พิมพ์ค้างหาย)
+  if(res.abort){ alert(res.abort); renderChat(); return false; }
+  r.rows = r.rows || [];
   r.rows.forEach((x,i)=>{ x.num = i+1; });
   r.rdUpdated = true;
-  const idx = records.findIndex(x=>x.id===r.id);
-  if(idx>=0){ records[idx]=r; saveRecordsStore(); }
+  if(res.act) logAct(res.act[0], res.act[1], res.act[2], r.id);
   window._lastDash = r;
-  renderDashboard(r);
+  renderDashboardForActor(r);
+  modifyPersist(r, label||'แก้สูตรในแชท');
   const c = getChat(r.id);
   if(c){
     invalidateChatApprovals(c);
-    pushSys(c, logText, {action:'formula_change'});
+    pushSys(c, res.log, {action:'formula_change'});
     touchChatPart(c, currentUser, false);
     saveChats();
   }
-  if(modifyRec && modifyRec.id===r.id){ buildModifyData(); }   // ให้หน้า PD Modify เห็นค่าล่าสุด
+  if(modifyRec && modifyRec.id===r.id){ modifyFresh(); buildModifyData(); }   // ให้หน้า PD Modify เห็นค่าล่าสุด
   renderChat();
   renderRecordsList();
+  return true;
 }
 
-function chatIngEdit(jobId, i, field, value){
+function chatIngEdit(jobId, i, field, value, expectKey){
   if(!requireJobChat(jobId)) return;
-  const r = records.find(x=>x.id===jobId);
-  if(!r || !r.rows[i]) return;
   if(!requirePerm('editFormula','แก้สูตรได้เฉพาะ Role: Admin, PD')){ renderChat(); return; }
-  const row = r.rows[i];
-  const before = (field==='w'||field==='p') ? Number(row[field]).toFixed(2) : String(row[field]||'');
-  if(field==='w' || field==='p') row[field] = parseFloat(value)||0;
-  else row[field] = value;
-  row.actual = row.w * row.p / 100;
-  row.fda = checkFDA(row.name||'', row.actual);
-  const after = (field==='w'||field==='p') ? Number(row[field]).toFixed(2) : String(row[field]||'');
-  if(before === after) return;
-  const msg = `${currentUser} แก้สูตร: ${row.name||'(ไม่มีชื่อ)'} · ${CF_FIELDS[field]} ${before||'—'} → ${after||'—'}`;
-  logAct('formula','แก้สูตรในห้องแชท', `${row.name||'(ไม่มีชื่อ)'} · ${CF_FIELDS[field]}: ${before||'—'} → ${after||'—'}`, r.id);
-  chatSaveFormula(r, msg);
+  chatSaveFormula(jobId, function(r){
+    const row = (r.rows||[])[i];
+    if(!row || (expectKey!==undefined && chatRowKey(row)!==expectKey)) return chatRowChangedNotice(i);
+    const before = (field==='w'||field==='p') ? Number(row[field]).toFixed(2) : String(row[field]||'');
+    const nv = (field==='w'||field==='p') ? (parseFloat(value)||0) : value;
+    const after = (field==='w'||field==='p') ? Number(nv).toFixed(2) : String(nv||'');
+    if(before === after) return false;
+    row[field] = nv;
+    row.actual = row.w * row.p / 100;
+    row.fda = checkFDA(row.name||'', row.actual);
+    const nm = row.name||'(ไม่มีชื่อ)';
+    return {log:`${currentUser} แก้สูตร: ${nm} · ${CF_FIELDS[field]} ${before||'—'} → ${after||'—'}`,
+            act:['formula','แก้สูตรในห้องแชท', `${nm} · ${CF_FIELDS[field]}: ${before||'—'} → ${after||'—'}`]};
+  }, 'แก้สูตรแถวที่ '+(i+1));
 }
 
 function chatIngAdd(jobId){
   if(!requireJobChat(jobId)) return;
-  const r = records.find(x=>x.id===jobId);
-  if(!r) return;
   if(!requirePerm('editFormula','เพิ่มสารได้เฉพาะ Role: Admin, PD')) return;
-  r.rows = r.rows || [];
-  r.rows.push({num:r.rows.length+1, name:'', w:0, o:'', p:100, actual:0, note:'', hero:false, fda:checkFDA('',0)});
-  logAct('formula','เพิ่มสารในสูตร (แชท)', 'แถวที่ '+r.rows.length, r.id);
-  chatSaveFormula(r, `${currentUser} เพิ่มสารใหม่ในสูตร (แถวที่ ${r.rows.length})`);
+  chatSaveFormula(jobId, function(r){
+    r.rows = r.rows || [];
+    r.rows.push({num:r.rows.length+1, name:'', w:0, o:'', p:100, actual:0, note:'', hero:false, fda:checkFDA('',0)});
+    return {log:`${currentUser} เพิ่มสารใหม่ในสูตร (แถวที่ ${r.rows.length})`, act:['formula','เพิ่มสารในสูตร (แชท)', 'แถวที่ '+r.rows.length]};
+  }, 'เพิ่มสาร');
 }
 
 function chatIngDel(jobId, i){
   if(!requireJobChat(jobId)) return;
-  const r = records.find(x=>x.id===jobId);
-  if(!r || !r.rows[i]) return;
   if(!requirePerm('editFormula','ลบสารได้เฉพาะ Role: Admin, PD')) return;
-  const nm = r.rows[i].name || '(ยังไม่ระบุชื่อ)';
-  if(!confirm(`ลบสาร "${nm}" ออกจากสูตร?`)) return;
-  r.rows.splice(i,1);
-  logAct('formula','ลบสารออกจากสูตร (แชท)', nm, r.id);
-  chatSaveFormula(r, `${currentUser} ลบสารออกจากสูตร: ${nm}`);
+  const r0 = records.find(x=>x.id===jobId);
+  if(!r0 || !(r0.rows||[])[i]) return;
+  const nm0 = r0.rows[i].name || '(ยังไม่ระบุชื่อ)', key0 = chatRowKey(r0.rows[i]);
+  if(!confirm(`ลบสาร "${nm0}" ออกจากสูตร?`)) return;
+  chatSaveFormula(jobId, function(r){          // อ่านใหม่หลัง confirm เพราะข้อมูลอาจเปลี่ยนระหว่างรอ
+    const row = (r.rows||[])[i];
+    if(!row || chatRowKey(row)!==key0) return chatRowChangedNotice(i);
+    const nm = row.name || '(ยังไม่ระบุชื่อ)';
+    r.rows.splice(i,1);
+    return {log:`${currentUser} ลบสารออกจากสูตร: ${nm}`, act:['formula','ลบสารออกจากสูตร (แชท)', nm]};
+  }, 'ลบสาร');
 }
 
 function toggleChatJob(){ chatJobOpen = !chatJobOpen; renderChat(); }
@@ -6290,6 +6639,9 @@ function authStoreSession(session){
 }
 function authClearSession(){
   sbConfirmedRecords = {}; sbConfirmedScope = '';
+  const hadUnconfirmed = saveQPending().length>0;
+  saveQReset(true);       // authClearSession อาจถูกเรียกซ้ำในเส้นทาง 401 · ข้อความเตือนต้องไม่หายตามไปด้วย
+  if(hadUnconfirmed) saveQShowLostNotice();
   clearTimeout(authRefreshTimer);
   authRefreshTimer = null;
   // ถอนพื้นที่ทำงานส่วนตัวก่อนล้าง session ไม่งั้นปุ่มกับ panel จะค้างอยู่บนหน้าจอ
@@ -6311,13 +6663,17 @@ function authClearSession(){
 async function authRequest(path, opt){
   const o = opt || {};
   const headers = Object.assign({apikey:SB_KEY,'Content-Type':'application/json'}, o.headers || {});
-  const res = await fetch(sbBase() + '/auth/v1/' + path, {
-    method:o.method || 'POST', headers,
-    body:o.body ? JSON.stringify(o.body) : undefined
-  });
-  const txt = await res.text();
-  if(!res.ok) throw new Error(res.status + ' ' + txt.slice(0,180));
-  return txt ? JSON.parse(txt) : null;
+  const dl = sbDeadline();
+  try{
+    const res = await dl.within(fetch(sbBase() + '/auth/v1/' + path, {
+      method:o.method || 'POST', headers,
+      body:o.body ? JSON.stringify(o.body) : undefined,
+      signal:dl.ctrl ? dl.ctrl.signal : undefined
+    }));
+    const txt = await dl.within(res.text());
+    if(!res.ok) throw new Error(res.status + ' ' + txt.slice(0,180));
+    return txt ? JSON.parse(txt) : null;
+  }finally{ dl.clear(); }
 }
 async function authSignIn(email, password){
   const session = await authRequest('token?grant_type=password', {body:{email:String(email||'').trim(),password:String(password||'')}});
@@ -6491,8 +6847,10 @@ function sbLoadSnapshot(){
     return value && value.records && value.chats && value.users && value.acts ? value : sbEmptySnapshot();
   }catch(err){ return sbEmptySnapshot(); }
 }
+let sbSnapshotStoreError = '';
 function sbPersistSnapshot(){
-  try{ localStorage.setItem('fs_sync_snapshot',JSON.stringify(sbSnap)); }catch(err){}
+  try{ localStorage.setItem('fs_sync_snapshot',JSON.stringify(sbSnap)); sbSnapshotStoreError=''; return true; }
+  catch(err){ sbSnapshotStoreError=String((err&&err.name)||'localStorage'); console.warn('[sync] เก็บ snapshot ลงเครื่องไม่สำเร็จ',sbSnapshotStoreError); return false; }
 }
 let sbSnap = sbLoadSnapshot();
 // Fresh server responses only; persisted snapshots are never proof of a save.
@@ -6562,15 +6920,37 @@ function sbCanInsertRecords(){ return ['admin','sales','opc','mkt'].includes(sbR
 function sbCanUpdateRecords(){ return ['admin','sales','opc','mkt','pd'].includes(sbRoleForServer()); }
 function sbCanWriteMeta(){ return ['admin','sales','opc','mkt'].includes(sbRoleForServer()); }
 
+// เวลาสูงสุดต่อหนึ่งคำขอ · คำขอที่ค้างต้องจบเป็น error เพื่อให้การบันทึกขึ้นสถานะ "ไม่สำเร็จ" และกดลองใหม่ได้
+let sbReqTimeoutMs = 20000;
+// ตัวจับเวลากลางสำหรับ fetch ทุกตัวที่อยู่ในรอบซิงก์/ล็อกอิน · within(p) จบเป็น error เมื่อเกินเวลา และสั่ง abort
+function sbDeadline(){
+  const ctrl = (typeof AbortController!=='undefined') ? new AbortController() : null;
+  let timer = null;
+  const timeout = new Promise((_,reject)=>{
+    timer = setTimeout(()=>{
+      if(ctrl) try{ ctrl.abort(); }catch(err){}
+      reject(new Error('หมดเวลารอเซิร์ฟเวอร์ตอบกลับ'));
+    }, sbReqTimeoutMs);
+  });
+  timeout.catch(()=>{});       // กัน unhandled rejection เมื่อคำขอจบก่อน
+  return {ctrl:ctrl, within:p=>Promise.race([p, timeout]), clear:()=>clearTimeout(timer)};
+}
 async function sbReq(path, opt){
   const o = opt || {};
-  const res = await fetch(sbBase() + '/rest/v1/' + path, {
+  const dl = sbDeadline();
+  try{
+    return await sbReqInner(path, o, dl.ctrl, dl.within);
+  }finally{ dl.clear(); }
+}
+async function sbReqInner(path, o, ctrl, within){
+  const res = await within(fetch(sbBase() + '/rest/v1/' + path, {
     method: o.method || 'GET',
     headers: Object.assign(authDataHeaders(), o.headers || {}),
-    body: o.body ? JSON.stringify(o.body) : undefined
-  });
+    body: o.body ? JSON.stringify(o.body) : undefined,
+    signal: ctrl ? ctrl.signal : undefined
+  }));
   if(!res.ok){
-    const t = await res.text();
+    const t = await within(res.text());
     // token หมดอายุระหว่างใช้งาน: ต่ออายุแล้วลองใหม่หนึ่งครั้งก่อนจะยอมแพ้
     // (ทำครั้งเดียว กัน loop เมื่อ refresh_token เองก็หมดอายุแล้ว)
     if(res.status===401 && !o._retried && authSession && authSession.refresh_token){
@@ -6587,7 +6967,7 @@ async function sbReq(path, opt){
     if(res.status===401) authClearSession();
     throw sbHttpError(res.status, t);
   }
-  const txt = await res.text();
+  const txt = await within(res.text());
   return txt ? JSON.parse(txt) : null;
 }
 function sbUpsert(table, rows, preference){
@@ -6607,7 +6987,8 @@ function sbChip(){
   if(!el) return;
   if(!sbOn()){ el.className='sync-chip'; return; }
   let cls = 'sync-chip on', txt;
-  if(sbErr){ cls += ' err'; txt = 'ซิงก์ไม่สำเร็จ — กดเพื่อลองใหม่'; }
+  if(lastStoreError){ cls += ' err'; txt = 'บันทึกลงเครื่องไม่สำเร็จ (พื้นที่เต็ม?)'; }
+  else if(sbErr){ cls += ' err'; txt = 'ซิงก์ไม่สำเร็จ — กดเพื่อลองใหม่'; }
   else if(sbBusy){ cls += ' busy'; txt = 'กำลังซิงก์…'; }
   else if(sbReadOnlyNote){ cls += ' ok'; txt = 'ซิงก์แล้ว (ดูอย่างเดียว)'; }
   else if(sbReady){ cls += ' ok'; txt = 'ซิงก์แล้ว' + (sbLastPush ? ' · ' + new Date(sbLastPush).toLocaleTimeString('th-TH') : ''); }
@@ -6666,6 +7047,19 @@ function sbMergeObjects(localList,remoteList,key,prior){
   });
   return out;
 }
+// เซิร์ฟเวอร์เปลี่ยนใบงานโดยคนอื่น ขณะที่เครื่องนี้มีการแก้ที่ยังไม่ยืนยัน → เตือน ไม่เขียนทับเงียบ ๆ
+// (เทียบด้วย fingerprint เพราะ JSONB เรียง key ใหม่ได้)
+let sbConflicts = {};
+function sbDetectConflicts(localList, remoteList, prior){
+  const rm = sbMap(remoteList,'id');
+  (localList||[]).forEach(l=>{
+    const p = prior && prior[l.id], r = rm[l.id];
+    if(!p || !r) return;
+    let pf; try{ pf = jobRecordFingerprint(JSON.parse(p)); }catch(err){ return; }
+    const lf = jobRecordFingerprint(l), rf = jobRecordFingerprint(r);
+    if(lf!==pf && rf!==pf && rf!==lf) sbConflicts[l.id] = Date.now();
+  });
+}
 function sbRemoteSnapshot(d){
   const m=sbEmptySnapshot();
   (d.records||[]).forEach(r=>{ m.records[r.id]=JSON.stringify(r); });
@@ -6681,6 +7075,8 @@ function sbApply(d){
   const before = JSON.stringify([records, chats, userList, activities.length, recCounter]);
   const prior=sbSnap;
   const remoteSnapshot=sbRemoteSnapshot(d);
+  sbDetectConflicts(records,d.records,prior.records);
+  saveQRender();
   sbConfirmRecords(d.records,true);
   sbApplying = true;
   try{
@@ -6711,7 +7107,8 @@ function sbApply(d){
   } finally { sbApplying = false; }
   sbSnap=remoteSnapshot;
   sbPersistSnapshot();
-  if(JSON.stringify([records, chats, userList, activities.length, recCounter]) === before) return false;
+  modifyRebind();    // records[] อาจถูกแทนด้วยออบเจ็กต์ใหม่ ต้องให้ PD Modify ชี้ตัวล่าสุด
+  if(JSON.stringify([records, chats, userList, activities.length, recCounter]) === before && !modifyRerender) return false;
   sbRerender();
   return true;
 }
@@ -6754,6 +7151,14 @@ function sbRerender(){
     if(status) status.innerHTML=r?jobWarningHTML(r)+jobSaveStatusHTML(r):'';
     if(document.getElementById('chatView') && document.getElementById('chatView').classList.contains('on')) renderChat();
     if(document.getElementById('actView') && document.getElementById('actView').classList.contains('on')) renderActivities();
+    // ตาราง PD Modify วาดใหม่เมื่อสูตรเปลี่ยนจากเซิร์ฟเวอร์ · ไม่วาดทับช่องที่กำลังพิมพ์ (ช่องเหล่านี้ไม่มี id)
+    if(modifyRerender && document.getElementById('modifyView') && document.getElementById('modifyView').classList.contains('on')){
+      const mc = document.getElementById('modContent');
+      if(!(mc && mc.contains(document.activeElement) && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName))){
+        modifyRerender = false; renderModify();
+      }
+    } else if(modifyRerender && !(document.getElementById('modifyView') && document.getElementById('modifyView').classList.contains('on'))) modifyRerender = false;
+    saveQRender();
   });
 }
 
@@ -6854,7 +7259,7 @@ async function sbPush(){
   const seenR = {}, seenC = {}, seenU = {};
   const secureChatEvents = sbChatEventsOn();
   let chatEventsPushed = false, chatReadsPushed = false, chatDeletesPushed = false;
-  records.forEach(r=>{ const j = JSON.stringify(r); seenR[r.id]=1;
+  records.forEach(r=>{ sbPdNormalizeLocal(r); const j = JSON.stringify(r); seenR[r.id]=1;
     if(sbSnap.records[r.id] !== j && !jobValidationError(r)) recUp.push({id:r.id, data:JSON.parse(j)}); });
   chats.forEach(c=>{ const j = JSON.stringify(c); seenC[c.jobId]=1;
     if(!secureChatEvents && sbSnap.chats[c.jobId] !== j) chtUp.push({job_id:c.jobId, data:c}); });
@@ -6919,12 +7324,37 @@ function sbQueue(){
 
 // ---------- รอบการซิงก์: ส่งขึ้น แล้วดึงลง ----------
 let sbCycleRunning = false;
-async function sbCycle(){
-  if(!sbOn() || !authSession || sbCycleRunning) return;
+let sbCycleAgain = false;
+let sbCyclePromise = null;
+let sbCycleStartedAt = 0;
+let sbCycleMaxMs = 120000;   // รอบที่ค้างนานกว่านี้ถูกทิ้ง เพื่อไม่ให้ sbCycleRunning=true ค้างตลอดไป
+// คืน promise ที่จบเมื่อรอบซิงก์ที่ครอบคลุมคำขอนี้จบ · ถ้ามีรอบกำลังวิ่งอยู่ จะจำคำขอไว้แล้วรันซ้ำอีกหนึ่งรอบ
+// (เดิมคำขอที่มาตอนรอบอื่นวิ่งอยู่ถูกทิ้ง จนกว่าจะถึงรอบ poll 5 วินาที)
+function sbCycle(){
+  if(!sbOn() || !authSession) return Promise.resolve();
+  if(sbCycleRunning && Date.now()-sbCycleStartedAt <= sbCycleMaxMs){ sbCycleAgain = true; return sbCyclePromise; }
+  sbCycleRunning = true; sbCycleStartedAt = Date.now();
+  const mine = sbCyclePromise = (async function(){
+    try{
+      do{ sbCycleAgain = false; await sbCycleOnce(); }while(sbCycleAgain && sbOn() && authSession && sbCyclePromise===mine);
+    }finally{
+      if(sbCyclePromise===mine){ sbCycleRunning = false; sbCycleAgain = false; }   // รอบที่ถูกทิ้งไปแล้วห้ามปิดสถานะของรอบใหม่
+    }
+  })();
+  return mine;
+}
+async function sbCycleOnce(){
   const beforeConfirmation=JSON.stringify([sbErr,sbConfirmedScope,sbConfirmedRecords]);
-  sbCycleRunning = true; sbBusy = true; sbChip();
+  sbBusy = true; sbChip();
   try{
-    await sbPush();
+    try{ await sbPush(); }
+    catch(err){
+      // PD: ฐาน non-pd_keys มาจาก sbSnap · ถ้าคนอื่นเปลี่ยนฟิลด์นอก pd_keys แล้ว push ล้ม 42501 sbSnap จะเก่าตลอดไป
+      // จึงดึงข้อมูลใหม่มา merge (รีเฟรช sbSnap) แล้วลองส่งอีกครั้งเดียว
+      if(!(sbIsPermanent(err) && sbRoleForServer()==='pd')) throw err;
+      sbApply(await sbPull());
+      await sbPush();
+    }
     sbApply(await sbPull());
     sbErr = '';
     // ตรวจสิทธิ์ของพื้นที่ทำงานส่วนตัวซ้ำทุกรอบ
@@ -6932,15 +7362,22 @@ async function sbCycle(){
     // เดิมเรียกแค่ตอน sbBoot แปลว่าถ้าสิทธิ์ถูกถอน role เปลี่ยน หรือได้ 403
     // ระหว่างเปิดแท็บทิ้งไว้ ปุ่มกับ panel จะยังอยู่จนกว่าผู้ใช้จะรีเฟรชเอง
     // ซึ่งขัดกับสัญญาที่ว่า "สิทธิ์หาย = ถอนออกทันที"
-    try{ await mountPrivateWorkspace(); }
-    catch(err){ console.warn('[workspace]', safeError(err)); }
+    // workspace ต้องไม่ค้างรอบซิงก์: เกินเวลาให้ยกเลิกคำขอที่ค้าง (mount เช็ก signal เองแล้วจบ)
+    const wsDl = sbDeadline();
+    try{ await wsDl.within(mountPrivateWorkspace()); }
+    catch(err){
+      if(pwsPending && pwsPending.controller) try{ pwsPending.controller.abort(); }catch(e2){}
+      console.warn('[workspace]', safeError(err));
+    }
+    finally{ wsDl.clear(); }
   }catch(err){
     sbErr = safeError(err);
     console.warn('[sync]', sbErr);
   }finally{
-    sbBusy = false; sbCycleRunning = false; sbChip();
+    sbBusy = false; sbChip();
     if(beforeConfirmation!==JSON.stringify([sbErr,sbConfirmedScope,sbConfirmedRecords])) sbRerender();
     if(!authSession) renderUserUI();
+    saveQRecheck();
   }
 }
 function sbManualSync(){ if(sbOn() && authSession){ sbErr=''; sbCycle(); } }
@@ -7230,7 +7667,7 @@ loadUsers();
 // ซิงก์ข้ามแท็บ — ถ้าเปิดแอปไว้หลายแท็บ แท็บอื่นปิดงาน/แก้ข้อมูล แท็บนี้จะอัพเดตตามทันที
 window.addEventListener('storage', e=>{
   if(!e || !e.key) return;
-  if(e.key==='fs_records' || e.key==='fs_reccounter') loadRecords();
+  if(e.key==='fs_records' || e.key==='fs_reccounter'){ loadRecords(); modifyRebind(); }
   else if(e.key==='fs_chats') loadChats();
   else if(e.key==='fs_activities') loadActivities();
   else if(e.key==='fs_userlist') loadUsers();
