@@ -1,0 +1,366 @@
+From cd9259133f76e47a5b399fe59204c80ec47153a5 Mon Sep 17 00:00:00 2001
+From: piyawatv-cloud <295929244+piyawatv-cloud@users.noreply.github.com>
+Date: Sat, 5 Sep 2026 13:38:07 +0700
+Subject: [PATCH 14/24] feat(workspace): constrain the imported bundle with a
+ page CSP
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+QA3 I3: mountPrivateWorkspace() runs the server bundle through
+`await import(blobUrl)`, so it executes in Formula's own origin and can
+read sessionStorage.fs_auth_session and every fs_* key. index.html
+declared no Content-Security-Policy at all, so nothing limited where
+that code could send what it read.
+
+Add a CSP that leaves reading alone (same-origin code always can) and
+instead closes the exfiltration destinations: connect-src is limited to
+'self' and the Supabase project host, img-src drops external beacons,
+form-action and object-src are 'none', base-uri is 'none', and
+script-src carries no unsafe-eval. 'unsafe-inline' has to stay while the
+app has 126 inline onclick handlers.
+
+connect-src and SCIENCE_WORKSPACE_API_ORIGIN are two separate settings,
+so pwsApprovedOrigin() now refuses to mount when the configured origin
+is absent from connect-src, with one console.error naming the cause. A
+misconfigured deployment fails loudly instead of mounting a workspace
+whose requests are silently blocked.
+
+The residual gap is recorded rather than papered over: CSP has no usable
+control over top-level navigation, so a hostile bundle could still leave
+via location assignment. Closing that needs the bundle moved into a
+cross-origin sandboxed iframe behind postMessage, which changes the
+loader contract and both bundle modes. Not done here.
+
+harness.js now inlines the suite instead of loading it with <script src>
+— the harness page is opened over file://, where 'self' does not match a
+sibling file and the suite was silently blocked. Both injected blocks
+carry ids so the "no static Science content in index.html" test can
+exclude harness scaffolding from what it inspects. harness.js also
+asserts the shipped CSP is still meaningful before rewriting it for the
+test origins, so the policy cannot be hollowed out while tests stay
+green.
+
+Tests: node harness.js 55/55 (5 new); LC_ALL=C ./tests/run-sql-tests.sh PASS.
+Data structures: unchanged. Build stamp: 2026-09-05.4.
+Critical Change — auth boundary; needs CODEOWNER @phossatron review.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_019ydP6KsDDZ9owE8qtTqFTj
+---
+ docs/PRIVATE_WORKSPACE_CSP.md | 63 ++++++++++++++++++++++++++++++++
+ harness.js                    | 35 ++++++++++++++++--
+ index.html                    | 68 ++++++++++++++++++++++++++++++++++-
+ tests/formula-studio.test.js  | 65 ++++++++++++++++++++++++++++++++-
+ 4 files changed, 226 insertions(+), 5 deletions(-)
+ create mode 100644 docs/PRIVATE_WORKSPACE_CSP.md
+
+diff --git a/docs/PRIVATE_WORKSPACE_CSP.md b/docs/PRIVATE_WORKSPACE_CSP.md
+new file mode 100644
+index 0000000..169e6ca
+--- /dev/null
++++ b/docs/PRIVATE_WORKSPACE_CSP.md
+@@ -0,0 +1,63 @@
++# Private workspace — Content-Security-Policy
++
++สถานะ: mitigation ที่ทำได้จริงของ QA3 I3 · ไม่ใช่การปิดช่องทั้งหมด · ต้องผ่าน
++CODEOWNER review ตาม `AGENTS.md` ก่อน (แตะ auth boundary = Critical Change)
++
++## ปัญหาที่แก้
++
++`mountPrivateWorkspace()` โหลด bundle จากเซิร์ฟเวอร์แล้วเรียก `await import(blobUrl)`
++โมดูลที่ได้จึงรันใน **origin เดียวกับ Formula** ไม่ได้ถูกกั้นไว้ใน `#pwsPanel`
++มันอ่าน `sessionStorage.fs_auth_session` (access token ที่ยังใช้ได้) และ `fs_*`
++ทุกคีย์ได้เต็มที่ ก่อนหน้านี้ `index.html` ไม่มี CSP เลย จึงไม่มีอะไรจำกัดว่า
++โมดูลนั้นจะส่งข้อมูลออกไปที่ไหน
++
++## สิ่งที่ CSP นี้ทำ และไม่ทำ
++
++CSP **ไม่ได้** กันการอ่าน — โค้ดที่รันใน origin เดียวกันอ่าน storage ได้เสมอ
++สิ่งที่มันทำคือจำกัด **ปลายทาง** ให้เหลือเฉพาะที่ประกาศไว้:
++
++| directive | ผล |
++|---|---|
++| `connect-src 'self' https://*.supabase.co` | `fetch`/XHR/WebSocket ไป host อื่นถูกบล็อก |
++| `img-src 'self' data: blob:` | ปิดการ exfiltrate ผ่าน image beacon |
++| `form-action 'none'` | ปิดการส่งออกผ่าน form submit |
++| `object-src 'none'` / `base-uri 'none'` | ปิด plugin และการย้ายฐาน URL ของหน้า |
++| `script-src` ไม่มี `unsafe-eval` | โค้ดที่ฉีดเข้ามาสร้างโค้ดใหม่จากสตริงไม่ได้ |
++
++**ช่องที่ยังเหลือ** — CSP ไม่มี directive ที่คุม top-level navigation ที่ใช้ได้จริงแล้ว
++(`navigate-to` ถูกถอดออกจากสเปก) โมดูลที่เป็นศัตรูจึงยัง `location = 'https://…?t=' + token`
++ได้อยู่ · `script-src` ยังต้องมี `'unsafe-inline'` เพราะแอปมี `onclick=` 126 จุด
++การปิดช่องนี้จริง ๆ ต้องย้าย bundle ไปรันใน **sandboxed iframe คนละ origin** แล้วคุยกัน
++ผ่าน `postMessage` ซึ่งเปลี่ยนสัญญาของ loader และต้องแก้ bundle ทั้งสองโหมด —
++บันทึกไว้เป็นงานถัดไป ไม่ได้ทำในรอบนี้
++
++## กติกาเวลาเปลี่ยน origin
++
++`connect-src` เป็นค่า static ใน `index.html` ส่วน `SCIENCE_WORKSPACE_API_ORIGIN`
++เป็นอีกค่าหนึ่ง ถ้าปล่อยให้ไม่ตรงกัน workspace จะยิง request ไม่ออกโดยไม่มีใครรู้สาเหตุ
++`pwsApprovedOrigin()` จึงตรวจ CSP ก่อนเสมอ และ **ปฏิเสธการ mount** เมื่อ origin ที่ตั้งไว้
++ไม่อยู่ใน `connect-src` พร้อม `console.error` ครั้งเดียว — พังแบบดังกว่าพังแบบเงียบ
++
++ดังนั้นเวลาตั้งค่า deployment ใหม่ต้องแก้ **สองที่คู่กัน**:
++
++1. `let SCIENCE_WORKSPACE_API_ORIGIN = 'https://<approved-host>';`
++2. เพิ่ม `https://<approved-host>` ลงใน `connect-src` ของ meta CSP
++
++`pwsCspAllowsConnect()` รับ wildcard host แบบ `https://*.example.com` โดยแมตช์เฉพาะ
++subdomain จริงเท่านั้น (`https://example.com` และ `https://evil-example.com` ไม่ผ่าน)
++
++## การพิสูจน์
++
++`node harness.js` — 55 เทสต์ ในนั้นมี 5 เทสต์สำหรับเรื่องนี้: CSP ยังมีความหมาย
++(ไม่มี `unsafe-eval`/wildcard), connect-src ยอมเฉพาะที่ประกาศ, wildcard แมตช์
++เฉพาะ subdomain, ไม่มี CSP = ปฏิเสธไว้ก่อน, และ origin นอก CSP ต้องไม่ mount
++และไม่ยิง request
++
++`harness.js` ยังตรวจ CSP ของ `index.html` ก่อนดัดแปลงเพื่อเทสต์ด้วย — ถ้ามีใครใส่
++`unsafe-eval` หรือ wildcard หรือลบ `object-src`/`base-uri`/`connect-src` ออก
++harness จะหยุดทันทีพร้อมบอกเหตุผล ไม่ปล่อยให้เทสต์ผ่านแบบไม่มีความหมาย
++
++หมายเหตุสำหรับคนรัน harness: หน้าเทสต์เปิดผ่าน `file://` ซึ่ง `'self'` ไม่แมตช์ไฟล์
++ข้างเคียง harness จึง **inline** ชุดเทสต์เข้าไปในหน้าแทนการใช้ `<script src>`
++และติด id `fs-test-suite` / `fs-test-prelude` ไว้ เพื่อให้เทสต์ที่ตรวจว่า
++"ไม่มีเนื้อหา static ฝังใน index.html" ตัด scaffolding ของ harness ออกได้
+diff --git a/harness.js b/harness.js
+index 7cd83b2..7502309 100644
+--- a/harness.js
++++ b/harness.js
+@@ -17,7 +17,30 @@ html = html
+   .replace(/let SB_URL = '[^']*';/, "let SB_URL = 'https://test-project.supabase.co';")
+   .replace(/let SB_KEY = '[^']*';/, "let SB_KEY = 'sb_publishable_test_only';");
+ 
+-const mockPrelude = `<script>
++// CSP ของ index.html ต้องคงคุณสมบัติที่ทำให้มันมีความหมาย ก่อนจะถูกดัดแปลงเพื่อเทสต์
++const cspMatch = html.match(/<meta http-equiv="Content-Security-Policy" content="([^"]*)">/);
++if(!cspMatch){
++  throw new Error('index.html no longer declares a Content-Security-Policy');
++}
++const productionCsp = cspMatch[1];
++for(const forbidden of ['unsafe-eval', "script-src *", "connect-src *", "default-src *"]){
++  if(productionCsp.includes(forbidden)){
++    throw new Error('The Content-Security-Policy in index.html is too permissive: ' + forbidden);
++  }
++}
++for(const required of ["object-src 'none'", "base-uri 'none'", 'connect-src ']){
++  if(!productionCsp.includes(required)){
++    throw new Error('The Content-Security-Policy in index.html is missing ' + required);
++  }
++}
++// origin ทดสอบต้องถูกอนุญาตเหมือน origin จริงของ deployment มิฉะนั้น loader จะ
++// ปฏิเสธ mount แบบ fail-closed และเทสต์ workspace ทั้งชุดจะวัดอะไรไม่ได้เลย
++// `https://evil.test` จงใจไม่อยู่ในรายการ เพื่อให้เทสต์ทางลบยังพิสูจน์ได้จริง
++html = html.replace(
++  /(<meta http-equiv="Content-Security-Policy" content="[^"]*?connect-src )/,
++  '$1https://opc.example.test https://other.example.test ');
++
++const mockPrelude = `<script id="fs-test-prelude">
+ window.__FS_TEST__ = true;
+ window.__fetchCalls = [];
+ window.__fetchQueue = [];
+@@ -36,9 +59,15 @@ window.fetch = async function(url, options){
+ </script>`;
+ 
+ html = html.replace(/<script>\s*\/\/ ===================================================================/, mockPrelude + '\n<script>\n// ===================================================================');
+-html = html.replace('</body>', '<script src="tests/formula-studio.test.js"></script>\n</body>');
++// เทสต์ต้อง inline · หน้าเปิดผ่าน file:// ซึ่ง 'self' ของ CSP ไม่แมตช์ไฟล์ข้างเคียง
++// ถ้าใช้ <script src> แทน เทสต์จะถูก CSP บล็อกและ harness จะเงียบไปเฉย ๆ
++const suiteSource = fs.readFileSync(path.join(root, 'tests', 'formula-studio.test.js'), 'utf8');
++if(suiteSource.includes('</script')){
++  throw new Error('The test suite cannot be inlined because it contains a script end tag');
++}
++html = html.replace('</body>', '<script id="fs-test-suite">\n' + suiteSource + '\n</script>\n</body>');
+ 
+-if(!html.includes('window.__FS_TEST__ = true') || !html.includes('tests/formula-studio.test.js')){
++if(!html.includes('window.__FS_TEST__ = true') || !html.includes(suiteSource)){
+   throw new Error('Could not inject the deterministic browser harness');
+ }
+ if((originalUrl && html.includes(originalUrl)) || (originalKey && html.includes(originalKey))){
+diff --git a/index.html b/index.html
+index 66cd00c..9e6b072 100755
+--- a/index.html
++++ b/index.html
+@@ -3,6 +3,16 @@
+ <head>
+ <meta charset="UTF-8">
+ <meta name="viewport" content="width=device-width, initial-scale=1.0">
++<!--
++  Content-Security-Policy — ชั้นจำกัดปลายทางของ private-workspace bundle
++  bundle ถูก import() เข้ามาทำงานใน origin เดียวกับ Formula จึงอ่าน
++  sessionStorage.fs_auth_session ได้ CSP นี้ไม่ได้กันการ "อ่าน" แต่จำกัด "ปลายทาง
++  ที่ส่งออกได้" ให้เหลือเฉพาะที่ประกาศไว้เท่านั้น (ดู docs/PRIVATE_WORKSPACE_CSP.md)
++  ถ้าตั้ง SCIENCE_WORKSPACE_API_ORIGIN เป็น origin ใหม่ ต้องเพิ่ม origin นั้นลงใน
++  connect-src ด้านล่างด้วย มิฉะนั้น loader จะปฏิเสธการ mount แบบ fail-closed
++  (ดู pwsCspAllowsConnect) แทนที่จะพังเงียบ ๆ ตอนยิง request
++-->
++<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' blob: https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com data:; img-src 'self' data: blob:; connect-src 'self' https://*.supabase.co; object-src 'none'; base-uri 'none'; form-action 'none'">
+ <title>Beyond Lab — Formula Studio</title>
+ <link rel="preconnect" href="https://fonts.googleapis.com">
+ <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+@@ -649,7 +659,7 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
+   <div class="logo"><svg viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-1.73-3L9 11.35V4H8a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2h-1v7.35L19.73 19A2 2 0 0 1 18 22H6Zm5-10.11L8.31 16.5h7.38L13 11.89V4h-2v7.89Z"/></svg></div>
+   <div>
+     <div class="hdr-title">Formula Studio</div>
+-    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-05.3</div>
++    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-05.4</div>
+   </div>
+   <div class="sync-chip" id="syncChip" onclick="sbManualSync()" title="สถานะการซิงก์ข้อมูลกับเซิร์ฟเวอร์กลาง"></div>
+ </div>
+@@ -6617,6 +6627,53 @@ function sbManualSync(){ if(sbOn() && authSession){ sbErr=''; sbCycle(); } }
+ let pwsState = null;
+ let pwsPending = null;
+ 
++let pwsCspWarned = false;
++
++/**
++ * อ่าน connect-src จาก CSP ของหน้านี้ · คืน null เมื่อไม่มี CSP หรือไม่มี connect-src
++ * (ไม่มี directive = เบราว์เซอร์ fallback ไป default-src ซึ่งเราถือว่า "ไม่รู้" และ
++ * ให้ผู้เรียกตัดสินใจแบบปิดไว้ก่อน)
++ */
++function pwsCspConnectSrc(){
++  const meta = document.querySelector('meta[http-equiv="Content-Security-Policy"]');
++  const content = meta && meta.getAttribute('content');
++  if(typeof content !== 'string' || content === '') return null;
++  for(const directive of content.split(';')){
++    const parts = directive.trim().split(/\s+/).filter(Boolean);
++    if(parts.length && parts[0].toLowerCase() === 'connect-src') return parts.slice(1);
++  }
++  return null;
++}
++
++/**
++ * CSP ยอมให้ยิงไป origin นี้หรือไม่ · ตอบ false เมื่อไม่มี CSP ให้ตรวจ เพื่อไม่ให้
++ * หน้าที่ลืมประกาศ CSP กลายเป็นทางผ่านที่ bundle ส่งข้อมูลออกไปไหนก็ได้
++ */
++function pwsCspAllowsConnect(origin){
++  const sources = pwsCspConnectSrc();
++  if(!sources) return false;
++  let target;
++  try{ target = new URL(origin); }catch(err){ return false; }
++  return sources.some(function(source){
++    if(source === '*') return true;
++    let candidate = source;
++    if(candidate.startsWith("'")) return false;            // 'self' ไม่ใช่ origin ภายนอก
++    if(candidate.indexOf('://') === -1) candidate = 'https://' + candidate;
++    const wildcard = candidate.indexOf('://*.');
++    if(wildcard !== -1){
++      const scheme = candidate.slice(0, wildcard + 3);
++      const suffix = candidate.slice(wildcard + 5).replace(/\/+$/, '');
++      if(scheme !== target.protocol + '//') return false;
++      if(!suffix || suffix.indexOf('*') !== -1) return false;
++      return target.host.length > suffix.length && target.host.endsWith('.' + suffix);
++    }
++    let parsed;
++    try{ parsed = new URL(candidate); }catch(err){ return false; }
++    if(parsed.pathname !== '/' || parsed.search || parsed.hash) return false;
++    return parsed.origin === target.origin;
++  });
++}
++
+ /** origin ที่อนุมัติต้องเป็น HTTPS origin เปล่า ๆ เท่านั้น ไม่มี path ไม่มี wildcard */
+ function pwsApprovedOrigin(){
+   const value = SCIENCE_WORKSPACE_API_ORIGIN;
+@@ -6630,6 +6687,15 @@ function pwsApprovedOrigin(){
+   // จะได้ค่าที่ไม่แมตช์อะไรเลยแบบเงียบ ๆ
+   if(!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/.test(url.hostname)) return '';
+   if(value.replace(/\/+$/,'') !== url.origin) return '';
++  // fail-closed: bundle รันใน origin เดียวกับ Formula ถ้า CSP ไม่ได้อนุญาต origin นี้
++  // ไว้ การ mount จะได้ workspace ที่ยิง request ไม่ออก และ operator จะไม่รู้สาเหตุ
++  if(!pwsCspAllowsConnect(url.origin)){
++    if(!pwsCspWarned){
++      pwsCspWarned = true;
++      console.error('private workspace: configured origin is not allowed by the page connect-src policy; refusing to mount');
++    }
++    return '';
++  }
+   return url.origin;
+ }
+ 
+diff --git a/tests/formula-studio.test.js b/tests/formula-studio.test.js
+index a55b9d6..ca59c79 100644
+--- a/tests/formula-studio.test.js
++++ b/tests/formula-studio.test.js
+@@ -250,7 +250,11 @@
+   test('index.html ไม่มีคำว่า RD Science หรือเนื้อหา Science แบบ static เลย', function(){
+     reset();
+     // คนที่เปิด view-source โดยไม่มีสิทธิ์ ต้องไม่เห็นแม้แต่ร่องรอยว่ามีระบบนี้อยู่
+-    const source = document.documentElement.outerHTML;
++    // นับเฉพาะเนื้อของ index.html จริง ๆ · ตัวเทสต์กับ mock ของ harness ถูกฉีดเข้ามา
++    // ในหน้าเดียวกัน และมีคำเหล่านี้อยู่ในชื่อเทสต์ ซึ่งไม่ได้ถูกส่งขึ้น deployment
++    const shipped = document.documentElement.cloneNode(true);
++    shipped.querySelectorAll('#fs-test-suite,#fs-test-prelude,#fs-test-results').forEach(function(node){ node.remove(); });
++    const source = shipped.outerHTML;
+     assert(!/RD Science/i.test(source), 'index.html มีป้าย RD Science ฝังอยู่');
+     assert(!/science[_-]?case|scienceWorkspace|escalation/i.test(source.replace(/SCIENCE_WORKSPACE_API_ORIGIN/g,'')),
+       'index.html มีคำเฉพาะของงาน Science ฝังอยู่');
+@@ -801,6 +805,65 @@
+     assert(document.getElementById('d_title').textContent.includes('<img'), 'stored text was not preserved');
+   });
+ 
++  // ---------- Content-Security-Policy ของหน้า (QA3 I3) ----------
++  // bundle ถูก import() เข้ามารันใน origin เดียวกับ Formula จึงอ่าน
++  // sessionStorage.fs_auth_session ได้ · CSP กันไม่ได้ว่าอ่าน แต่กันได้ว่าส่งออกไปไหน
++
++  function cspMeta(){ return document.querySelector('meta[http-equiv="Content-Security-Policy"]'); }
++
++  test('หน้ามี CSP ที่ยังมีความหมาย ไม่มี unsafe-eval และไม่มี wildcard', function(){
++    const meta = cspMeta();
++    assert(meta, 'หน้าไม่มี Content-Security-Policy เลย');
++    const csp = meta.getAttribute('content');
++    assert(!/unsafe-eval/.test(csp), 'CSP ยอมให้ eval ได้');
++    assert(!/script-src[^;]*\s\*(\s|;|$)/.test(csp), 'script-src เป็น wildcard');
++    assert(!/connect-src[^;]*\s\*(\s|;|$)/.test(csp), 'connect-src เป็น wildcard');
++    assert(/object-src 'none'/.test(csp), 'CSP ไม่ได้ปิด object-src');
++    assert(/base-uri 'none'/.test(csp), 'CSP ไม่ได้ปิด base-uri');
++    assert(/connect-src /.test(csp), 'CSP ไม่ได้จำกัดปลายทางของ request');
++  });
++
++  test('connect-src ยอมเฉพาะ origin ที่ประกาศไว้', function(){
++    assert(pwsCspAllowsConnect('https://opc.example.test'), 'origin ที่ประกาศไว้กลับถูกปฏิเสธ');
++    assert(!pwsCspAllowsConnect('https://evil.test'), 'origin ที่ไม่ได้ประกาศกลับผ่าน');
++    assert(!pwsCspAllowsConnect('http://opc.example.test'), 'ยอมรับ origin ที่ไม่ใช่ HTTPS');
++    assert(!pwsCspAllowsConnect('not a url'), 'ยอมรับค่าที่ไม่ใช่ URL');
++  });
++
++  test('wildcard host ใน connect-src ต้องแมตช์เฉพาะ subdomain จริง', function(){
++    assert(pwsCspAllowsConnect('https://uumk.supabase.co'), 'subdomain ที่ถูกต้องกลับถูกปฏิเสธ');
++    assert(!pwsCspAllowsConnect('https://supabase.co'), 'โดเมนแม่ผ่าน wildcard ได้');
++    assert(!pwsCspAllowsConnect('https://evil-supabase.co'), 'โดเมนที่แค่ลงท้ายคล้ายกันผ่านได้');
++    assert(!pwsCspAllowsConnect('https://supabase.co.evil.test'), 'suffix ถูกใช้เป็น prefix ได้');
++  });
++
++  test('ไม่มี CSP ให้ตรวจ = ปฏิเสธไว้ก่อน', function(){
++    const meta = cspMeta();
++    const saved = meta.getAttribute('content');
++    try{
++      meta.setAttribute('content', "default-src 'self'");
++      equal(pwsCspConnectSrc(), null, 'ไม่มี connect-src แต่ยังตอบว่ารู้');
++      assert(!pwsCspAllowsConnect('https://opc.example.test'), 'ไม่มี connect-src แต่กลับปล่อยผ่าน');
++    }finally{
++      meta.setAttribute('content', saved);
++    }
++  });
++
++  test('origin ที่ CSP ไม่อนุญาต ต้องไม่ mount และไม่ยิง request', async function(){
++    reset();
++    workspaceSession();
++    // origin นี้ถูกต้องตามกฎ HTTPS ทุกข้อ ต่างกันแค่ไม่ได้อยู่ใน connect-src
++    SCIENCE_WORKSPACE_API_ORIGIN = 'https://evil.test';
++    const before = domFingerprint();
++
++    equal(pwsApprovedOrigin(), '', 'origin นอก CSP ผ่าน preflight ไปได้');
++    await mountPrivateWorkspace();
++
++    equal(window.__fetchCalls.length, 0, 'ยิง request ไป origin ที่ CSP บล็อกอยู่ดี');
++    equal(domFingerprint(), before, 'DOM ของเดิมเปลี่ยนไป');
++    equal(document.getElementById('pwsNav'), null, 'สร้างปุ่มทั้งที่ mount ไม่ได้');
++  });
++
+   async function run(){
+     const results = [];
+     for(const item of tests){
+-- 
+2.39.5 (Apple Git-154)
+

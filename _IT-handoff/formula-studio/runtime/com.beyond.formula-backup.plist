@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.beyond.formula-backup</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>/Users/user/formula-runtime/scripts/daily-backup-formula.sh</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>3</integer>
+    <key>Minute</key><integer>15</integer>
+  </dict>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/Users/user/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>BACKUP_KIND</key>
+    <string>daily</string>
+    <key>FORMULA_BACKUP_DESTINATION</key>
+    <string>local</string>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/Users/user/.hermes/apps/formula-studio/monitoring/backup-launchd.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/user/.hermes/apps/formula-studio/monitoring/backup-launchd.err.log</string>
+</dict>
+</plist>

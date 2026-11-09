@@ -1,0 +1,76 @@
+-- Formula Runtime owner identity migration draft
+-- STATUS: NOT RUN — review and approval required before any database change.
+-- Purpose: add canonical fs_records.data.ownerEmail from the verified login email.
+
+begin;
+
+-- Preconditions: stop if the required tables are unavailable.
+do $$
+begin
+  if to_regclass('public.fs_users') is null or to_regclass('public.fs_records') is null then
+    raise exception 'owner identity migration precondition failed: required table missing';
+  end if;
+end $$;
+
+-- Preconditions: the login identity source must be unique.
+do $$
+begin
+  if exists (
+    select 1
+    from public.fs_users
+    group by lower(trim(data->>'email'))
+    having lower(trim(data->>'email')) <> '' and count(*) > 1
+  ) then
+    raise exception 'owner identity migration precondition failed: duplicate user email';
+  end if;
+end $$;
+
+-- Review query: rows that cannot be mapped exactly must be resolved by the owner.
+-- The migration must not guess when a display name maps to zero or many users.
+with candidates as (
+  select r.id,
+         r.data,
+         u.name as matched_name,
+         lower(trim(u.data->>'email')) as matched_email,
+         count(u.name) over (partition by r.id) as candidate_count
+  from public.fs_records r
+  left join public.fs_users u
+    on u.name = r.data->>'createdBy'
+    or lower(trim(regexp_replace(regexp_replace(regexp_replace(coalesce(r.data->>'salesOwner',''), E'^\\d+\\.', ''), E'^(Sales|MKT)\\s*', '', 'i'), '^พี่', '')))
+       = lower(trim(regexp_replace(regexp_replace(regexp_replace(coalesce(u.data->>'name',''), E'^\\d+\\.', ''), E'^(Sales|MKT)\\s*', '', 'i'), '^พี่', '')))
+  where coalesce(nullif(trim(r.data->>'ownerEmail'), ''), '') = ''
+)
+select id, candidate_count, matched_name, matched_email
+from candidates
+where candidate_count <> 1 or matched_email !~* '^[^@[:space:]]+@[^@[:space:]]+\\.[^@[:space:]]+$';
+
+-- Forward change: run only after the review query above returns no rows.
+-- This update is intentionally left commented in the draft so the file cannot
+-- be mistaken for an executable production migration.
+-- update public.fs_records r
+-- set data = jsonb_set(r.data, '{ownerEmail}', to_jsonb(lower(trim(u.data->>'email'))), true),
+--     updated_at = now()
+-- from public.fs_users u
+-- where nullif(trim(r.data->>'ownerEmail'), '') is null
+--   and u.name = r.data->>'createdBy';
+
+-- Required validation queries after an approved run:
+-- select count(*) as missing_owner_email
+-- from public.fs_records
+-- where nullif(trim(data->>'ownerEmail'), '') is null;
+-- select count(*) as invalid_owner_email
+-- from public.fs_records
+-- where lower(trim(data->>'ownerEmail')) !~ '^[^@[:space:]]+@[^@[:space:]]+\\.[^@[:space:]]+$';
+-- select count(*) as owner_mismatch
+-- from public.fs_records r
+-- left join public.fs_users u on lower(trim(u.data->>'email')) = lower(trim(r.data->>'ownerEmail'))
+-- where u.name is null;
+
+-- Rollback:
+-- restore fs_records from the fresh, checksummed backup taken immediately
+-- before this transaction. Do not remove ownerEmail blindly because rows that
+-- already had a canonical value before this migration must be preserved.
+-- The backup reference and checksum must be recorded in the release evidence.
+
+rollback;
+

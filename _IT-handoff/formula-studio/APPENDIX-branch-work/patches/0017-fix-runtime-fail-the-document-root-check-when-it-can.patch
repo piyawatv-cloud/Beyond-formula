@@ -1,0 +1,46 @@
+From 0443e886e61ef57db67c760dab87dd58baf23427 Mon Sep 17 00:00:00 2001
+From: piyawatv-cloud <295929244+piyawatv-cloud@users.noreply.github.com>
+Date: Sat, 5 Sep 2026 13:59:51 +0700
+Subject: [PATCH 17/24] fix(runtime): fail the document-root check when it
+ cannot read the plist
+
+An unreadable --directory printed SKIP and exited 0, so a reformatted
+plist would have silenced the check while reporting success. A
+confidentiality check that passes when it cannot see the root is worse
+than no check. Both an unparseable plist and a document root that does
+not exist now fail.
+
+Verified both paths: the real exposure is still reported, and a plist
+with no ProgramArguments exits 1 instead of 0.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_019ydP6KsDDZ9owE8qtTqFTj
+---
+ runtime/check-document-root.sh | 10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/runtime/check-document-root.sh b/runtime/check-document-root.sh
+index f8f6696..c2a9d56 100755
+--- a/runtime/check-document-root.sh
++++ b/runtime/check-document-root.sh
+@@ -12,9 +12,15 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ plist="$root/runtime/com.beyond-formula.runtime.plist"
+ 
+ served="$(awk '/--directory/{getline; gsub(/.*<string>|<\/string>.*/,""); print; exit}' "$plist" 2>/dev/null)"
++# อ่าน plist ไม่ออก = ตรวจไม่ได้ ไม่ใช่ "ไม่มีปัญหา" · การตอบ PASS ตรงนี้จะทำให้
++# การจัดรูปแบบ plist ใหม่กลายเป็นวิธีปิดการตรวจแบบเงียบ ๆ จึงต้องล้มให้ดัง
+ if [ -z "$served" ]; then
+-  echo "SKIP ไม่พบ --directory ใน $plist"
+-  exit 0
++  echo "FAIL อ่าน --directory จาก $plist ไม่ได้ — ตรวจไม่ได้ ไม่ใช่ว่าปลอดภัย"
++  exit 1
++fi
++if [ ! -d "$served" ]; then
++  echo "FAIL document root ที่ plist ระบุไม่มีอยู่จริง: $served"
++  exit 1
+ fi
+ echo "document root: $served"
+ 
+-- 
+2.39.5 (Apple Git-154)
+

@@ -1,0 +1,18 @@
+'use strict';
+const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
+const {compareChatHistory}=require('./chat-history-compare.cjs');
+const html=fs.readFileSync(path.resolve(__dirname,'../../_IT-handoff/formula-studio/app/index.html'),'utf8');
+const a=html.indexOf('function msgUid(jobId, m){'),b=html.indexOf('// ข้อมูลระดับห้อง',a);assert.ok(a>=0&&b>a);
+const ctx={};vm.createContext(ctx);vm.runInContext(html.slice(a,b),ctx);const getUid=(id,msg)=>ctx.msgUid(id,msg);
+const job='A00001',old={text:'ข้อความสมมติ',user:'ผู้ใช้สมมติ',ts:123,type:'msg'},uid=getUid(job,structuredClone(old));
+const history={status:'requires-reconciliation',chat:{jobId:job},embeddedMessages:[old,{text:'เก่าเท่านั้น',ts:124}],messages:[{job_id:job,uid,ts:123,data:{...old,uid}},{job_id:job,uid:'new-only',ts:125,data:{uid:'new-only',text:'ใหม่เท่านั้น',ts:125}}]};
+const before=JSON.stringify(history),r=compareChatHistory(job,history,getUid);
+assert.deepEqual(r,{status:'compared',matching:[uid],embeddedOnly:[getUid(job,structuredClone(history.embeddedMessages[1]))],tableOnly:['new-only'],conflicting:[],duplicateEmbedded:[]});assert.equal(JSON.stringify(history),before);
+const collision=structuredClone(history);collision.messages[0].data.text='ข้อความต่าง';assert.deepEqual(compareChatHistory(job,collision,getUid).conflicting,[uid]);
+const wrongTime=structuredClone(history);wrongTime.messages[0].ts=999;assert.throws(()=>compareChatHistory(job,wrongTime,getUid),/เวลา/);
+const duplicate=structuredClone(history);duplicate.embeddedMessages.push(structuredClone(old));assert.deepEqual(compareChatHistory(job,duplicate,getUid).duplicateEmbedded,[uid]);
+assert.throws(()=>compareChatHistory(job,history,()=>''),/รหัส/);
+const withUid=structuredClone(history);withUid.embeddedMessages[0].uid=uid;
+assert.throws(()=>compareChatHistory(job,withUid,()=> 'different-id'),/รหัส/);
+assert.throws(()=>compareChatHistory('A00002',history,getUid),/งาน/);
+console.log('PASS: comparison classifies synthetic history using original message IDs, without merging or mutation');

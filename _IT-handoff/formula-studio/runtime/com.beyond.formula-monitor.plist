@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.beyond.formula-monitor</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>/Users/user/formula-runtime/scripts/monitor-formula.sh</string>
+  </array>
+  <!-- นาทีคงที่ ไม่ใช่ StartInterval — งานของ OPC ใช้ StartInterval ซึ่งเลื่อนไปเรื่อย
+       ตามเวลาที่บูตเครื่อง ตั้งแบบนี้ระยะห่างจากงานอื่นจึงคงที่จริง ไม่ค่อย ๆ ไหลมาชนกัน -->
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Minute</key><integer>7</integer></dict>
+    <dict><key>Minute</key><integer>22</integer></dict>
+    <dict><key>Minute</key><integer>37</integer></dict>
+    <dict><key>Minute</key><integer>52</integer></dict>
+  </array>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/Users/user/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>FORMULA_BACKUP_DESTINATION</key>
+    <string>local</string>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/Users/user/.hermes/apps/formula-studio/monitoring/monitor-launchd.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/user/.hermes/apps/formula-studio/monitoring/monitor-launchd.err.log</string>
+</dict>
+</plist>

@@ -1,0 +1,42 @@
+From dd77bdc84f56dcc835295fd61085218f817cd620 Mon Sep 17 00:00:00 2001
+From: piyawatv-cloud <295929244+piyawatv-cloud@users.noreply.github.com>
+Date: Sat, 19 Sep 2026 02:32:57 +0700
+Subject: [PATCH 20/24] docs(auth): document approved OPC user population
+
+---
+ docs/OPC_USER_DIRECTORY_ADAPTER.md | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/docs/OPC_USER_DIRECTORY_ADAPTER.md b/docs/OPC_USER_DIRECTORY_ADAPTER.md
+index 9d49d29..9a7e55f 100644
+--- a/docs/OPC_USER_DIRECTORY_ADAPTER.md
++++ b/docs/OPC_USER_DIRECTORY_ADAPTER.md
+@@ -18,6 +18,7 @@ FORMULA_AUTH_USER_URL=https://<formula-auth-host>/auth/v1/user
+ FORMULA_AUTH_API_KEY=<Formula authentication API key>
+ OPC_USER_DIRECTORY_URL=https://<opc-staging-host>/api/integrations/v1/formula/users
+ OPC_USER_DIRECTORY_TOKEN=<OPC REPORT_API_TOKEN>
++FORMULA_USER_DIRECTORY_APPROVED_EMAILS=<comma-separated Approved + Active emails from the owner sheet>
+ ```
+ 
+ On OPC Staging, enable the existing route with:
+@@ -25,6 +26,7 @@ On OPC Staging, enable the existing route with:
+ ```text
+ FORMULA_USER_DIRECTORY_ENABLED=true
+ REPORT_API_TOKEN=<same value used by OPC_USER_DIRECTORY_TOKEN>
++FORMULA_USER_DIRECTORY_APPROVED_EMAILS=<the exact Approved + Active population>
+ ```
+ 
+ The Formula release has the OPC reference check enabled and fails closed when
+@@ -32,7 +34,8 @@ the adapter, authenticated session, or active OPC reference is unavailable.
+ 
+ ## Verification order
+ 
+-1. Check OPC Staging returns `200` with the machine token and `401` without it.
++1. Check OPC Staging returns `200` with the machine token and `401` without it;
++   the response must contain only the configured approved active population.
+ 2. Check Formula's same-origin adapter returns `401` without a Formula session.
+ 3. Sign in with one approved user and confirm the OPC `source_record_id` is
+    retained without changing Formula's existing role.
+-- 
+2.39.5 (Apple Git-154)
+

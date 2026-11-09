@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.beyond.formula-recover</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>/Users/user/formula-runtime/scripts/recover-formula.sh</string>
+  </array>
+  <!-- ทุก 5 นาที เหลื่อมกับตัวเฝ้าระวัง (นาที 7/22/37/52) และไม่ตรงนาทีกลม
+       ที่งานตามเวลาอื่น ๆ บนเครื่องนี้ชอบใช้ -->
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Minute</key><integer>3</integer></dict>
+    <dict><key>Minute</key><integer>8</integer></dict>
+    <dict><key>Minute</key><integer>13</integer></dict>
+    <dict><key>Minute</key><integer>18</integer></dict>
+    <dict><key>Minute</key><integer>23</integer></dict>
+    <dict><key>Minute</key><integer>28</integer></dict>
+    <dict><key>Minute</key><integer>33</integer></dict>
+    <dict><key>Minute</key><integer>38</integer></dict>
+    <dict><key>Minute</key><integer>43</integer></dict>
+    <dict><key>Minute</key><integer>48</integer></dict>
+    <dict><key>Minute</key><integer>53</integer></dict>
+    <dict><key>Minute</key><integer>58</integer></dict>
+  </array>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/Users/user/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/Users/user/.hermes/apps/formula-studio/monitoring/recover-launchd.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/user/.hermes/apps/formula-studio/monitoring/recover-launchd.err.log</string>
+</dict>
+</plist>

@@ -1,0 +1,14 @@
+'use strict';
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
+const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8');
+const model=html.match(/<script id="model">([\s\S]*?)<\/script>/)[1];
+const registration=html.match(/window\.addEventListener\('beforeunload',[\s\S]*?\}\);/);
+assert.ok(registration,'must register a beforeunload warning');
+const context={module:{exports:{}},window:{addEventListener:(name,fn)=>{if(name==='beforeunload')context.guard=fn}}};
+vm.createContext(context);vm.runInContext(model,context);context.state=context.module.exports.initialState();context.initialStateSnapshot=JSON.stringify(context.state);context.dirty=false;vm.runInContext(registration[0],context);
+const event=()=>({prevented:false,returnValue:undefined,preventDefault(){this.prevented=true}});
+let e=event();context.guard(e);assert.equal(e.prevented,false,'clean demo should not prompt');
+context.dirty=true;e=event();context.guard(e);assert.equal(e.prevented,true,'unfinished draft prompts');
+context.dirty=false;context.state.jobs[0].brand='เปลี่ยนข้อมูลจำลอง';e=event();context.guard(e);assert.equal(e.prevented,true,'saved demo changes still disappear on reload');
+context.state=context.module.exports.initialState();e=event();context.guard(e);assert.equal(e.prevented,false,'reset state no longer prompts');
+console.log('PASS: unload warning covers draft and changed in-memory data');

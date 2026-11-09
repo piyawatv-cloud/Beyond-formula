@@ -4940,6 +4940,9 @@ function openRecordPopup(id){
     ${jobDetailHTML(r)}
     <div class="modal-acts">
       ${chatBtn}
+      ${can('createData')
+        ? `<button class="btn btn-s btn-sm" onclick="closeGModal();editRecordInSales('${r.id}')" title="โหลดใบงานเดิมเพื่อดูสรุปราคา/แก้ไข">เปิดใน Customer Data</button>`
+        : ''}
       ${r.closed && can('closeJob')
         ? `<button class="btn btn-s btn-sm" onclick="reopenJob('${r.id}');openRecordPopup('${r.id}')">เปิดงานอีกครั้ง</button>`
         : ''}

@@ -1,0 +1,22 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {readChatHistory}=require('./runtime-chat-read.cjs');
+const id='A00001';const history={chats:[{job_id:id,data:{jobId:id,parts:[]}}],messages:[{job_id:id,uid:'u1',ts:123,data:{text:'ข้อความสมมติ'}}]};
+(async()=>{
+ let calls=0;const read=async path=>{calls++;assert.equal(path,'/__formula/scoped-chat-history?job_id=eq.A00001');return history};
+ const result=await readChatHistory(id,read,()=>true);assert.equal(result.status,'ready');assert.deepEqual(result.chat,history.chats[0].data);assert.equal(result.messages[0].uid,'u1');
+ result.messages[0].data.text='เปลี่ยนสำเนา';assert.equal(history.messages[0].data.text,'ข้อความสมมติ');
+ const embedded={...history.chats[0],data:{...history.chats[0].data,messages:[{text:'ข้อความเก่า',ts:1}]}};
+ const legacy=await readChatHistory(id,async()=>({chats:[embedded],messages:[]}),()=>true);assert.equal(legacy.status,'legacy-history');assert.equal(legacy.embeddedMessages[0].text,'ข้อความเก่า');
+ const mixed=await readChatHistory(id,async()=>({chats:[embedded],messages:history.messages}),()=>true);assert.equal(mixed.status,'requires-reconciliation');assert.equal(mixed.embeddedMessages.length,1);assert.equal(mixed.messages.length,1);
+ assert.equal((await readChatHistory(id,async()=>({chats:history.chats,messages:[{...history.messages[0],data:{text:'x',jobId:'A00002'}}]}),()=>true)).status,'unconfirmed');
+ assert.equal((await readChatHistory(id,async()=>({chats:history.chats,messages:[{...history.messages[0],data:{text:'x',uid:'other'}}]}),()=>true)).status,'unconfirmed');
+ assert.equal((await readChatHistory(id,async()=>({chats:[],messages:[]}),()=>true)).status,'no-chat');
+ for(const bad of [null,{}, {chats:[],messages:history.messages}, {chats:history.chats,messages:[...history.messages,...history.messages]}, {chats:history.chats,messages:[{...history.messages[0],job_id:'A00002'}]}, {chats:[{job_id:id,data:{jobId:'A00002'}}],messages:[]}])assert.equal((await readChatHistory(id,async()=>bad,()=>true)).status,'unconfirmed');
+ assert.equal((await readChatHistory(id,async()=>{throw Error('offline')},()=>true)).status,'unconfirmed');
+ assert.equal((await readChatHistory(id,read,()=>false)).status,'session-changed');assert.equal(calls,1);
+ let current=true;assert.equal((await readChatHistory(id,async()=>{current=false;return history},()=>current)).status,'session-changed');
+ await assert.rejects(()=>readChatHistory('A00001&x=1',read,()=>true),/รหัส/);
+ await assert.rejects(()=>readChatHistory(id,read),/เซสชัน/);
+ console.log('PASS: synthetic scoped chat read rejects partial, mixed and stale results');
+})().catch(e=>{console.error(e);process.exitCode=1});

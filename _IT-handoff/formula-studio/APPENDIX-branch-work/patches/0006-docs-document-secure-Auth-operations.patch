@@ -1,0 +1,242 @@
+From c867371cbd52a4da64e74b96fda719557d34f060 Mon Sep 17 00:00:00 2001
+From: piyawatv-cloud <295929244+piyawatv-cloud@users.noreply.github.com>
+Date: Mon, 10 Aug 2026 07:32:58 +0700
+Subject: [PATCH 06/24] docs: document secure Auth operations
+
+---
+ CLAUDE.md | 63 ++++++++++++++++++++++++++++++++++++-------------------
+ README.md | 47 +++++++++++++++++++++--------------------
+ 2 files changed, 65 insertions(+), 45 deletions(-)
+
+diff --git a/CLAUDE.md b/CLAUDE.md
+index 1143149..13f6814 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -1,12 +1,30 @@
+ # Formula Studio — กฎการแก้ไขโปรเจกต์
+ 
+ เครื่องมือ R&D Briefing ของ Beyond Laboratory · ไฟล์เดียว `index.html` (HTML + CSS + JS วานิลลา ไม่มี build step)
+-ข้อมูลทั้งหมดเก็บใน `localStorage` ของเบราว์เซอร์ผู้ใช้ — **ไม่มีเซิร์ฟเวอร์ ไม่มี migration script**
+-นั่นคือเหตุผลของกฎข้อ 1 ด้านล่าง
++ข้อมูลเก็บใน `localStorage` เป็น local-first และอาจซิงก์กับ Supabase เมื่อเปิดใช้ server configuration
++
++ก่อนทำงานทุกครั้งต้องอ่าน `AGENTS.md` ก่อน ไฟล์นั้นกำหนด **กฎเหล็กอันดับ 1: GitHub-Centered Development & Runtime Governance** และมีลำดับเหนือกฎเฉพาะ Formula Studio ในไฟล์นี้
++
++---
++
++## กฎเหล็กอันดับ 1 — GitHub-Centered Development & Runtime Governance
++
++> GitHub เป็น Source of Truth ของการเปลี่ยนแปลงระบบ · Codex เป็น Development Agent · Hermes เป็น Governance Monitor · Runtime Operator เป็นผู้ deploy approved release
++
++- ทำงานบน feature branch ผ่าน Pull Request และ independent review ตามระดับความเสี่ยง ห้าม direct push/force push ไป protected `main`
++- Codex ห้าม final approve งานตัวเอง ห้าม deploy production ห้ามเข้าถึง production secret/data ที่ไม่ mask และห้าม patch source ที่ runtime
++- Critical Change รวม auth/permission, Supabase/schema/sync, runtime/deployment, CI/CD, secret handling, backup/restore และ audit integrity
++- Critical Change ต้องขอ independent approval จาก CODEOWNER `@phossatron` หรือผู้ทดแทนที่ System Owner แต่งตั้งอย่างเป็นทางการ
++- ห้ามฝัง secret หรือ production/confidential data ลง repository, commit, PR, log หรือ prompt
++- Browser ใช้ได้เฉพาะ Supabase publishable/anon key ภายใต้ RLS และ least-privilege grants; ห้ามฝัง `service_role`, secret key หรือ privileged token
++- ทุกงานต้องรายงาน traceability, files changed, tests, impacts, rollback, risks และ PR reference ตาม contract ใน `AGENTS.md`
++- หากพบ scope conflict, forbidden path, secret หรือ production credential ให้หยุดด้วย `BLOCKED_GOVERNANCE` และแจ้ง System Owner
++
++รายละเอียดบังคับทั้งหมดอยู่ใน `AGENTS.md`; เอกสาร governance ฉบับเต็มเป็น `Internal Confidential` และห้ามคัดลอกเข้า public repository
+ 
+ ---
+ 
+-## กฎข้อ 1 (สำคัญที่สุด) — ห้ามแก้ไขโครงสร้างข้อมูล
++## กฎเหล็กอันดับ 2 — ห้ามแก้ไขโครงสร้างข้อมูล
+ 
+ > **ห้ามเปลี่ยน / เปลี่ยนชื่อ / ลบ key ของ localStorage, ชื่อฟิลด์ หรือชนิดข้อมูลของ object ที่ระบุไว้ในหัวข้อ "โครงสร้างข้อมูลที่ถูกล็อก" โดยเด็ดขาด**
+ 
+@@ -24,7 +42,7 @@
+ - ลบฟิลด์เดิมทิ้ง แม้จะเลิกใช้แล้ว (ให้หยุดแสดงผลแทน — ข้อมูลเก่ายังต้องอยู่ครบ)
+ - เปลี่ยนรูปแบบรหัสงาน `A00001` (prefix ตัวอักษร A–Z + เลข 5 หลัก) หรือแก้ตัวนับ `fs_reccounter` ให้ย้อนกลับ
+ - เขียนทับ / เคลียร์ store ใด ๆ ตอน load — โดยเฉพาะ **ห้ามเรียก `saveRecordsStore()` ก่อนที่ `loadRecords()` จะทำงานเสร็จ**
+-  (เคยเกือบทำให้ records ทั้งหมดถูกเขียนทับด้วย array ว่างมาแล้ว — ดูกฎข้อ 3)
++  (เคยเกือบทำให้ records ทั้งหมดถูกเขียนทับด้วย array ว่างมาแล้ว — ดูกฎข้อ 4)
+ 
+ ### ถ้าจำเป็นต้องเปลี่ยนจริง ๆ
+ 1. ถามเจ้าของโปรเจกต์ก่อนเสมอ ห้ามตัดสินใจเอง
+@@ -46,6 +64,8 @@
+ | `fs_activities` | array ของ activity log (ใหม่สุดอยู่หน้าสุด, จำกัด `ACT_MAX`) |
+ | `fs_imp` | ชื่อผู้ที่กำลัง impersonate (string) |
+ 
++Optional state ที่เพิ่มแบบ backward compatible: `sessionStorage.fs_auth_session` เก็บ Auth session เฉพาะ tab/session และ `localStorage.fs_sync_snapshot` เก็บ server snapshot ที่ไม่มี token เพื่อ merge offline delta
++
+ ### record (`fs_records[]`)
+ ```
+ id createdAt createdBy updatedAt updatedBy date metaDate
+@@ -61,13 +81,13 @@ closed        // {by, at, ts} — มีเมื่อปิดงานแล
+ 
+ ### user (`fs_userlist[]`)
+ ```
+-{ name, role, email, pass }      // pass = pwHash() — ผู้ใช้เก่าที่ไม่มี pass ต้องล็อกอินได้ต่อไป
++{ name, role, email, pass }      // secure server: pass = null; local-only legacy: pwHash() ได้
+ ```
+ 
+ ### chat (`fs_chats[]`)
+ ```
+ { jobId, createdAt, createdBy, messages[], parts[], approvals:{pd, ra, rd} }
+-messages[] = { type:'sys'|'msg', text, ts, ... }
++messages[] = { type:'sys'|'msg', user?, text, ts, ... }
+ ```
+ 
+ ### activity (`fs_activities[]`)
+@@ -80,15 +100,16 @@ messages[] = { type:'sys'|'msg', text, ts, ... }
+ ### เซิร์ฟเวอร์กลาง (Supabase) ก็ล็อกโครงสร้างเดียวกัน
+ 
+ ตารางบนเซิร์ฟเวอร์เก็บ object รูปทรงเดิม**ทั้งก้อน**ไว้ในคอลัมน์ `data jsonb` — ไม่แตกฟิลด์เป็นคอลัมน์
+-ดังนั้นเพิ่มฟิลด์ใหม่ในแอปได้โดยไม่ต้องแก้ฐานข้อมูล และกฎข้อ 1 ยังคุมทั้งสองฝั่งด้วยกติกาชุดเดียว
++ดังนั้นเพิ่มฟิลด์ใหม่ในแอปได้โดยไม่ต้องแก้ฐานข้อมูล และกฎข้อ 2 ยังคุมทั้งสองฝั่งด้วยกติกาชุดเดียว
+ 
+ | ตาราง | คีย์ | มาจาก |
+ |---|---|---|
+ | `fs_records` | `id` | `records[]` |
+ | `fs_chats` | `job_id` | `chats[]` |
+ | `fs_users` | `name` | `userList[]` |
+-| `fs_activities` | `seq` (+`ts`) | `activities[]` — append only |
++| `fs_activities` | `uid` (+`ts`) | `activities[]` — append only |
+ | `fs_meta` | `key` | `reccounter` |
++| `fs_memberships` | `user_id` | Auth authorization แยกจาก locked JSON |
+ 
+ ห้ามแตกฟิลด์ออกเป็นคอลัมน์จริง ห้ามเปลี่ยนชื่อตาราง/คีย์ ห้ามเก็บ `currentUser` / `impersonator` ขึ้นเซิร์ฟเวอร์
+ (เป็นสถานะของเครื่องนั้น ๆ ไม่ใช่ข้อมูลร่วม) โครงสร้างเต็มอยู่ที่ `supabase/schema.sql`
+@@ -97,29 +118,27 @@ messages[] = { type:'sys'|'msg', text, ts, ... }
+ 
+ ## กฎข้ออื่น ๆ
+ 
+-**2. ไฟล์เดียว** — งานทั้งหมดอยู่ใน `index.html` ห้ามแตกไฟล์ ห้ามเพิ่ม build step ห้ามเพิ่ม dependency ใหม่
+-(ที่มีอยู่คือ SheetJS จาก CDN เท่านั้น)
++**3. ไฟล์เดียว** — งาน application ทั้งหมดอยู่ใน `index.html` ห้ามแตกไฟล์ ห้ามเพิ่ม build step ห้ามเพิ่ม dependency ใหม่
++(dependency ที่มีอยู่โหลดจาก CDN: SheetJS และชุดสร้าง PDF ที่โหลดเมื่อใช้งาน)
+ 
+-**3. ห้ามเขียนทับข้อมูลตอน load** — ฟังก์ชัน migrate ต้องแยกกันตามชนิดข้อมูล และเรียกหลังจาก loader ของชนิดนั้นทำงานเสร็จแล้วเท่านั้น
++**4. ห้ามเขียนทับข้อมูลตอน load** — ฟังก์ชัน migrate ต้องแยกกันตามชนิดข้อมูล และเรียกหลังจาก loader ของชนิดนั้นทำงานเสร็จแล้วเท่านั้น
+ (เช่น `migrateUserNames()` ใน `loadUsers()` ห้ามแตะ records — ต้องใช้ `migrateRecordOwners()` ที่เรียกหลัง `loadRecords()`)
+ 
+-**4. Export Excel เพิ่มคอลัมน์ได้เฉพาะต่อท้าย** — ห้ามแทรกกลางหรือสลับลำดับ เพราะ index ของคอลัมน์ถูกอ้างอิงอยู่ทั้งขาเข้า (import) และเทสต์
++**5. Export Excel เพิ่มคอลัมน์ได้เฉพาะต่อท้าย** — ห้ามแทรกกลางหรือสลับลำดับ เพราะ index ของคอลัมน์ถูกอ้างอิงอยู่ทั้งขาเข้า (import) และเทสต์
+ 
+-**5. escape ทุกค่าที่มาจากผู้ใช้** — ใช้ `esc()` ทุกครั้งที่ประกอบ HTML จาก template literal
++**6. escape ทุกค่าที่มาจากผู้ใช้** — ใช้ `esc()` ทุกครั้งที่ประกอบ HTML จาก template literal
+ 
+-**6. รันเทสต์ก่อนส่งงานเสมอ** — `node harness.js` แล้วเปิด `test.html` ด้วย headless Chrome ต้องผ่าน 100% และ console ต้องไม่มี error
++**7. รันเทสต์ก่อนส่งงานเสมอ** — `node harness.js` และ `./tests/run-sql-tests.sh` ต้องผ่าน 100%; browser console ต้องไม่มี error
+ ถ้าแก้อะไรแล้วเทสต์เดิมพัง ให้ตรวจก่อนว่าเป็น regression จริงหรือแค่ความคาดหวังเก่าที่ต้องอัปเดต
+ 
+-**7. สิทธิ์ผู้ใช้ตรวจที่ `can()` / `requirePerm()` เสมอ** — ห้ามซ่อนปุ่มอย่างเดียวโดยไม่เช็คสิทธิ์ในฟังก์ชันที่ทำงานจริง
++**8. สิทธิ์ผู้ใช้ตรวจที่ `can()` / `requirePerm()` เสมอ** — ห้ามซ่อนปุ่มอย่างเดียวโดยไม่เช็คสิทธิ์ในฟังก์ชันที่ทำงานจริง
+ เมนูที่จำกัด Role ต้องกัน 3 ชั้น: ซ่อนปุ่ม + กันตอนเปิดหน้า/ป๊อปอัพ + กันในฟังก์ชันที่ลงมือทำจริง
+-สำหรับสิทธิ์ระดับ Admin ให้ตรวจ **Role ตัวจริง** (`impersonator ? findUser(impersonator).role : currentRole()`)
+-ไม่ใช่ Role ที่กำลังสวมบทบาทอยู่
++Secure mode ต้องใช้ `authMembership.role` เป็น authority และปิด impersonation; local-only mode ที่สวมบทบาทให้ตรวจ Role ตัวจริงก่อนทำงานระดับ Admin
+ 
+-**7.1 หน้า Login คุมทางเข้าเดียว** — `renderLoginView()` แสดงเมื่อ `currentUser` ว่าง และเรียกจาก `renderUserUI()` เท่านั้น
+-ห้ามเพิ่มทางเข้าที่ตั้ง `currentUser` โดยไม่ผ่านการตรวจรหัสผ่าน และห้าม sync `currentUser` / `impersonator` ขึ้นเซิร์ฟเวอร์
++**8.1 หน้า Login คุมทางเข้าเดียว** — `renderLoginView()` แสดงเมื่อ `currentUser` ว่าง และเรียกจาก `renderUserUI()` เท่านั้น
++ห้ามเพิ่มทางเข้าที่ตั้ง `currentUser` โดยไม่ผ่าน Supabase Auth + active membership (หรือ legacy password เฉพาะ local-only mode) และห้าม sync `currentUser` / `impersonator` ขึ้นเซิร์ฟเวอร์
+ ระหว่างที่ข้อมูลผู้ใช้ยังโหลดจากเซิร์ฟเวอร์ไม่เสร็จ ห้ามแสดงฟอร์มสร้าง Admin คนแรก (จะสร้างทับของเดิม)
+ 
+-**8. รหัสผ่านในระบบนี้ไม่ใช่ระบบความปลอดภัยจริง** — `pwHash()` เป็นแค่การอำพรางฝั่ง client เก็บใน localStorage
+-ห้ามนำไปใช้เก็บข้อมูลลับ และห้ามโฆษณาว่าปลอดภัย
++**9. `pwHash()` ใช้ได้เฉพาะ local-only compatibility** — เป็นแค่การอำพรางฝั่ง client ห้ามใช้เป็น authorization ของ server; secure mode ต้องใช้ Supabase Auth + RLS
+ 
+-**9. อัปเดต build stamp บน header ทุกครั้งที่แก้** — ผู้ใช้ใช้ตัวนี้ยืนยันว่าได้เวอร์ชันใหม่แล้วหลัง hard refresh
++**10. อัปเดต build stamp บน header ทุกครั้งที่แก้ application** — ผู้ใช้ใช้ตัวนี้ยืนยันว่าได้เวอร์ชันใหม่แล้วหลัง hard refresh
+diff --git a/README.md b/README.md
+index 004cef4..a79fab4 100644
+--- a/README.md
++++ b/README.md
+@@ -8,20 +8,20 @@
+ 
+ ## ความสามารถหลัก
+ 
+-- **หน้าเข้าใช้งาน (Login)** — ครอบทั้งจอจนกว่าจะล็อกอินสำเร็จ ใช้ชื่อผู้ใช้หรืออีเมลบริษัท + รหัสผ่าน
++- **หน้าเข้าใช้งาน (Login)** — Supabase Auth email/password เมื่อเปิด server mode; ครอบทั้งจอจนกว่าจะตรวจ session + membership สำเร็จ
+ - **Customer Data** — ฟอร์มบันทึกบรีฟลูกค้า (ลูกค้า & แบรนด์, รายละเอียดสินค้า, ลักษณะสินค้า & บรรจุภัณฑ์, กลุ่มเป้าหมาย & ราคา, สรรพคุณ / ข้อจำกัด / หมายเหตุ) พร้อมสูตรส่วนผสม
+ - **Dashboard** — สรุปงานทั้งหมด, งานที่ปิดแล้ว, ค้นหา / กรอง / Export Excel
+ - **Chat Message** — ห้องแชทต่อ 1 งาน พร้อมประวัติการแก้ไขชุดข้อมูล และการอนุมัติ 4 ฝ่าย (PD / RA / RD / Sales)
+ - **Activities log** — บันทึกทุกการกระทำในระบบ (Admin)
+-- **จัดการผู้ใช้** — เพิ่ม / แก้ไข Role / รีเซ็ตรหัสผ่าน (Admin)
+-- **สวมบทบาทผู้ใช้** — เข้าใช้งานในมุมมองของ Role อื่นเพื่อตรวจสอบสิทธิ์ (Admin ตัวจริงเท่านั้น)
++- **จัดการผู้ใช้** — ใน secure mode แสดงสมาชิกแบบ read-only; การเชิญ/Role/รหัสผ่านเป็นหน้าที่ Owner ผ่าน Supabase
++- **สวมบทบาทผู้ใช้** — ใช้ได้เฉพาะ local-only mode; secure mode ปิดเพื่อไม่ให้ browser ข้าม database role
+ - **ออกจากระบบ** — เมนูล่างสุดของแถบซ้าย ยืนยันก่อนออก แล้วกลับไปหน้า Login
+ 
+ ## Role
+ 
+ `Admin` · `PD` · `RA` · `RD` · `Sales` · `OPC` · `MKT` · `Purchasing`
+ 
+-สิทธิ์ทั้งหมดนิยามอยู่ที่ตัวแปร `ROLES` ในไฟล์ และตรวจผ่าน `can()` / `requirePerm()`
++UI ตรวจผ่าน `ROLES`/`can()`/`requirePerm()` และ secure mode บังคับซ้ำที่ฐานข้อมูลด้วย membership, grants, RLS และ JSON mutation guards
+ 
+ ### เมนูไหนใครเห็น
+ 
+@@ -30,46 +30,47 @@
+ | Dashboard · Chat Message | ทุก Role |
+ | Customer Data | Admin · Sales · OPC · MKT |
+ | Activities log | Admin |
+-| สวมบทบาทผู้ใช้ | Admin (และต้องไม่ได้สวมบทบาทอยู่) |
+-| จัดการผู้ใช้ | ทุกคนเปิดดูได้ · แต่ เพิ่ม / เปลี่ยน Role / รีเซ็ตรหัส / ลบ = Admin เท่านั้น |
++| สวมบทบาทผู้ใช้ | Admin เฉพาะ local-only mode |
++| จัดการผู้ใช้ | Secure mode = read-only และ Owner จัดการผ่าน Supabase Dashboard |
+ 
+-## รหัสผ่าน
++## การยืนยันตัวตน
+ 
+-- ผู้ใช้ทุกคนต้องมีรหัสผ่าน — บัญชีที่ยังไม่เคยตั้ง จะใช้รหัสตั้งต้น `123456` แล้วระบบบันทึกให้ถาวรตั้งแต่ล็อกอินครั้งแรก
+-- Admin รีเซ็ตรหัสของใครก็ได้ (ทีละคนหรือทั้งหมด) กลับเป็น `123456` ที่เมนู **จัดการผู้ใช้**
+-- ผู้ใช้เปลี่ยนรหัสของตัวเองได้ที่เมนู **เปลี่ยนรหัสผ่าน**
+-- ⚠️ รหัสผ่านเก็บเป็นค่าแฮชฝั่งเบราว์เซอร์ (`pwHash`) เป็นการกันคนอ่านผ่าน ๆ **ไม่ใช่ระบบความปลอดภัยระดับสูง**
++- Secure mode ใช้ Supabase Auth; token อยู่ใน `sessionStorage` เท่านั้น และ Data API ใช้ user JWT ไม่ใช้ publishable key เป็น bearer
++- `fs_users.data.pass` คง key ไว้เพื่อ compatibility แต่ server บังคับให้เป็น JSON `null`
++- เชิญผู้ใช้/รีเซ็ตหรือกู้รหัสผ่านผ่าน Supabase Dashboard ตาม [Auth/RLS runbook](supabase/AUTH_RLS_RUNBOOK.md)
++- local-only mode ที่ไม่ตั้ง Supabase ยังรองรับ password hash เดิมเพื่อ backward compatibility เท่านั้น
+ 
+ ## เว็บใช้งานจริง
+ 
+-https://beyond-formula.vercel.app — deploy อัตโนมัติจาก branch `main` ทุกครั้งที่ push
++Production URL เดิมคือ https://beyond-formula.vercel.app แต่การ release ต้องผ่าน approved PR/CODEOWNER/checks และ Runtime Operator ตาม governance; ห้ามถือว่า push ใด ๆ คือ production complete
+ 
+ ## ข้อมูล
+ 
+ เก็บใน `localStorage` ของเบราว์เซอร์เสมอ และถ้าตั้งค่าเซิร์ฟเวอร์กลางไว้ จะซิงก์ให้ทุกเครื่องเห็นข้อมูลชุดเดียวกัน
+-**ก่อนแก้ไขโค้ด อ่าน [CLAUDE.md](CLAUDE.md) ก่อน — โดยเฉพาะกฎข้อ 1: ห้ามแก้ไขโครงสร้างข้อมูล**
++
++**ก่อนทำงานทุกครั้ง อ่าน [AGENTS.md](AGENTS.md) ก่อน — กฎเหล็กอันดับ 1 คือ GitHub-Centered Development & Runtime Governance แล้วจึงอ่าน [CLAUDE.md](CLAUDE.md) สำหรับกฎข้อมูลและสถาปัตยกรรมเฉพาะ Formula Studio**
+ 
+ ## ตั้งค่าซิงก์ข้อมูลข้ามเครื่อง (Supabase)
+ 
+ ถ้าไม่ตั้งค่า แอปยังใช้งานได้ปกติ แต่ข้อมูลจะอยู่แค่ในเครื่องที่กรอก ไม่มีใครเห็นด้วย
+ 
+ 1. สมัคร https://supabase.com (ฟรี) → **New project** → ตั้งชื่อ เช่น `beyond-formula` → เลือก region **Southeast Asia (Singapore)**
+-2. เข้าเมนู **SQL Editor** → **New query** → วางทั้งไฟล์ [supabase/schema.sql](supabase/schema.sql) → กด **Run**
+-3. เข้า **Project Settings → Data API** คัดลอก **Project URL** และ **anon public key**
+-4. เปิด `index.html` แก้ 2 บรรทัดบนสุดของแท็ก `<script>`
++2. ทำตาม [supabase/AUTH_RLS_RUNBOOK.md](supabase/AUTH_RLS_RUNBOOK.md): สร้าง Auth users ให้ email ตรงกับผู้ใช้เดิมก่อน แล้วรัน [supabase/schema.sql](supabase/schema.sql) ใน staging
++3. ตรวจ membership, RLS negative cases และ UAT ใน staging แล้วจึงทำ production rollout ตาม approval
++4. เข้า **Project Settings → Data API** คัดลอก **Project URL** และ **publishable/anon key** (ห้ามใช้ secret/service-role key)
++5. เปิด `index.html` แก้ 2 บรรทัดบนสุดของแท็ก `<script>`
+    ```js
+    let SB_URL = 'https://xxxxxxxx.supabase.co';
+-   let SB_KEY = 'eyJhbGciOi...';
++   let SB_KEY = 'sb_publishable_...';
+    ```
+-5. push ขึ้น GitHub → Vercel deploy เอง → เปิดเว็บ จะเห็นป้าย **ซิงก์แล้ว** สีเขียวมุมขวาบน
++6. เปิด PR ให้ checks ผ่านและ `@phossatron` approve; Runtime Operator จึง deploy approved immutable commit
+ 
+ ### การซิงก์ทำงานยังไง
+ - **เขียน:** ทุกครั้งที่บันทึก จะส่งขึ้นเซิร์ฟเวอร์เฉพาะรายการที่เปลี่ยนจริง (รวบการบันทึกที่ติดกันภายใน 0.4 วินาทีเป็นครั้งเดียว)
+ - **อ่าน:** ดึงข้อมูลใหม่ทุก 5 วินาที และทันทีที่สลับกลับมาที่แท็บ
+ - **เน็ตหลุด:** ใช้ข้อมูลในเครื่องต่อได้ ป้ายสถานะเป็นสีแดง พอเน็ตกลับมาจะซิงก์ให้เอง
+-- **ครั้งแรก:** ถ้าเซิร์ฟเวอร์ยังว่างและเครื่องมีข้อมูลอยู่ ระบบจะยกข้อมูลชุดนั้นขึ้นไปตั้งต้นให้อัตโนมัติ
++- **merge:** ใช้ snapshot ล่าสุดแยก remote cache ออกจาก offline delta จึงไม่เขียนทับงานที่แก้ตอนเน็ตหลุด
++
++### ความปลอดภัย
+ 
+-### ⚠️ เรื่องความปลอดภัย
+-ระบบ login ยังตรวจฝั่ง client เหมือนเดิม และ anon key อยู่ในไฟล์ที่เปิดดูได้
+-**ใครที่รู้ URL ของเว็บสามารถดึงข้อมูลทั้งหมดได้** — เหมาะกับข้อมูลภายในทีมเท่านั้น
+-ถ้าต้องการกันจริงต้องเปลี่ยนไปใช้ Supabase Auth + RLS ตามผู้ใช้
++Publishable key มองเห็นได้ใน browser จึงเป็นเพียง project identifier ไม่ใช่สิทธิ์เข้าถึง ระบบบังคับ Supabase Auth, active membership, least-privilege grants, RLS และ mutation guards ที่ฐานข้อมูล ส่วน secret/service-role key ห้ามเข้า browser/repository โดยเด็ดขาด
+-- 
+2.39.5 (Apple Git-154)
+

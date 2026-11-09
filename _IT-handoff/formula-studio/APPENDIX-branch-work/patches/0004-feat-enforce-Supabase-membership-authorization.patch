@@ -1,0 +1,824 @@
+From 8e6ef301b9cc89e55b2a7fac56f730217b62c85e Mon Sep 17 00:00:00 2001
+From: piyawatv-cloud <295929244+piyawatv-cloud@users.noreply.github.com>
+Date: Mon, 10 Aug 2026 07:32:57 +0700
+Subject: [PATCH 04/24] feat: enforce Supabase membership authorization
+
+---
+ supabase/AUTH_RLS_RUNBOOK.md   |  87 ++++++++
+ supabase/rollback_auth_rls.sql |  44 ++++
+ supabase/schema.sql            | 386 +++++++++++++++++++++++++++++++++
+ tests/run-sql-tests.sh         |  25 +++
+ tests/sql/auth_rls_test.sql    | 184 ++++++++++++++++
+ tests/sql/bootstrap.sql        |  41 ++++
+ 6 files changed, 767 insertions(+)
+ create mode 100644 supabase/AUTH_RLS_RUNBOOK.md
+ create mode 100644 supabase/rollback_auth_rls.sql
+ create mode 100755 tests/run-sql-tests.sh
+ create mode 100644 tests/sql/auth_rls_test.sql
+ create mode 100644 tests/sql/bootstrap.sql
+
+diff --git a/supabase/AUTH_RLS_RUNBOOK.md b/supabase/AUTH_RLS_RUNBOOK.md
+new file mode 100644
+index 0000000..3cae455
+--- /dev/null
++++ b/supabase/AUTH_RLS_RUNBOOK.md
+@@ -0,0 +1,87 @@
++# Formula Studio Auth/RLS rollout runbook
++
++เอกสารนี้เป็นขั้นตอนปฏิบัติสำหรับ System Owner, CODEOWNER และ Runtime Operator โดยไม่รวม secret หรือ production data งานนี้เป็น Critical Change และห้ามบุคคลเดียวทำ Code + Final Approve + Deploy
++
++## ผู้รับผิดชอบ
++
++| Gate | ผู้รับผิดชอบ | หลักฐานขั้นต่ำ |
++| --- | --- | --- |
++| Repository/settings | System Owner `@phossatron` | Private repo, collaborator, ruleset screenshot/URL |
++| Code/schema review | CODEOWNER `@phossatron` หรือผู้แทนที่แต่งตั้ง | Approved PR, checks ผ่าน, rollback reviewed |
++| Supabase staging/production | Supabase Owner | backup reference, SQL execution record, membership/UAT evidence |
++| Release/deploy/rollback | Runtime / Platform Operator | immutable commit, time, health check, rollback target |
++| Correlation | Hermes (read-only) | Task → PR → commit → release → deployment/incident |
++
++## 1. GitHub one-time controls — System Owner
++
++1. เปลี่ยน repository เป็น **Private** ก่อนนำข้อมูลภายในหรือ config เพิ่มเติมขึ้น GitHub
++2. ให้สิทธิ์ Write แก่ development identity ที่อนุมัติ (ปัจจุบัน `piyawatv-cloud` มีเพียง Read) โดยไม่ให้ Admin/secret access
++3. ยืนยันว่า `.github/CODEOWNERS` ชี้ critical paths ไปที่ `@phossatron`
++4. สร้าง ruleset/branch protection สำหรับ `main`:
++   - Require pull request และอย่างน้อย 1 approval
++   - Require review from CODEOWNERS และ dismiss stale approvals
++   - Require conversation resolution
++   - Block force push และ branch deletion
++   - จำกัด bypass ให้เฉพาะ break-glass ที่มี Incident ID
++5. หลัง workflow นี้ merge ครั้งแรก ให้เพิ่ม required checks ชื่อ `Browser auth tests` และ `PostgreSQL RLS tests` (PR แรกใช้ผล local ที่ reviewer ตรวจได้ แล้วเปิด required checks ทันทีหลัง workflow อยู่บน default branch)
++
++## 2. Supabase staging — Supabase Owner
++
++1. สร้าง backup/restore point และบันทึก reference; ห้ามส่ง dump หรือ credential เข้า Issue/PR/prompt
++2. ปิด public signup/anonymous sign-in ตาม Auth policy ขององค์กร
++3. เชิญ Auth users ใน staging ผ่าน Dashboard ก่อน migration โดยใช้อีเมลให้ตรงกับ `fs_users.data.email`
++4. ตรวจ PR, commit SHA และผล checks แล้วรัน `supabase/schema.sql` ทั้งไฟล์ใน staging SQL Editor
++5. ตรวจว่าเฉพาะอีเมลที่ match ถูกสร้างใน `fs_memberships`; unmatched user ต้องไม่มีสิทธิ์
++6. ผู้ใช้ใหม่หลัง migration ให้ Owner เพิ่ม membership จาก Auth user ที่มีอยู่แล้ว ตัวอย่างที่ต้องแทนค่าด้วยข้อมูลที่อนุมัติ:
++
++```sql
++insert into public.fs_memberships(user_id,name,role,active)
++select id, '<approved-name>', '<approved-role>', true
++from auth.users
++where lower(email)=lower('<approved-email>');
++```
++
++7. ห้ามนำ `service_role`, secret key, database password หรือ user JWT ไปใส่ใน `index.html`; browser ใช้ได้เฉพาะ Project URL + publishable/anon key ภายใต้ RLS
++
++## 3. Staging verification — Owner + Reviewer
++
++รัน automated checks จาก clean checkout:
++
++```sh
++node harness.js
++./tests/run-sql-tests.sh
++```
++
++ทำ UAT ด้วยบัญชี synthetic/staging แยก Role และเก็บเฉพาะ sanitized evidence:
++
++- ไม่มี session: Data API ไม่ถูกเรียกและข้อมูล cache ถูก login overlay ปิด
++- Admin: อ่าน activity และจัดการ membership ได้
++- Sales: แก้งานของตนได้ แต่แก้งานของ Sales อื่น/ลบงานไม่ได้
++- PD: แก้ `rows`/formula ได้ แต่แก้ customer/owner ไม่ได้
++- RA/RD/Sales: เปลี่ยนได้เฉพาะ approval ของ Role ตน
++- Non-Admin: append activity ของตนได้ แต่อ่าน/แก้ log ไม่ได้
++- Logout/401/403: session ถูกล้างและต้อง login ใหม่
++- Network loss หลัง login: แก้ local ได้ และ reconnect แล้ว merge โดยไม่เขียนทับ offline delta
++
++Reviewer ต้องตรวจว่า `fs_users.data.pass` ยังมี key แต่เป็น JSON `null`, anon ไม่มี table grants และไม่มี privileged credential ใน diff/log
++
++## 4. Production rollout — Owner + Runtime Operator
++
++ใช้ maintenance window เพราะ schema ต้อง secure ก่อน application Auth build:
++
++1. Owner ยืนยัน approved PR/commit, backup และ staging UAT
++2. Supabase Owner รัน `supabase/schema.sql` ที่ reviewed commit ใน production และบันทึกเวลา/ผู้รัน
++3. Runtime Operator deploy เฉพาะ immutable approved commit ตาม `RUNTIME_OPERATIONS.md`
++4. ตรวจ health endpoint/static page, login, membership, role-negative case และ sync status โดยไม่บันทึก token
++5. บันทึก commit, PR, release/artifact, deployer/time, health evidence และ rollback target ให้ Hermes correlate
++
++## 5. Rollback
++
++ทางเลือกที่ปลอดภัยที่สุดคือ forward fix. ถ้าจำเป็นต้อง rollback:
++
++1. Runtime Operator ย้อน application ไป approved commit ก่อนหน้า
++2. Supabase Owner ใช้ `supabase/rollback_auth_rls.sql` เฉพาะเมื่อ Incident/approval อนุญาต
++3. Rollback SQL ไม่ลบ table/data แต่ **เปิด anonymous CRUD แบบ legacy อีกครั้ง** จึงต้องจำกัดเวลา, เฝ้าระวัง และรีบกลับสู่ secure desired state
++4. ตรวจ health/data count จาก sanitized evidence, revoke break-glass access และทำ post-incident review
++
++Codex ไม่มีอำนาจเปลี่ยน repository visibility/settings, รัน production SQL, final approve, merge หรือ deploy
+diff --git a/supabase/rollback_auth_rls.sql b/supabase/rollback_auth_rls.sql
+new file mode 100644
+index 0000000..0a314b0
+--- /dev/null
++++ b/supabase/rollback_auth_rls.sql
+@@ -0,0 +1,44 @@
++-- Emergency compatibility rollback for Formula Studio Auth/RLS.
++-- WARNING: this intentionally reopens legacy anonymous CRUD access.
++-- It retains every table and row. Run only after approved incident review.
++
++begin;
++
++drop trigger if exists fs_users_guard on public.fs_users;
++drop trigger if exists fs_records_guard on public.fs_records;
++drop trigger if exists fs_chats_guard on public.fs_chats;
++drop trigger if exists fs_activities_guard on public.fs_activities;
++
++drop policy if exists records_member_select on public.fs_records;
++drop policy if exists records_role_insert on public.fs_records;
++drop policy if exists records_role_update on public.fs_records;
++drop policy if exists records_admin_delete on public.fs_records;
++drop policy if exists chats_member_select on public.fs_chats;
++drop policy if exists chats_member_insert on public.fs_chats;
++drop policy if exists chats_member_update on public.fs_chats;
++drop policy if exists chats_admin_delete on public.fs_chats;
++drop policy if exists users_member_select on public.fs_users;
++drop policy if exists users_admin_insert on public.fs_users;
++drop policy if exists users_admin_update on public.fs_users;
++drop policy if exists users_admin_delete on public.fs_users;
++drop policy if exists activities_admin_select on public.fs_activities;
++drop policy if exists activities_member_insert on public.fs_activities;
++drop policy if exists meta_member_select on public.fs_meta;
++drop policy if exists meta_creator_insert on public.fs_meta;
++drop policy if exists meta_creator_update on public.fs_meta;
++drop policy if exists meta_admin_delete on public.fs_meta;
++
++grant select,insert,update,delete on public.fs_records,public.fs_chats,public.fs_users,
++  public.fs_activities,public.fs_meta to anon,authenticated;
++drop policy if exists anon_all on public.fs_records;
++drop policy if exists anon_all on public.fs_chats;
++drop policy if exists anon_all on public.fs_users;
++drop policy if exists anon_all on public.fs_activities;
++drop policy if exists anon_all on public.fs_meta;
++create policy anon_all on public.fs_records for all to anon,authenticated using (true) with check (true);
++create policy anon_all on public.fs_chats for all to anon,authenticated using (true) with check (true);
++create policy anon_all on public.fs_users for all to anon,authenticated using (true) with check (true);
++create policy anon_all on public.fs_activities for all to anon,authenticated using (true) with check (true);
++create policy anon_all on public.fs_meta for all to anon,authenticated using (true) with check (true);
++
++commit;
+diff --git a/supabase/schema.sql b/supabase/schema.sql
+index e69de29..210d5b2 100644
+--- a/supabase/schema.sql
++++ b/supabase/schema.sql
+@@ -0,0 +1,386 @@
++-- Formula Studio — Supabase Auth + membership/RLS forward migration
++-- Critical Change. Review, test and run in staging before production.
++-- The five application tables retain their locked key + jsonb data contract.
++
++begin;
++
++create table if not exists public.fs_records (
++  id text primary key,
++  data jsonb not null,
++  updated_at timestamptz not null default now()
++);
++create table if not exists public.fs_chats (
++  job_id text primary key,
++  data jsonb not null,
++  updated_at timestamptz not null default now()
++);
++create table if not exists public.fs_users (
++  name text primary key,
++  data jsonb not null,
++  updated_at timestamptz not null default now()
++);
++create table if not exists public.fs_activities (
++  uid text primary key,
++  ts bigint not null,
++  data jsonb not null
++);
++create index if not exists fs_activities_ts_idx on public.fs_activities (ts desc);
++create table if not exists public.fs_meta (
++  key text primary key,
++  value jsonb not null,
++  updated_at timestamptz not null default now()
++);
++
++create table if not exists public.fs_memberships (
++  user_id uuid primary key references auth.users(id) on delete cascade,
++  name text not null unique,
++  role text not null check (role in ('admin','pd','ra','rd','sales','opc','mkt','purchasing')),
++  active boolean not null default true,
++  created_at timestamptz not null default now(),
++  updated_at timestamptz not null default now()
++);
++create index if not exists fs_memberships_role_active_idx
++  on public.fs_memberships (role, active);
++
++create schema if not exists private;
++revoke all on schema private from public;
++grant usage on schema public to authenticated;
++grant usage on schema private to authenticated;
++
++create or replace function private.fs_is_active_member() returns boolean
++language sql stable security definer
++set search_path = ''
++as $$
++  select exists (
++    select 1 from public.fs_memberships m
++    where m.user_id=auth.uid() and m.active
++  )
++$$;
++create or replace function private.fs_current_role() returns text
++language sql stable security definer
++set search_path = ''
++as $$
++  select m.role from public.fs_memberships m
++  where m.user_id=auth.uid() and m.active
++$$;
++create or replace function private.fs_current_name() returns text
++language sql stable security definer
++set search_path = ''
++as $$
++  select m.name from public.fs_memberships m
++  where m.user_id=auth.uid() and m.active
++$$;
++revoke all on function private.fs_is_active_member() from public, anon;
++revoke all on function private.fs_current_role() from public, anon;
++revoke all on function private.fs_current_name() from public, anon;
++grant execute on function private.fs_is_active_member() to authenticated;
++grant execute on function private.fs_current_role() to authenticated;
++grant execute on function private.fs_current_name() to authenticated;
++
++create or replace function private.fs_touch_updated_at() returns trigger
++language plpgsql
++set search_path = ''
++as $$
++begin
++  new.updated_at=now();
++  return new;
++end $$;
++revoke all on function private.fs_touch_updated_at() from public, anon, authenticated;
++
++do $$
++declare t text;
++begin
++  foreach t in array array['fs_records','fs_chats','fs_users','fs_meta','fs_memberships'] loop
++    execute format('drop trigger if exists %I_touch on public.%I',t,t);
++    execute format('create trigger %I_touch before update on public.%I for each row execute function private.fs_touch_updated_at()',t,t);
++  end loop;
++end $$;
++
++-- Map only already-known legacy users to Auth users. Unmatched Auth users get no access.
++insert into public.fs_memberships(user_id,name,role,active)
++select au.id, u.name, lower(u.data->>'role'), true
++from public.fs_users u
++join auth.users au on lower(trim(au.email))=lower(trim(u.data->>'email'))
++where lower(u.data->>'role') in ('admin','pd','ra','rd','sales','opc','mkt','purchasing')
++on conflict (user_id) do update
++set name=excluded.name,role=excluded.role,updated_at=now();
++
++-- Preserve the locked key while removing every browser password hash from server data.
++update public.fs_users
++set data=jsonb_set(data,'{pass}','null'::jsonb,true)
++where not (data ? 'pass') or data->'pass' is distinct from 'null'::jsonb;
++
++create or replace function private.fs_guard_user_json() returns trigger
++language plpgsql
++set search_path = ''
++as $$
++begin
++  if new.data->>'name' is distinct from new.name then
++    raise exception 'fs_users name must match data.name' using errcode='42501';
++  end if;
++  if lower(coalesce(new.data->>'role','')) not in ('admin','pd','ra','rd','sales','opc','mkt','purchasing') then
++    raise exception 'invalid Formula Studio role' using errcode='42501';
++  end if;
++  if not (new.data ? 'pass') or new.data->'pass' is distinct from 'null'::jsonb then
++    raise exception 'fs_users.data.pass must be JSON null' using errcode='42501';
++  end if;
++  return new;
++end $$;
++
++create or replace function private.fs_guard_activity_json() returns trigger
++language plpgsql
++set search_path = ''
++as $$
++declare
++  actor_role text := private.fs_current_role();
++  actor_name text := private.fs_current_name();
++begin
++  if actor_role is null or actor_name is null then
++    raise exception 'active membership required' using errcode='42501';
++  end if;
++  if actor_role<>'admin' and (
++    new.data->>'user' is distinct from actor_name
++    or coalesce(new.data->>'via','')<>''
++  ) then
++    raise exception 'activity actor mismatch' using errcode='42501';
++  end if;
++  return new;
++end $$;
++
++create or replace function private.fs_guard_record_json() returns trigger
++language plpgsql
++set search_path = ''
++as $$
++declare
++  actor_role text := private.fs_current_role();
++  actor_name text := private.fs_current_name();
++  pd_keys text[] := array['rows','rdUpdated','modNote'];
++begin
++  if actor_role is null or actor_name is null then
++    raise exception 'active membership required' using errcode='42501';
++  end if;
++  if new.id !~ '^[A-Z]+[0-9]{5}$' or new.data->>'id' is distinct from new.id then
++    raise exception 'record id must match data.id' using errcode='42501';
++  end if;
++  if tg_op='INSERT' then
++    if actor_role not in ('admin','sales','opc','mkt') then
++      raise exception 'role cannot create records' using errcode='42501';
++    end if;
++    if actor_role='sales' and new.data->>'createdBy' is distinct from actor_name then
++      raise exception 'Sales can create only owned records' using errcode='42501';
++    end if;
++    return new;
++  end if;
++  if new.data->>'createdBy' is distinct from old.data->>'createdBy' then
++    raise exception 'record creator is immutable' using errcode='42501';
++  end if;
++  if (new.data->'closed') is distinct from (old.data->'closed')
++     and actor_role not in ('admin','sales','opc') then
++    raise exception 'role cannot change closed state' using errcode='42501';
++  end if;
++  if actor_role='admin' then return new; end if;
++  if actor_role='sales' then
++    if old.data->>'createdBy' is distinct from actor_name then
++      raise exception 'Sales can update only owned records' using errcode='42501';
++    end if;
++    return new;
++  end if;
++  if actor_role in ('opc','mkt') then return new; end if;
++  if actor_role='pd' and (new.data - pd_keys)=(old.data - pd_keys) then return new; end if;
++  raise exception 'record mutation exceeds role permission' using errcode='42501';
++end $$;
++
++create or replace function private.fs_guard_chat_json() returns trigger
++language plpgsql
++set search_path = ''
++as $$
++declare
++  actor_role text := private.fs_current_role();
++  actor_name text := private.fs_current_name();
++  old_approvals jsonb := coalesce(old.data->'approvals','{}'::jsonb);
++  new_approvals jsonb := coalesce(new.data->'approvals','{}'::jsonb);
++  old_messages jsonb := coalesce(old.data->'messages','[]'::jsonb);
++  new_messages jsonb := coalesce(new.data->'messages','[]'::jsonb);
++  prefix_messages jsonb;
++  old_other_parts jsonb;
++  new_other_parts jsonb;
++  invalid_message boolean;
++begin
++  if new.job_id !~ '^[A-Z]+[0-9]{5}$' or new.data->>'jobId' is distinct from new.job_id then
++    raise exception 'chat job id must match data.jobId' using errcode='42501';
++  end if;
++  if tg_op='INSERT' then
++    if not private.fs_is_active_member() then raise exception 'active membership required' using errcode='42501'; end if;
++    if new.data->>'createdBy' is distinct from actor_name and actor_role<>'admin' then
++      raise exception 'chat creator mismatch' using errcode='42501';
++    end if;
++    return new;
++  end if;
++  if actor_role='admin' then return new; end if;
++  if (new.data - array['messages','parts','seen','exports','approvals'])
++     is distinct from (old.data - array['messages','parts','seen','exports','approvals']) then
++    raise exception 'immutable chat fields changed' using errcode='42501';
++  end if;
++  if jsonb_typeof(new_messages)<>'array' or jsonb_array_length(new_messages)<jsonb_array_length(old_messages) then
++    raise exception 'chat messages are append-only' using errcode='42501';
++  end if;
++  select coalesce(jsonb_agg(e.value order by e.ord),'[]'::jsonb) into prefix_messages
++  from jsonb_array_elements(new_messages) with ordinality e(value,ord)
++  where e.ord<=jsonb_array_length(old_messages);
++  if prefix_messages is distinct from old_messages then
++    raise exception 'existing chat messages cannot be rewritten' using errcode='42501';
++  end if;
++  select exists (
++    select 1 from jsonb_array_elements(new_messages) with ordinality e(value,ord)
++    where e.ord>jsonb_array_length(old_messages) and e.value->>'user' is distinct from actor_name
++  ) into invalid_message;
++  if invalid_message then
++    raise exception 'new chat message actor mismatch' using errcode='42501';
++  end if;
++  if jsonb_typeof(coalesce(new.data->'parts','[]'::jsonb))<>'array' then
++    raise exception 'chat parts must be an array' using errcode='42501';
++  end if;
++  select coalesce(jsonb_agg(e.value order by e.value->>'name'),'[]'::jsonb) into old_other_parts
++  from jsonb_array_elements(coalesce(old.data->'parts','[]'::jsonb)) e(value)
++  where e.value->>'name' is distinct from actor_name;
++  select coalesce(jsonb_agg(e.value order by e.value->>'name'),'[]'::jsonb) into new_other_parts
++  from jsonb_array_elements(coalesce(new.data->'parts','[]'::jsonb)) e(value)
++  where e.value->>'name' is distinct from actor_name;
++  if new_other_parts is distinct from old_other_parts then
++    raise exception 'user can update only own participation' using errcode='42501';
++  end if;
++  if (coalesce(new.data->'seen','{}'::jsonb) - actor_name)
++     is distinct from (coalesce(old.data->'seen','{}'::jsonb) - actor_name) then
++    raise exception 'user can update only own seen state' using errcode='42501';
++  end if;
++  if (new_approvals - array['pd','ra','rd','sales'])
++     is distinct from (old_approvals - array['pd','ra','rd','sales']) then
++    raise exception 'unknown approval state changed' using errcode='42501';
++  end if;
++  if (new_approvals->'pd') is distinct from (old_approvals->'pd') and actor_role<>'pd' then
++    raise exception 'only PD can change PD approval' using errcode='42501';
++  end if;
++  if (new_approvals->'ra') is distinct from (old_approvals->'ra') and actor_role<>'ra' then
++    raise exception 'only RA can change RA approval' using errcode='42501';
++  end if;
++  if (new_approvals->'rd') is distinct from (old_approvals->'rd') and actor_role<>'rd' then
++    raise exception 'only RD can change RD approval' using errcode='42501';
++  end if;
++  if (new_approvals->'sales') is distinct from (old_approvals->'sales') and actor_role<>'sales' then
++    raise exception 'only Sales can change Sales approval' using errcode='42501';
++  end if;
++  if (new.data->'exports') is distinct from (old.data->'exports') and actor_role<>'opc' then
++    raise exception 'only OPC can change export state' using errcode='42501';
++  end if;
++  return new;
++end $$;
++
++revoke all on function private.fs_guard_user_json() from public, anon, authenticated;
++revoke all on function private.fs_guard_activity_json() from public, anon, authenticated;
++revoke all on function private.fs_guard_record_json() from public, anon, authenticated;
++revoke all on function private.fs_guard_chat_json() from public, anon, authenticated;
++drop trigger if exists fs_users_guard on public.fs_users;
++create trigger fs_users_guard before insert or update on public.fs_users
++for each row execute function private.fs_guard_user_json();
++drop trigger if exists fs_activities_guard on public.fs_activities;
++create trigger fs_activities_guard before insert on public.fs_activities
++for each row execute function private.fs_guard_activity_json();
++drop trigger if exists fs_records_guard on public.fs_records;
++create trigger fs_records_guard before insert or update on public.fs_records
++for each row execute function private.fs_guard_record_json();
++drop trigger if exists fs_chats_guard on public.fs_chats;
++create trigger fs_chats_guard before insert or update on public.fs_chats
++for each row execute function private.fs_guard_chat_json();
++
++do $$
++declare t text;
++begin
++  foreach t in array array['fs_records','fs_chats','fs_users','fs_activities','fs_meta','fs_memberships'] loop
++    execute format('alter table public.%I enable row level security',t);
++    execute format('alter table public.%I force row level security',t);
++    execute format('drop policy if exists anon_all on public.%I',t);
++  end loop;
++end $$;
++
++revoke all on table public.fs_records,public.fs_chats,public.fs_users,
++  public.fs_activities,public.fs_meta,public.fs_memberships from public,anon,authenticated;
++grant select,insert,update,delete on public.fs_records,public.fs_chats to authenticated;
++grant select,insert,update,delete on public.fs_users,public.fs_memberships to authenticated;
++grant select,insert on public.fs_activities to authenticated;
++grant select,insert,update,delete on public.fs_meta to authenticated;
++
++drop policy if exists memberships_self_or_admin_select on public.fs_memberships;
++create policy memberships_self_or_admin_select on public.fs_memberships for select to authenticated
++using (private.fs_is_active_member() and (user_id=auth.uid() or private.fs_current_role()='admin'));
++drop policy if exists memberships_admin_insert on public.fs_memberships;
++create policy memberships_admin_insert on public.fs_memberships for insert to authenticated
++with check (private.fs_current_role()='admin');
++drop policy if exists memberships_admin_update on public.fs_memberships;
++create policy memberships_admin_update on public.fs_memberships for update to authenticated
++using (private.fs_current_role()='admin') with check (private.fs_current_role()='admin');
++drop policy if exists memberships_admin_delete on public.fs_memberships;
++create policy memberships_admin_delete on public.fs_memberships for delete to authenticated
++using (private.fs_current_role()='admin');
++
++drop policy if exists records_member_select on public.fs_records;
++create policy records_member_select on public.fs_records for select to authenticated
++using (private.fs_is_active_member());
++drop policy if exists records_role_insert on public.fs_records;
++create policy records_role_insert on public.fs_records for insert to authenticated
++with check (private.fs_current_role() in ('admin','sales','opc','mkt'));
++drop policy if exists records_role_update on public.fs_records;
++create policy records_role_update on public.fs_records for update to authenticated
++using (private.fs_current_role() in ('admin','sales','opc','mkt','pd'))
++with check (private.fs_current_role() in ('admin','sales','opc','mkt','pd'));
++drop policy if exists records_admin_delete on public.fs_records;
++create policy records_admin_delete on public.fs_records for delete to authenticated
++using (private.fs_current_role()='admin');
++
++drop policy if exists chats_member_select on public.fs_chats;
++create policy chats_member_select on public.fs_chats for select to authenticated
++using (private.fs_is_active_member());
++drop policy if exists chats_member_insert on public.fs_chats;
++create policy chats_member_insert on public.fs_chats for insert to authenticated
++with check (private.fs_is_active_member());
++drop policy if exists chats_member_update on public.fs_chats;
++create policy chats_member_update on public.fs_chats for update to authenticated
++using (private.fs_is_active_member()) with check (private.fs_is_active_member());
++drop policy if exists chats_admin_delete on public.fs_chats;
++create policy chats_admin_delete on public.fs_chats for delete to authenticated
++using (private.fs_current_role()='admin');
++
++drop policy if exists users_member_select on public.fs_users;
++create policy users_member_select on public.fs_users for select to authenticated
++using (private.fs_is_active_member());
++drop policy if exists users_admin_insert on public.fs_users;
++create policy users_admin_insert on public.fs_users for insert to authenticated
++with check (private.fs_current_role()='admin');
++drop policy if exists users_admin_update on public.fs_users;
++create policy users_admin_update on public.fs_users for update to authenticated
++using (private.fs_current_role()='admin') with check (private.fs_current_role()='admin');
++drop policy if exists users_admin_delete on public.fs_users;
++create policy users_admin_delete on public.fs_users for delete to authenticated
++using (private.fs_current_role()='admin');
++
++drop policy if exists activities_admin_select on public.fs_activities;
++create policy activities_admin_select on public.fs_activities for select to authenticated
++using (private.fs_current_role()='admin');
++drop policy if exists activities_member_insert on public.fs_activities;
++create policy activities_member_insert on public.fs_activities for insert to authenticated
++with check (private.fs_is_active_member());
++
++drop policy if exists meta_member_select on public.fs_meta;
++create policy meta_member_select on public.fs_meta for select to authenticated
++using (private.fs_is_active_member());
++drop policy if exists meta_creator_insert on public.fs_meta;
++create policy meta_creator_insert on public.fs_meta for insert to authenticated
++with check (private.fs_current_role() in ('admin','sales','opc','mkt'));
++drop policy if exists meta_creator_update on public.fs_meta;
++create policy meta_creator_update on public.fs_meta for update to authenticated
++using (private.fs_current_role() in ('admin','sales','opc','mkt'))
++with check (private.fs_current_role() in ('admin','sales','opc','mkt'));
++drop policy if exists meta_admin_delete on public.fs_meta;
++create policy meta_admin_delete on public.fs_meta for delete to authenticated
++using (private.fs_current_role()='admin');
++
++commit;
+diff --git a/tests/run-sql-tests.sh b/tests/run-sql-tests.sh
+new file mode 100755
+index 0000000..85d6246
+--- /dev/null
++++ b/tests/run-sql-tests.sh
+@@ -0,0 +1,25 @@
++#!/bin/sh
++set -eu
++
++FS_SQL_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
++FS_SQL_TMP=$(mktemp -d "${TMPDIR:-/tmp}/beyond-formula-sql.XXXXXX")
++FS_SQL_PORT=$((50000 + ($$ % 10000)))
++FS_SQL_LOG="$FS_SQL_TMP/postgres.log"
++
++cleanup() {
++  if [ -f "$FS_SQL_TMP/data/postmaster.pid" ]; then
++    pg_ctl -D "$FS_SQL_TMP/data" -m fast -w stop >/dev/null 2>&1 || true
++  fi
++  rm -rf -- "$FS_SQL_TMP"
++}
++trap cleanup EXIT HUP INT TERM
++
++initdb -D "$FS_SQL_TMP/data" -A trust --no-locale >/dev/null
++pg_ctl -D "$FS_SQL_TMP/data" -l "$FS_SQL_LOG" -o "-F -k $FS_SQL_TMP -p $FS_SQL_PORT" -w start >/dev/null
++createdb -h "$FS_SQL_TMP" -p "$FS_SQL_PORT" formula_studio_test
++
++PSQL="psql -X -v ON_ERROR_STOP=1 -h $FS_SQL_TMP -p $FS_SQL_PORT -d formula_studio_test"
++$PSQL -f "$FS_SQL_ROOT/tests/sql/bootstrap.sql"
++$PSQL -f "$FS_SQL_ROOT/supabase/schema.sql"
++$PSQL -f "$FS_SQL_ROOT/supabase/schema.sql"
++$PSQL -f "$FS_SQL_ROOT/tests/sql/auth_rls_test.sql"
+diff --git a/tests/sql/auth_rls_test.sql b/tests/sql/auth_rls_test.sql
+new file mode 100644
+index 0000000..9f1b7ca
+--- /dev/null
++++ b/tests/sql/auth_rls_test.sql
+@@ -0,0 +1,184 @@
++\set ON_ERROR_STOP on
++
++-- Forward migration maps the legacy Admin by normalized email and nulls pass.
++do $$
++begin
++  if not exists (
++    select 1 from public.fs_memberships
++    where user_id='11111111-1111-1111-1111-111111111111' and role='admin' and active
++  ) then raise exception 'legacy Admin membership was not migrated'; end if;
++  if (select data->'pass' from public.fs_users where name='Admin Owner') is distinct from 'null'::jsonb
++     or not (select data ? 'pass' from public.fs_users where name='Admin Owner')
++  then raise exception 'fs_users.data.pass must remain present and JSON null'; end if;
++end $$;
++
++insert into public.fs_memberships(user_id,name,role,active) values
++  ('22222222-2222-2222-2222-222222222222','Sales One','sales',true),
++  ('33333333-3333-3333-3333-333333333333','Sales Two','sales',true),
++  ('44444444-4444-4444-4444-444444444444','PD One','pd',true),
++  ('55555555-5555-5555-5555-555555555555','RA One','ra',true),
++  ('66666666-6666-6666-6666-666666666666','Inactive User','sales',false),
++  ('88888888-8888-8888-8888-888888888888','OPC One','opc',true)
++on conflict (user_id) do update set name=excluded.name,role=excluded.role,active=excluded.active;
++
++begin;
++set local role authenticated;
++select set_config('request.jwt.claim.sub','11111111-1111-1111-1111-111111111111',true);
++insert into public.fs_records(id,data) values
++  ('A00001','{"id":"A00001","customer":"Alpha","createdBy":"Sales One","salesOwner":"Sales One","rows":[],"closed":false}'::jsonb),
++  ('A00002','{"id":"A00002","customer":"Beta","createdBy":"Sales Two","salesOwner":"Sales Two","rows":[],"closed":false}'::jsonb)
++on conflict (id) do update set data=excluded.data;
++insert into public.fs_chats(job_id,data) values
++  ('A00001','{"jobId":"A00001","createdBy":"Sales One","messages":[],"parts":[],"seen":{},"approvals":{"pd":null,"ra":null,"rd":null,"sales":null}}'::jsonb)
++on conflict (job_id) do update set data=excluded.data;
++insert into public.fs_activities(uid,ts,data) values
++  ('seed-event',0,'{"user":"Admin Owner"}'::jsonb)
++on conflict (uid) do nothing;
++commit;
++
++-- Utility: an expected authorization failure must set psql's ERROR flag.
++\set ON_ERROR_STOP off
++begin; set local role anon; select * from public.fs_records;
++\if :ERROR
++  \echo 'PASS anon read denied'
++\else
++  \echo 'FAIL anon read unexpectedly allowed'
++  \quit 1
++\endif
++rollback;
++
++begin; set local role anon; insert into public.fs_records(id,data) values ('X00001','{"id":"X00001"}');
++\if :ERROR
++  \echo 'PASS anon write denied'
++\else
++  \echo 'FAIL anon write unexpectedly allowed'
++  \quit 1
++\endif
++rollback;
++
++begin; set local role authenticated; select set_config('request.jwt.claim.sub','77777777-7777-7777-7777-777777777777',true); select 1/count(*) from public.fs_records;
++\if :ERROR
++  \echo 'PASS unknown user denied'
++\else
++  \echo 'FAIL unknown user unexpectedly allowed'
++  \quit 1
++\endif
++rollback;
++
++begin; set local role authenticated; select set_config('request.jwt.claim.sub','66666666-6666-6666-6666-666666666666',true); select 1/count(*) from public.fs_records;
++\if :ERROR
++  \echo 'PASS inactive user denied'
++\else
++  \echo 'FAIL inactive user unexpectedly allowed'
++  \quit 1
++\endif
++rollback;
++
++begin; set local role authenticated; select set_config('request.jwt.claim.sub','22222222-2222-2222-2222-222222222222',true); update public.fs_records set data=jsonb_set(data,'{customer}','"Hijacked"') where id='A00002';
++\if :ERROR
++  \echo 'PASS Sales cannot update another owner record'
++\else
++  \echo 'FAIL Sales updated another owner record'
++  \quit 1
++\endif
++rollback;
++
++begin; set local role authenticated; select set_config('request.jwt.claim.sub','44444444-4444-4444-4444-444444444444',true); update public.fs_records set data=jsonb_set(data,'{customer}','"Changed by PD"') where id='A00001';
++\if :ERROR
++  \echo 'PASS PD customer mutation denied'
++\else
++  \echo 'FAIL PD changed customer field'
++  \quit 1
++\endif
++rollback;
++
++begin; set local role authenticated; select set_config('request.jwt.claim.sub','55555555-5555-5555-5555-555555555555',true); update public.fs_chats set data=jsonb_set(data,'{approvals,pd}','{"by":"RA One"}') where job_id='A00001';
++\if :ERROR
++  \echo 'PASS RA cannot change PD approval'
++\else
++  \echo 'FAIL RA changed PD approval'
++  \quit 1
++\endif
++rollback;
++
++begin; set local role authenticated; select set_config('request.jwt.claim.sub','22222222-2222-2222-2222-222222222222',true); select 1/count(*) from public.fs_activities;
++\if :ERROR
++  \echo 'PASS non-Admin activity read denied'
++\else
++  \echo 'FAIL non-Admin read activity log'
++  \quit 1
++\endif
++rollback;
++
++begin; set local role authenticated; select set_config('request.jwt.claim.sub','22222222-2222-2222-2222-222222222222',true); update public.fs_activities set data='{}' where uid='none';
++\if :ERROR
++  \echo 'PASS activity log update denied'
++\else
++  \echo 'FAIL activity log update unexpectedly allowed'
++  \quit 1
++\endif
++rollback;
++
++begin; set local role authenticated; select set_config('request.jwt.claim.sub','22222222-2222-2222-2222-222222222222',true); insert into public.fs_activities(uid,ts,data) values ('spoofed-event',2,'{"user":"Sales Two"}');
++\if :ERROR
++  \echo 'PASS activity actor spoof denied'
++\else
++  \echo 'FAIL activity actor spoof unexpectedly allowed'
++  \quit 1
++\endif
++rollback;
++
++begin; set local role authenticated; select set_config('request.jwt.claim.sub','55555555-5555-5555-5555-555555555555',true); update public.fs_chats set data=jsonb_set(data,'{messages}','[{"type":"msg","user":"Sales One","text":"forged"}]') where job_id='A00001';
++\if :ERROR
++  \echo 'PASS chat actor spoof denied'
++\else
++  \echo 'FAIL chat actor spoof unexpectedly allowed'
++  \quit 1
++\endif
++rollback;
++\set ON_ERROR_STOP on
++
++-- Positive paths.
++begin;
++set local role authenticated;
++select set_config('request.jwt.claim.sub','22222222-2222-2222-2222-222222222222',true);
++do $$ begin if (select count(*) from public.fs_records) <> 2 then raise exception 'active member cannot read shared records'; end if; end $$;
++update public.fs_records set data=jsonb_set(data,'{customer}','"Alpha Updated"') where id='A00001';
++insert into public.fs_activities(uid,ts,data) values ('sales-event',1,'{"user":"Sales One"}');
++rollback;
++
++begin;
++set local role authenticated;
++select set_config('request.jwt.claim.sub','44444444-4444-4444-4444-444444444444',true);
++update public.fs_records set data=jsonb_set(data,'{rows}','[{"name":"Vitamin C"}]') where id='A00001';
++rollback;
++
++begin;
++set local role authenticated;
++select set_config('request.jwt.claim.sub','55555555-5555-5555-5555-555555555555',true);
++update public.fs_chats set data=jsonb_set(data,'{approvals,ra}','{"by":"RA One"}') where job_id='A00001';
++rollback;
++
++begin;
++set local role authenticated;
++select set_config('request.jwt.claim.sub','11111111-1111-1111-1111-111111111111',true);
++insert into public.fs_memberships(user_id,name,role,active)
++values ('77777777-7777-7777-7777-777777777777','Former Unknown','purchasing',true);
++insert into public.fs_users(name,data)
++values ('New User','{"name":"New User","role":"purchasing","email":"new@example.test","pass":null}');
++rollback;
++
++-- Rollback is compatibility-only: data stays, named legacy policy returns.
++\ir ../../supabase/rollback_auth_rls.sql
++do $$
++begin
++  if not exists (select 1 from public.fs_records where id='A00001') then raise exception 'rollback dropped application data'; end if;
++  if not exists (select 1 from pg_policies where schemaname='public' and tablename='fs_records' and policyname='anon_all')
++  then raise exception 'rollback did not restore anon_all'; end if;
++end $$;
++
++begin;
++set local role anon;
++select count(*) from public.fs_records;
++rollback;
++\echo 'PASS SQL authorization and rollback contract'
+diff --git a/tests/sql/bootstrap.sql b/tests/sql/bootstrap.sql
+new file mode 100644
+index 0000000..eb4689b
+--- /dev/null
++++ b/tests/sql/bootstrap.sql
+@@ -0,0 +1,41 @@
++\set ON_ERROR_STOP on
++
++do $$
++begin
++  if not exists (select 1 from pg_roles where rolname='anon') then create role anon nologin; end if;
++  if not exists (select 1 from pg_roles where rolname='authenticated') then create role authenticated nologin; end if;
++  if not exists (select 1 from pg_roles where rolname='service_role') then create role service_role nologin bypassrls; end if;
++end $$;
++
++create schema if not exists auth;
++create table if not exists auth.users (
++  id uuid primary key,
++  email text unique not null
++);
++create or replace function auth.uid() returns uuid
++language sql stable
++set search_path = ''
++as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
++grant usage on schema auth to anon, authenticated;
++grant execute on function auth.uid() to anon, authenticated;
++
++insert into auth.users(id,email) values
++  ('11111111-1111-1111-1111-111111111111','admin@example.test'),
++  ('22222222-2222-2222-2222-222222222222','sales.one@example.test'),
++  ('33333333-3333-3333-3333-333333333333','sales.two@example.test'),
++  ('44444444-4444-4444-4444-444444444444','pd@example.test'),
++  ('55555555-5555-5555-5555-555555555555','ra@example.test'),
++  ('66666666-6666-6666-6666-666666666666','inactive@example.test'),
++  ('77777777-7777-7777-7777-777777777777','unknown@example.test'),
++  ('88888888-8888-8888-8888-888888888888','opc@example.test')
++on conflict do nothing;
++
++-- Simulate the existing legacy table/data before the forward migration.
++create table if not exists public.fs_users (
++  name text primary key,
++  data jsonb not null,
++  updated_at timestamptz not null default now()
++);
++insert into public.fs_users(name,data) values
++  ('Admin Owner','{"name":"Admin Owner","role":"admin","email":"admin@example.test","pass":"legacy-browser-hash"}'::jsonb)
++on conflict (name) do update set data=excluded.data;
+-- 
+2.39.5 (Apple Git-154)
+

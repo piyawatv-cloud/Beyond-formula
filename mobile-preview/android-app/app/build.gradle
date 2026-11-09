@@ -1,0 +1,27 @@
+plugins { id 'com.android.application' }
+// FCM เปิดอัตโนมัติเมื่อมี app/google-services.json (ไฟล์จากโปรเจกต์ Firebase ของคุณ ห้ามเข้า git) · ถ้าไม่มี ใช้ polling ตามเดิม
+def fcmEnabled = file('google-services.json').exists()
+if (fcmEnabled) { apply plugin: 'com.google.gms.google-services' }
+android {
+    namespace 'org.example.formulastudio.preview'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'org.example.formulastudio.preview'
+        minSdk 26
+        targetSdk 35
+        versionCode 8
+        versionName fcmEnabled ? '0.8-test-fcm' : '0.8-test'
+    }
+    sourceSets { main { java.srcDirs += (fcmEnabled ? 'src/fcm/java' : 'src/nofcm/java') } }
+    buildTypes { release { minifyEnabled false } }
+}
+dependencies {
+    if (fcmEnabled) {
+        implementation platform('com.google.firebase:firebase-bom:33.5.1')
+        implementation 'com.google.firebase:firebase-messaging'
+    }
+}
+
+// หมายเหตุสภาพแวดล้อม: บนเครื่องนี้ AGP 8.7.3 ล้มที่ขั้น mergeDebugJavaResource (VerifyException) ทุกครั้งที่มี dependency ของ AndroidX/Firebase
+// รุ่นดีบักข้ามขั้นนั้น (ใช้เฉพาะรวมไฟล์ META-INF ซ้ำ) — ไม่ใช้กับรุ่น release; ตรวจเนื้อ APK ทุกครั้งหลังบิลด์
+tasks.configureEach { t -> if (t.name == 'mergeDebugJavaResource') { t.enabled = false } }

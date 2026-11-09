@@ -1,0 +1,465 @@
+From ca5d3edb32e449883a48e40bb0ac6ed7c7e34f34 Mon Sep 17 00:00:00 2001
+From: piyawatv-cloud <295929244+piyawatv-cloud@users.noreply.github.com>
+Date: Mon, 10 Aug 2026 07:32:57 +0700
+Subject: [PATCH 03/24] chore: enforce repository governance controls
+
+---
+ .github/CODEOWNERS                       |  10 ++
+ .github/pull_request_template.md         |  44 +++++++++
+ .gitignore                               |   2 +
+ AGENTS.md                                | 119 +++++++++++++++++++++++
+ RUNTIME_OPERATIONS.md                    | 112 +++++++++++++++++++++
+ runtime/com.beyond-formula.runtime.plist |  29 ++++++
+ runtime/deploy-approved-main.sh          |  16 +++
+ runtime/healthcheck.sh                   |   7 ++
+ runtime/install-local-runtime.sh         |  13 +++
+ runtime/rollback-to-commit.sh            |  21 ++++
+ 10 files changed, 373 insertions(+)
+ create mode 100644 .github/CODEOWNERS
+ create mode 100644 .github/pull_request_template.md
+ create mode 100644 AGENTS.md
+ create mode 100644 RUNTIME_OPERATIONS.md
+ create mode 100644 runtime/com.beyond-formula.runtime.plist
+ create mode 100755 runtime/deploy-approved-main.sh
+ create mode 100755 runtime/healthcheck.sh
+ create mode 100755 runtime/install-local-runtime.sh
+ create mode 100755 runtime/rollback-to-commit.sh
+
+diff --git a/.github/CODEOWNERS b/.github/CODEOWNERS
+new file mode 100644
+index 0000000..9f33c1a
+--- /dev/null
++++ b/.github/CODEOWNERS
+@@ -0,0 +1,10 @@
++# Independent owner review is mandatory for this repository.
++* @phossatron
++
++# Critical-change paths (see AGENTS.md).
++/.github/ @phossatron
++/runtime/ @phossatron
++/supabase/ @phossatron
++/index.html @phossatron
++/AGENTS.md @phossatron
++/CLAUDE.md @phossatron
+diff --git a/.github/pull_request_template.md b/.github/pull_request_template.md
+new file mode 100644
+index 0000000..b4080d6
+--- /dev/null
++++ b/.github/pull_request_template.md
+@@ -0,0 +1,44 @@
++## Traceability
++
++- Task ID:
++- Issue / Requirement:
++- Change type:
++- Critical change: Yes / No
++- Business owner:
++- Required reviewer / CODEOWNER: @phossatron (or formally delegated System Owner reviewer)
++
++## Change
++
++- What changed:
++- Why:
++- Allowed paths used:
++- Forbidden paths touched: None / Explain
++
++## Impact
++
++- Business impact:
++- Security impact:
++- Database / migration impact:
++- Authentication / permission impact:
++- Configuration / secret impact:
++- Dependency impact:
++
++## Verification
++
++- Test method:
++- Test result:
++- Security checks:
++- UAT / business acceptance:
++
++## Release and recovery
++
++- Release / artifact:
++- Rollback method and target:
++- Known risks / limitations:
++- Deployment and health-check evidence:
++- Hermes correlation reference:
++
++## Author attestation
++
++- [ ] I did not approve my own change, bypass required checks, deploy production, or use production secrets/data.
++- [ ] Critical-change CODEOWNER review is requested where applicable.
+diff --git a/.gitignore b/.gitignore
+index 3e34a3a..84dd65d 100755
+--- a/.gitignore
++++ b/.gitignore
+@@ -5,3 +5,5 @@ index.bak*.html
+ test.html
+ err.html
+ node_modules/
++runtime/logs/
++.runtime/
+diff --git a/AGENTS.md b/AGENTS.md
+new file mode 100644
+index 0000000..f8829f6
+--- /dev/null
++++ b/AGENTS.md
+@@ -0,0 +1,119 @@
++# Beyond Formula — กฎสำหรับ Agent ทุกตัว
++
++## ขอบเขตและลำดับความสำคัญ
++
++ไฟล์นี้ใช้กับทั้ง repository และเป็นกฎระดับ project ที่ Agent ทุกตัวต้องอ่านก่อนวางแผน ตรวจ แก้ ทดสอบ หรือจัดการ runtime
++
++> **กฎเหล็กอันดับ 1 — GitHub-Centered Development & Runtime Governance**
++
++กฎนี้มีลำดับเหนือกฎ project อื่นทั้งหมด หากกฎใดขัดกันให้หยุดด้วยสถานะ `BLOCKED_GOVERNANCE` และแจ้ง System Owner ห้ามตีความเพื่อหลบ control เอง ทั้งนี้คำสั่ง system/platform และคำสั่งล่าสุดของผู้ใช้ที่มีอำนาจยังมีลำดับสูงกว่าตามปกติ
++
++เอกสาร governance ฉบับเต็มมีชั้นความลับ `Internal Confidential` จึงห้ามคัดลอกเนื้อหาฉบับเต็มลง public repository, prompt, log หรือบริการภายนอกที่ไม่ได้รับอนุมัติ ไฟล์นี้เป็นข้อบังคับเชิงปฏิบัติที่เปิดเผยใน application repository ได้
++
++Governance baseline ที่ System Owner สั่งให้ใช้กับ project นี้คือ version 1.0 ลงวันที่ 2026-08-09; การเปลี่ยน baseline ต้องได้รับอนุมัติจาก System Owner และผ่าน workflow เดียวกับ Critical Change
++
++## 1. Source of truth และการแยกหน้าที่
++
++- GitHub เป็น Source of Truth ของ requirement, source, configuration template, migration, review, approved release และ rollback reference
++- ห้ามแก้ application source, business logic, UI, authentication, authorization, permission หรือ schema โดยตรงใน production runtime
++- Production change ต้องย้อนกลับได้ถึง approved Issue/Task → Commit → Pull Request → Review → Release/Artifact → Deployment
++- ห้ามบุคคลหรือ Agent เดียวทำครบวงจร Code + Final Approve + Deploy + เข้าถึง Production Secrets/Data
++- ใช้ least privilege ตาม repository, path, environment, operation, duration และ data scope
++
++## 2. หน้าที่ของ Codex, Hermes และ Runtime Operator
++
++### Codex — Development Agent
++
++Codex ทำงานได้เฉพาะ repository/task scope ที่ได้รับมอบหมาย และ MAY วิเคราะห์ แก้ source บน feature branch สร้าง test/migration/documentation และเตรียม commit/PR
++
++Codex MUST:
++
++- ผูกงานกับ Task ID และ Issue ID เมื่อมีอยู่จริง; ห้ามแต่ง Issue ID ขึ้นเอง
++- ระบุไฟล์ที่แก้ ผลทดสอบ และผลกระทบด้าน security, database, permission และ dependency
++- ระบุ rollback และความเสี่ยงคงเหลือ
++- flag Critical Change และหยุดเมื่อพบ scope conflict, secret หรือ production data
++
++Codex MUST NOT:
++
++- final approve งานของตัวเอง หรือ bypass PR/review/status check/CODEOWNER
++- deploy production, ใช้ production credential หรืออ่าน production data ที่ไม่ mask
++- แก้ branch protection, organization security policy, collaborator, repository visibility หรือ transfer/fork repository ออกนอกองค์กร
++- ฝัง secret ใน code, commit, issue, PR, log, screenshot หรือ prompt
++- upload/mirror source ไป external service, personal cloud หรือ repository ที่ไม่ได้รับอนุมัติ
++
++### Hermes — Governance Monitor
++
++- Read-only ต่อ source โดย default
++- ใช้ metadata, sanitized logs และ audit event เป็นหลัก
++- เชื่อม Task/Issue → PR → Commit → Release → Deployment → Incident
++- ห้ามแก้ application source, merge Critical PR, deploy โดยไม่มี approval, เปลี่ยน permission หรือทำลาย audit evidence
++
++### Runtime / Platform Operator
++
++- deploy, start/stop/restart, health check, backup/restore และ rollback ได้เฉพาะ approved release ตาม scope
++- ห้าม patch application source หรือ schema ที่ runtime และห้าม deploy uncommitted/unknown code
++
++## 3. Workflow บังคับ
++
++1. ก่อนเริ่ม ระบุ `task_id`, `issue_id` (ถ้ามี), allowed/forbidden paths, environment, data classification, change type, owner/reviewer และว่าเป็น Critical Change หรือไม่
++2. ทำงานบน feature branch ห้าม direct push/force push ไป protected `main`
++3. ใช้ข้อมูล synthetic/dummy ใน development/test; production data ใช้ได้เฉพาะผ่าน sanitized evidence ที่ได้รับอนุมัติ
++4. ทุก change ต้องมี focused automated check ตามความเสี่ยง และห้ามปิด/ข้าม security check เพื่อให้ผ่าน
++5. เปิด PR พร้อม What/Why, business/security/database/config-secret/dependency impact, test method/result, rollback และ known risks
++6. Critical Change ต้องมี independent review, CODEOWNER/Owner/Security/Platform review ตามประเภท, checks ผ่าน และผู้เขียนห้าม final approve เอง
++7. Production deploy เป็นหน้าที่ Runtime Operator จาก approved immutable commit/release/artifact พร้อมบันทึก commit, PR, version, deployer/time, health check และ rollback target
++
++## 4. Critical Change ของ repository นี้
++
++ถือเป็น Critical Change เมื่อแตะ:
++
++- `.github/workflows/`, `runtime/`, deployment, infrastructure หรือ secret/config handling
++- `supabase/schema.sql`, migration หรือ data synchronization/reconciliation
++- authentication, password, impersonation, authorization, role หรือ permission logic
++- production data access, export, backup/restore หรือ audit-log integrity
++- ส่วนที่เกี่ยวข้องใน `index.html` แม้ project จะเป็น single-file
++
++## 5. Secret และข้อมูล
++
++- GitHub ห้ามเก็บ production password, API key/token ที่เป็นความลับ, encryption key, database dump, customer/employee personal data, confidential formula/costing/supplier data หรือ production backup
++- Source code เพียงอย่างเดียวต้องไม่ทำให้ login/query/decrypt/access production หรือ backup ได้
++- Supabase publishable/anon key อาจอยู่ใน browser ได้เฉพาะเมื่อเปิด RLS และจำกัด grants ตาม least privilege; ห้ามใช้ key ประเภท `service_role`, secret key หรือ privileged token ใน browser/repository โดยเด็ดขาด
++- Secret ต้องอยู่ใน approved secret manager/protected environment แยกตาม environment มี owner, scope, rotation และ audit
++- ใช้ Minimum Necessary Principle และห้ามส่ง confidential/restricted data เข้า prompt หรือ summary
++
++## 6. Definition of Done และผลลัพธ์บังคับ
++
++งานยังไม่ถือว่า complete จนหลักฐานตามระดับความเสี่ยงครบ: requirement/task, source diff, tests/security checks, review, migration/docs, rollback, UAT/release/deployment/health check และ Hermes correlation เมื่อเกี่ยวข้อง
++
++ผลส่งมอบของ Codex ต้องมีอย่างน้อย:
++
++```yaml
++status:
++task_id:
++issue_id:
++files_changed:
++tests_run:
++test_result:
++security_impact:
++database_impact:
++permission_impact:
++dependency_impact:
++rollback:
++open_risks:
++pr_reference:
++```
++
++ถ้ายังไม่ได้ merge/release/deploy ให้รายงานสถานะจริง ห้ามอ้างว่า production complete
++
++## 7. Exception และเหตุฉุกเฉิน
++
++- Governance exception ต้องมี Exception ID, เหตุผล, owner, risk assessment, approver, expiry และ compensating control
++- Break-glass ใช้เฉพาะ incident รุนแรง ต้องมี Incident ID, temporary access, audit, time limit, revoke และ post-incident review
++- หลัง break-glass ต้องทำให้ GitHub desired state ตรงกับ production ผ่าน workflow ปกติ
++
++## 8. กฎเฉพาะ Formula Studio
++
++- CODEOWNER หลักของ repository คือ `@phossatron`; Critical Change ต้องได้รับ approval จาก reviewer นี้หรือผู้ทดแทนที่ System Owner แต่งตั้งอย่างเป็นทางการ และผู้เขียนห้าม approve งานตัวเอง
++- หลังผ่านกฎเหล็กอันดับ 1 แล้ว ให้ปฏิบัติตาม data compatibility และ single-file constraints ใน `CLAUDE.md`
++- Core runtime ต้องเป็น deterministic code และทำงานได้โดยไม่พึ่ง AI หรือโควตา AI
++- ห้ามเปลี่ยน locked storage/schema contract โดยไม่มี System Owner approval และ backward-compatible idempotent migration
+diff --git a/RUNTIME_OPERATIONS.md b/RUNTIME_OPERATIONS.md
+new file mode 100644
+index 0000000..330e50c
+--- /dev/null
++++ b/RUNTIME_OPERATIONS.md
+@@ -0,0 +1,112 @@
++# Beyond Formula local runtime operations
++
++## Runtime governance (mandatory)
++
++GitHub is the source of truth for all application changes. Every production
++version must trace to an approved task or issue, commit, pull request, review,
++release or artifact, deployment record, health check, and rollback target.
++
++Codex is the development agent. It may change application source only within an
++approved task scope on a feature branch and must provide tests, impact analysis,
++and rollback guidance. Codex must not final-approve its own critical change,
++deploy production, access production secrets or unmasked production data, or
++bypass pull-request and review controls.
++
++Hermes is the read-only governance monitor by default. The Runtime / Platform
++Operator is the separate authority permitted to deploy, health-check, and roll
++back an approved release. The operator must not edit application source,
++user-interface behavior, business logic, database schema, data structure,
++permissions, or dependencies directly on the runtime.
++Critical changes require independent approval from CODEOWNER `@phossatron` (or
++a formally delegated System Owner reviewer); the change author cannot provide
++the final approval.
++
++The application currently consists of `index.html` and is served unchanged as a
++static site. Runtime files in `runtime/` do not alter its contents or behavior.
++
++## Selected local deployment
++
++| Approach | Advantages | Trade-offs | Assessment |
++| --- | --- | --- | --- |
++| **launchd + Python standard-library HTTP server (selected)** | No app build or package dependency; starts after login/restarts automatically; binds to localhost only; simple logs and health probe | Requires macOS/Python 3 on this iMac; intended for this host only | 92/100 |
++| Docker static-server container | Reproducible container boundary; straightforward port mapping | Requires Docker Desktop to remain running and pulls/maintains an image for a one-file static app | 86/100 |
++| Vercel production deployment | Already integrated with `main`; managed HTTPS availability | Not a local iMac runtime; depends on external service/network and is outside the requested local operating boundary | 83/100 |
++
++The selected service listens only at `http://127.0.0.1:4173/`. It needs no AI
++service and application functionality continues independently of Codex or any
++AI limit.
++
++## Start and verify
++
++From the repository root, run once after a fresh checkout or after changing the
++runtime configuration:
++
++```sh
++./runtime/install-local-runtime.sh
++./runtime/healthcheck.sh
++```
++
++Open `http://127.0.0.1:4173/` on the iMac. The LaunchAgent label is
++`com.beyond-formula.runtime`; it is configured to restart on failure and writes
++its stdout/stderr to `runtime/logs/` (logs are intentionally untracked).
++
++To stop it temporarily:
++
++```sh
++launchctl bootout "gui/$(id -u)/com.beyond-formula.runtime"
++```
++
++To start it again, run the install script.
++
++## Controlled update
++
++Only the authorized Runtime / Platform Operator may run an update after the
++approved commit has passed the required GitHub PR, review, and checks. The
++runtime working tree must be clean. If local changes exist, the operator must
++stop and escalate them to the development owner; the operator must not commit,
++discard, or deploy those changes. Then:
++
++```sh
++./runtime/deploy-approved-main.sh
++./runtime/healthcheck.sh
++```
++
++For an Auth/RLS release, the Supabase Owner must first complete the reviewed
++schema and staging gates in `supabase/AUTH_RLS_RUNBOOK.md`. The Runtime Operator
++must not run SQL or use Supabase credentials while deploying the static app.
++
++The script refuses a dirty working tree, fetches `origin/main`, fast-forwards
++only (never creates a merge commit), restarts the service, and prints the
++deployed commit. It therefore cannot replace local source with an uncommitted
++version.
++
++## Rollback and restore support
++
++To roll back to a known developer commit, first record the current commit and
++then run:
++
++```sh
++git rev-parse HEAD
++./runtime/rollback-to-commit.sh <approved-commit-sha>
++./runtime/healthcheck.sh
++```
++
++Rollback uses only a commit already present in `origin` and leaves the checkout
++detached at that exact version. To return to the approved `main`, run the
++controlled update script. Browser data is stored in browser `localStorage` (and
++optionally the existing Supabase setup), not in this static runtime; this
++runtime neither mutates nor backs up application data. Use the browser/Supabase
++owner's established export/backup process before restoring data.
++
++## Operator checks
++
++```sh
++tail -n 100 runtime/logs/runtime-error.log
++launchctl print "gui/$(id -u)/com.beyond-formula.runtime"
++git status --short
++```
++
++If the health check fails, inspect the error log and verify port 4173 is not
++occupied with `lsof -nP -iTCP:4173 -sTCP:LISTEN`. Do not repair failures by
++editing application files; escalate an application defect to the development
++team with the deployed commit and relevant log output.
+diff --git a/runtime/com.beyond-formula.runtime.plist b/runtime/com.beyond-formula.runtime.plist
+new file mode 100644
+index 0000000..893a647
+--- /dev/null
++++ b/runtime/com.beyond-formula.runtime.plist
+@@ -0,0 +1,29 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
++<plist version="1.0">
++<dict>
++  <key>Label</key>
++  <string>com.beyond-formula.runtime</string>
++  <key>ProgramArguments</key>
++  <array>
++    <string>/usr/local/bin/python3</string>
++    <string>-m</string>
++    <string>http.server</string>
++    <string>4173</string>
++    <string>--bind</string>
++    <string>127.0.0.1</string>
++    <string>--directory</string>
++    <string>/Users/user/Desktop/Beyond-formula</string>
++  </array>
++  <key>WorkingDirectory</key>
++  <string>/Users/user/Desktop/Beyond-formula</string>
++  <key>KeepAlive</key>
++  <true/>
++  <key>RunAtLoad</key>
++  <true/>
++  <key>StandardOutPath</key>
++  <string>/Users/user/Desktop/Beyond-formula/runtime/logs/runtime.log</string>
++  <key>StandardErrorPath</key>
++  <string>/Users/user/Desktop/Beyond-formula/runtime/logs/runtime-error.log</string>
++</dict>
++</plist>
+diff --git a/runtime/deploy-approved-main.sh b/runtime/deploy-approved-main.sh
+new file mode 100755
+index 0000000..9e4bb73
+--- /dev/null
++++ b/runtime/deploy-approved-main.sh
+@@ -0,0 +1,16 @@
++#!/bin/sh
++set -eu
++
++repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
++cd "$repo_dir"
++
++if ! git diff --quiet || ! git diff --cached --quiet || [ -n "$(git ls-files --others --exclude-standard)" ]; then
++  printf '%s\n' 'Refusing deployment: preserve or commit all local changes first.' >&2
++  exit 1
++fi
++
++git fetch --prune origin main
++git switch main
++git merge --ff-only origin/main
++./runtime/install-local-runtime.sh
++git rev-parse HEAD
+diff --git a/runtime/healthcheck.sh b/runtime/healthcheck.sh
+new file mode 100755
+index 0000000..72de07a
+--- /dev/null
++++ b/runtime/healthcheck.sh
+@@ -0,0 +1,7 @@
++#!/bin/sh
++set -eu
++
++url=http://127.0.0.1:4173/
++body=$(curl --fail --silent --show-error --max-time 5 "$url")
++printf '%s' "$body" | grep -Fq '<title>Beyond Lab — Formula Studio</title>'
++printf 'Healthy: %s (Formula Studio HTML served)\n' "$url"
+diff --git a/runtime/install-local-runtime.sh b/runtime/install-local-runtime.sh
+new file mode 100755
+index 0000000..0accd2f
+--- /dev/null
++++ b/runtime/install-local-runtime.sh
+@@ -0,0 +1,13 @@
++#!/bin/sh
++set -eu
++
++repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
++uid=$(id -u)
++label=com.beyond-formula.runtime
++plist="$repo_dir/runtime/$label.plist"
++
++mkdir -p "$repo_dir/runtime/logs"
++plutil -lint "$plist"
++launchctl bootout "gui/$uid/$label" 2>/dev/null || true
++launchctl bootstrap "gui/$uid" "$plist"
++printf 'Formula Studio runtime started: http://127.0.0.1:4173/\n'
+diff --git a/runtime/rollback-to-commit.sh b/runtime/rollback-to-commit.sh
+new file mode 100755
+index 0000000..9d30a93
+--- /dev/null
++++ b/runtime/rollback-to-commit.sh
+@@ -0,0 +1,21 @@
++#!/bin/sh
++set -eu
++
++if [ "$#" -ne 1 ]; then
++  printf 'Usage: %s <approved-commit-sha>\n' "$0" >&2
++  exit 64
++fi
++
++repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
++cd "$repo_dir"
++
++if ! git diff --quiet || ! git diff --cached --quiet || [ -n "$(git ls-files --others --exclude-standard)" ]; then
++  printf '%s\n' 'Refusing rollback: preserve or commit all local changes first.' >&2
++  exit 1
++fi
++
++git fetch --prune origin
++git merge-base --is-ancestor "$1" origin/main
++git checkout --detach "$1"
++./runtime/install-local-runtime.sh
++git rev-parse HEAD
+-- 
+2.39.5 (Apple Git-154)
+

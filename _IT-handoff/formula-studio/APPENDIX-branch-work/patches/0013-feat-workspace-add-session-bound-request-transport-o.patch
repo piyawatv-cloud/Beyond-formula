@@ -1,0 +1,147 @@
+From d970e16d01c2ce040b6ae591ca25989d988bdbc7 Mon Sep 17 00:00:00 2001
+From: piyawatv-cloud <295929244+piyawatv-cloud@users.noreply.github.com>
+Date: Sat, 5 Sep 2026 12:40:33 +0700
+Subject: [PATCH 13/24] feat(workspace): add session-bound request transport
+ (opc-workflow#7)
+
+---
+ docs/DEBUG_LOG.md            | 12 ++++++++++
+ index.html                   | 33 +++++++++++++++++++++++++--
+ tests/formula-studio.test.js | 43 ++++++++++++++++++++++++++++++++++++
+ 3 files changed, 86 insertions(+), 2 deletions(-)
+
+diff --git a/docs/DEBUG_LOG.md b/docs/DEBUG_LOG.md
+index 8885138..2d5aa87 100644
+--- a/docs/DEBUG_LOG.md
++++ b/docs/DEBUG_LOG.md
+@@ -36,3 +36,15 @@ Local preflight requires a real session principal and matching active membership
+ This is local G4 evidence, not UAT/release approval. Independent QA and CODEOWNER review remain required before higher gates; no PR was opened, merged, or deployed by this change. The approved origin remains unconfigured. Same-origin imported code can execute its module body before an outstanding import settles, and uncooperative bundle code can escape the host DOM; the existing CSP/sandbox architecture decision remains with the System Owner. Loader fencing does not claim to sandbox trusted modules.
+ 
+ Rollback: revert the eventual isolated change commit through normal review, retaining feature origin disabled. There are no data/schema changes to reverse. Do not reset the shared checkout or touch unrelated files.
++
++## 2026-09-05 — Authenticated transport for the additive workspace
++
++Issue: [opc-workflow #7](https://github.com/piyawatv-cloud/opc-workflow/issues/7), local Critical authorization change on top of #5. Only the generic loader and its tests change; task-specific UI remains in the private repository's emitted bundle.
++
++The bundle previously received no API transport. It now receives `options.request(path, {method, body})`, limited to GET/POST under `/api/private-workspaces/` on the captured approved origin. The loader supplies its captured bearer token internally, omits cookies, disables caching and redirects, and checks workspace ownership/session again after response and JSON awaits. No token is passed to bundle options. Removed handles cannot issue requests. 401/403/404 withdraw the workspace; stale requests cannot remove a successor. The 404 case matters because private APIs deliberately conceal authorization denial as not found.
++
++Focused browser tests failed before implementation **48 passed / 2 failed** (missing transport). QA's 404 regression then failed **49 passed / 1 failed**, and now passes after unavailable-status cleanup. Final `node harness.js`: **50/50 PASS**; `LC_ALL=C ./tests/run-sql-tests.sh`: **PASS**, `git diff --check`: clean. Header build stamp `2026-09-05.3`. Receipts: `/tmp/formula-issue7-final.json`, `/tmp/formula-issue7-sql.log`.
++
++Rendered evidence uses sanitized actual Formula HTML, its real loader, the emitted private workspace bundle, synthetic responses, and the existing showcase's licensed embedded fonts. Noto Sans Thai 400/500/700 and Roboto 400/500 all loaded; computed inherited font stack matches Formula. Screenshots: `/tmp/science-formula-host-1440.png`, `-390.png`, `-360.png`; metrics `/tmp/science-formula-host-evidence.json`, reproduction `/tmp/science-formula-host.mjs`. No external requests or page errors. This is local visual verification, not UAT. The private repository has separate real-handler/application-role PostgreSQL integration evidence.
++
++No schema/storage/dependency or existing feature-flow changes. Rollback is a reviewed revert of this isolated change with origin disabled. Independent QA and CODEOWNER approval remain separate; no merge, release, production access or deployment. Same-origin bundle/CSP isolation remains an owner decision; transport fencing does not sandbox module code.
+diff --git a/index.html b/index.html
+index e5689d0..66cd00c 100755
+--- a/index.html
++++ b/index.html
+@@ -649,7 +649,7 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
+   <div class="logo"><svg viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-1.73-3L9 11.35V4H8a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2h-1v7.35L19.73 19A2 2 0 0 1 18 22H6Zm5-10.11L8.31 16.5h7.38L13 11.89V4h-2v7.89Z"/></svg></div>
+   <div>
+     <div class="hdr-title">Formula Studio</div>
+-    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-05.2</div>
++    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-05.3</div>
+   </div>
+   <div class="sync-chip" id="syncChip" onclick="sbManualSync()" title="สถานะการซิงก์ข้อมูลกับเซิร์ฟเวอร์กลาง"></div>
+ </div>
+@@ -6662,6 +6662,35 @@ function teardownPrivateWorkspace(){
+   pwsRemoveState();
+ }
+ 
++/** Transport scoped to this mounted workspace, without exposing its bearer token. */
++function pwsRequest(state, origin, token){
++  const check = ()=>{
++    if(pwsState !== state || state.controller.signal.aborted) throw new Error('Workspace unavailable');
++    if(pwsContext() !== state.context){ teardownPrivateWorkspace(); throw new Error('Workspace unavailable'); }
++  };
++  return async function(path, options={}){
++    check();
++    if(typeof path !== 'string' || !path.startsWith('/api/private-workspaces/')) throw new Error('Invalid workspace path');
++    const url = new URL(path, origin);
++    if(url.origin !== origin || !url.pathname.startsWith('/api/private-workspaces/') ||
++        url.username || url.password || url.hash) throw new Error('Invalid workspace path');
++    const method = options.method || 'GET';
++    if(!['GET','POST'].includes(method)) throw new Error('Invalid workspace method');
++    const response = await fetch(url.toString(), {method,
++      headers:{Authorization:'Bearer ' + token, 'Content-Type':'application/json'},
++      body:method === 'POST' ? JSON.stringify(options.body || {}) : undefined,
++      credentials:'omit', cache:'no-store', redirect:'error', signal:state.controller.signal});
++    check();
++    if(!response.ok){
++      if([401,403,404].includes(response.status)) teardownPrivateWorkspace();
++      throw new Error('Workspace request failed');
++    }
++    const result = await response.json();
++    check();
++    return result;
++  };
++}
++
+ /** ถาม manifest ใหม่เสมอ และรับผลเฉพาะ session ที่เริ่มคำขอนั้น */
+ async function mountPrivateWorkspace(){
+   const context = pwsContext();
+@@ -6712,7 +6741,7 @@ async function mountPrivateWorkspace(){
+       if(!current()) return;
+       const mount = mod && (mod.mount || mod.default);
+       if(typeof mount !== 'function') throw new Error('Missing mount');
+-      const handle = await mount(panel, {mode:manifest.mode, signal:request.controller.signal});
++      const handle = await mount(panel, {mode:manifest.mode, signal:request.controller.signal, request:pwsRequest(state, origin, token)});
+       if(!current() || pwsState !== state){
+         try{ if(typeof handle?.destroy === 'function') handle.destroy(); }catch(err){}
+         return;
+diff --git a/tests/formula-studio.test.js b/tests/formula-studio.test.js
+index ab6e3cf..a55b9d6 100644
+--- a/tests/formula-studio.test.js
++++ b/tests/formula-studio.test.js
+@@ -486,6 +486,49 @@
+     equal(pwsState.panelEl.textContent,'second','wrong mode');
+   });
+ 
++  test('bundle request transport confines origin, captures auth, and expires with its workspace', async function(){
++    prepareWorkspace();window.__privateRequest=null;
++    window.__fetchQueue.push(allowWorkspace());
++    window.__fetchQueue.push(window.__mockResponse(200,'export function mount(host,options){window.__privateRequest=options.request;return {destroy(){}};}'));
++    await mountPrivateWorkspace();assert(typeof window.__privateRequest==='function','missing transport');
++    const request=window.__privateRequest;
++    window.__fetchQueue.push(window.__mockResponse(200,{value:'ok'}));
++    const result=await request('/api/private-workspaces/test',{method:'POST',body:{question:'synthetic'}});
++    equal(result.value,'ok','response missing');
++    const call=window.__fetchCalls[2];
++    equal(call.options.headers.Authorization,'Bearer ws-token','wrong bearer');
++    equal(call.options.credentials,'omit','credentials attached');
++    equal(call.options.cache,'no-store','cache allowed');
++    equal(call.options.redirect,'error','redirect allowed');
++    equal(JSON.parse(call.options.body).question,'synthetic','body changed');
++    for(const path of ['https://evil.test/x','//evil.test/x','/api/other','/api/private-workspaces/../../other']){
++      let denied=false;try{await request(path);}catch(err){denied=true;}
++      assert(denied,'unsafe path accepted');
++    }
++    equal(window.__fetchCalls.length,3,'unsafe path requested');
++    authClearSession();let denied=false;try{await request('/api/private-workspaces/test');}catch(err){denied=true;}
++    assert(denied,'stale transport accepted');equal(window.__fetchCalls.length,3,'stale transport requested');
++  });
++
++  test('late transport JSON is discarded and denied status withdraws its own workspace', async function(){
++    prepareWorkspace();window.__privateRequest=null;
++    window.__fetchQueue.push(allowWorkspace());
++    window.__fetchQueue.push(window.__mockResponse(200,'export function mount(host,options){window.__privateRequest=options.request;return {destroy(){}};}'));
++    await mountPrivateWorkspace();assert(window.__privateRequest,'missing transport');
++    const entered=deferred(),release=deferred();
++    window.__fetchQueue.push({ok:true,status:200,json:()=>{entered.resolve();return release.promise;}});
++    const pending=window.__privateRequest('/api/private-workspaces/test').then(()=>false,()=>true);
++    await entered.promise;authClearSession();release.resolve({private:'old'});
++    assert(await pending,'stale JSON released');
++    for(const status of [401,403,404]){
++      prepareWorkspace();window.__fetchQueue.push(allowWorkspace());
++      window.__fetchQueue.push(window.__mockResponse(200,'export function mount(host,options){window.__privateRequest=options.request;return {destroy(){}};}'));
++      await mountPrivateWorkspace();window.__fetchQueue.push(window.__mockResponse(status,{}));
++      let denied=false;try{await window.__privateRequest('/api/private-workspaces/test');}catch(err){denied=true;}
++      assert(denied,'denial accepted');equal(pwsState,null,'denial retained workspace: '+status);
++    }
++  });
++
+   test('manifest request ใช้ bearer token ของผู้ใช้ ไม่ส่ง cookie และไม่ cache', async function(){
+     reset();
+     workspaceSession();
+-- 
+2.39.5 (Apple Git-154)
+

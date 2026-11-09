@@ -1,0 +1,559 @@
+From 35d9769a16c4189f0b26bb435abed59c56519c40 Mon Sep 17 00:00:00 2001
+From: piyawatv-cloud <295929244+piyawatv-cloud@users.noreply.github.com>
+Date: Sat, 5 Sep 2026 12:23:04 +0700
+Subject: [PATCH 12/24] fix(workspace): fence session changes and denied roles
+ (opc-workflow#5)
+
+---
+ docs/DEBUG_LOG.md            |  38 +++++++
+ index.html                   | 192 +++++++++++++++++-----------------
+ tests/formula-studio.test.js | 193 +++++++++++++++++++++++++++++++++--
+ 3 files changed, 313 insertions(+), 110 deletions(-)
+ create mode 100644 docs/DEBUG_LOG.md
+
+diff --git a/docs/DEBUG_LOG.md b/docs/DEBUG_LOG.md
+new file mode 100644
+index 0000000..8885138
+--- /dev/null
++++ b/docs/DEBUG_LOG.md
+@@ -0,0 +1,38 @@
++# Debug log
++
++## 2026-09-05 — Private workspace session isolation
++
++- Task: Beyond Science OS / approved ticket 2; issue: [opc-workflow #5](https://github.com/piyawatv-cloud/opc-workflow/issues/5).
++- Candidate: local changes on `feat/formula-science-workspace-loader`, baseline `3a9c32d`.
++- Classification: Critical authorization change. Local synthetic browser and throwaway SQL only.
++- Allowed: generic loader in `index.html`, focused browser tests, this evidence. Forbidden: existing feature behavior/storage contracts, production, secrets, schema/deployment, unrelated working files.
++- Owner/reviewer: System Owner / CODEOWNER `@phossatron`; independent agent QA is supporting evidence, not final approval.
++
++### Reproduction and first failure
++
++`node harness.js` executes the actual application in headless Chrome with synthetic fetch responses and session identities. Deferred responses make concurrency deterministic without time-based sleeps.
++
++Before the source fix, the expanded suite returned **38 passed / 5 failed**. An active `sales` membership sent one request; a pending bundle could recreate state after a token/identity change; a late mount handle retained a listener; an old 403 response removed the newer workspace. The logout test also demonstrated that requests carried no abort signal. Existing mode-change behavior passed.
++
++QA then identified that an active membership could belong to the previous principal. Added missing/mismatched membership identity cases failed **45 passed / 1 failed**, requesting a manifest with no matching membership identity. The preflight now requires equality between membership `user_id` and session `user.id`.
++
++### Cause and change
++
++The loader trusted mutable global session state across awaits, used only version/mode as its reuse key, and had no ownership fence for cleanup. Preflight did not check membership or deny roles locally.
++
++Each load now captures principal, token, origin, role, and membership identity, owns an AbortController, and rechecks ownership and context after every asynchronous boundary. Logout cancels pending work even before DOM exists. Stale errors cannot remove a successor's state. A late async mount handle is destroyed instead of attached; cooperative bundles receive an abort signal. State removal detaches its handle before invoking cleanup to make teardown reentrant. Token or membership changes trigger additive teardown hooks. Reuse also requires the captured context. The exported `mount`/`default` contract replaces the global fallback, which could carry an earlier bundle's function across sessions.
++
++Local preflight requires a real session principal and matching active membership in `rd`, `ra`, or `admin`; all still need server authorization. No browser role grants content access. Denied/unknown roles and missing, inactive, or mismatched memberships send zero requests. No schema, stored-data, dependency, or permission expansion occurs. Header build stamp is `2026-09-05.2`.
++
++### Verification
++
++- `node harness.js`: **48/48 PASS**. Coverage includes exact whole-document before/after snapshots for disabled/denied states; logout at manifest response/body, bundle body, dynamic import, and async mount; token/principal/role/origin/local-mode change; equal-version context and mode replacement; stale denial/rejection; immediate token-update teardown; listener/handle cleanup; existing application flows.
++- `LC_ALL=C ./tests/run-sql-tests.sh`: exit 0, **PASS SQL authorization and rollback contract**. Throwaway cluster only; no schema changes.
++- `git diff --check`: exit 0.
++- Local raw receipts: `/tmp/formula-issue5-red.json`, `/tmp/formula-issue5-membership-red.json`, `/tmp/formula-issue5-final.json`, `/tmp/formula-issue5-sql.log`. They are transient and not release evidence by themselves.
++
++### Remaining gates and rollback
++
++This is local G4 evidence, not UAT/release approval. Independent QA and CODEOWNER review remain required before higher gates; no PR was opened, merged, or deployed by this change. The approved origin remains unconfigured. Same-origin imported code can execute its module body before an outstanding import settles, and uncooperative bundle code can escape the host DOM; the existing CSP/sandbox architecture decision remains with the System Owner. Loader fencing does not claim to sandbox trusted modules.
++
++Rollback: revert the eventual isolated change commit through normal review, retaining feature origin disabled. There are no data/schema changes to reverse. Do not reset the shared checkout or touch unrelated files.
+diff --git a/index.html b/index.html
+index ae30909..e5689d0 100755
+--- a/index.html
++++ b/index.html
+@@ -649,7 +649,7 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
+   <div class="logo"><svg viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-1.73-3L9 11.35V4H8a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2h-1v7.35L19.73 19A2 2 0 0 1 18 22H6Zm5-10.11L8.31 16.5h7.38L13 11.89V4h-2v7.89Z"/></svg></div>
+   <div>
+     <div class="hdr-title">Formula Studio</div>
+-    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-05.1</div>
++    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-05.2</div>
+   </div>
+   <div class="sync-chip" id="syncChip" onclick="sbManualSync()" title="สถานะการซิงก์ข้อมูลกับเซิร์ฟเวอร์กลาง"></div>
+ </div>
+@@ -6076,6 +6076,8 @@ function authStoreSession(session){
+   if(!session || !session.access_token || !session.refresh_token) throw new Error('Invalid Auth session');
+   const normalized = Object.assign({}, session);
+   if(!normalized.expires_at) normalized.expires_at = Math.floor(Date.now()/1000) + Number(normalized.expires_in || 3600);
++  if(authSession && (authSession.access_token !== normalized.access_token ||
++      authSession.user?.id !== normalized.user?.id)) teardownPrivateWorkspace();
+   authSession = normalized;
+   // เบราว์เซอร์ที่บล็อกข้อมูลเว็บไซต์ (หน้าต่างส่วนตัว / นโยบายองค์กร) จะ throw ตรงนี้
+   // ถ้าไม่ดัก error จะทะลุออกไปเป็น "ตรวจสอบอินเทอร์เน็ต" ซึ่งชี้สาเหตุผิดจนแก้ไม่ถูก
+@@ -6181,6 +6183,8 @@ async function authFetchMembership(){
+     authClearSession();
+     throw new Error('Unknown membership role');
+   }
++  if(authMembership && (authMembership.role !== membership.role ||
++      authMembership.user_id !== membership.user_id || authMembership.active !== membership.active)) teardownPrivateWorkspace();
+   authMembership = membership;
+   currentUser = membership.name;
+   impersonator = '';
+@@ -6610,7 +6614,8 @@ function sbManualSync(){ if(sbOn() && authSession){ sbErr=''; sbCycle(); } }
+ //  "ไม่มีอะไรอยู่ตรงนั้น"
+ // ===================================================================
+ 
+-let pwsState = null;   // {navEl, panelEl, blobUrl, version}
++let pwsState = null;
++let pwsPending = null;
+ 
+ /** origin ที่อนุมัติต้องเป็น HTTPS origin เปล่า ๆ เท่านั้น ไม่มี path ไม่มี wildcard */
+ function pwsApprovedOrigin(){
+@@ -6628,114 +6633,101 @@ function pwsApprovedOrigin(){
+   return url.origin;
+ }
+ 
+-/** ถอนทุกอย่างที่ loader สร้างไว้ · เรียกซ้ำได้ปลอดภัย */
+-function teardownPrivateWorkspace(){
+-  if(!pwsState) return;
+-  // ให้ bundle เก็บกวาดของตัวเองก่อน (timer, listener ที่ผูกไว้นอก panel)
+-  try{
+-    const handle = pwsState.handle;
+-    if(handle && typeof handle.destroy === 'function') handle.destroy();
+-  }catch(err){}
+-  try{ if(pwsState.navEl && pwsState.navEl.parentNode) pwsState.navEl.parentNode.removeChild(pwsState.navEl); }catch(err){}
+-  try{ if(pwsState.panelEl && pwsState.panelEl.parentNode) pwsState.panelEl.parentNode.removeChild(pwsState.panelEl); }catch(err){}
+-  // ปล่อย Blob URL คืน ไม่งั้นโค้ดของ workspace ยังถูกอ้างถึงได้หลังผู้ใช้ออกจากระบบ
+-  try{ if(pwsState.blobUrl) URL.revokeObjectURL(pwsState.blobUrl); }catch(err){}
++/** Local preflight only; the server still decides grants and assignments. */
++function pwsContext(){
++  const origin = pwsApprovedOrigin();
++  if(!origin || !sbOn() || !authSession?.access_token || !authSession.user?.id ||
++      authMembership?.active !== true || authMembership.user_id !== authSession.user.id ||
++      !['rd','ra','admin'].includes(authMembership.role)) return '';
++  return JSON.stringify([origin, authSession.user.id, authSession.access_token,
++    authMembership.role, authMembership.user_id || '']);
++}
++
++function pwsRemoveState(){
++  const state = pwsState;
+   pwsState = null;
++  if(!state) return;
++  state.controller.abort();
++  try{ if(typeof state.handle?.destroy === 'function') state.handle.destroy(); }catch(err){}
++  try{ state.navEl.remove(); }catch(err){}
++  try{ state.panelEl.remove(); }catch(err){}
++  try{ if(state.blobUrl) URL.revokeObjectURL(state.blobUrl); }catch(err){}
+ }
+ 
+-/**
+- * ถาม manifest แล้ว mount ถ้าได้รับอนุญาต
+- *
+- * เรียกได้บ่อยเท่าที่ต้องการ · ถ้าสิทธิ์หายไประหว่างทาง มันจะถอนของเดิมออกให้เอง
+- */
++/** ถอนทุกอย่างที่ loader สร้างไว้ รวมงานที่ยังรอผลอยู่ */
++function teardownPrivateWorkspace(){
++  const pending = pwsPending;
++  pwsPending = null;
++  if(pending) pending.controller.abort();
++  pwsRemoveState();
++}
++
++/** ถาม manifest ใหม่เสมอ และรับผลเฉพาะ session ที่เริ่มคำขอนั้น */
+ async function mountPrivateWorkspace(){
++  const context = pwsContext();
++  if(!context){ teardownPrivateWorkspace(); return; }
++  if(pwsPending || (pwsState && pwsState.context !== context)) teardownPrivateWorkspace();
+   const origin = pwsApprovedOrigin();
+-  // ไม่ตั้งค่า / origin ไม่ปลอดภัย / ยังไม่ล็อกอิน / local-only mode = เงียบสนิท
+-  if(!origin || !sbOn() || !authSession || !authSession.access_token){
+-    teardownPrivateWorkspace();
+-    return;
+-  }
+-
+-  let manifest = null;
+-  try{
+-    const res = await fetch(origin + '/api/private-workspaces/formula', {
+-      method:'GET',
+-      headers:{Authorization:'Bearer ' + authSession.access_token},
+-      credentials:'omit',   // ตัวตนคือ bearer token เท่านั้น ไม่เคยพึ่ง cookie
+-      cache:'no-store'      // คำตอบเป็นของเฉพาะคน ห้ามให้ cache ไหนเก็บไว้
+-    });
+-    if(!res.ok){ teardownPrivateWorkspace(); return; }
+-    manifest = await res.json();
+-  }catch(err){
+-    // ต่อไม่ติดก็คือไม่มี · ไม่ประกาศให้ผู้ใช้รู้ว่ามีอะไรที่เขาเข้าไม่ถึง
+-    teardownPrivateWorkspace();
+-    return;
+-  }
+-
+-  if(!manifest || manifest.allowed !== true || typeof manifest.label !== 'string' || !manifest.label){
+-    teardownPrivateWorkspace();
+-    return;
+-  }
+-
+-  // bundle ต้องอยู่บน origin ที่อนุมัติไว้เท่านั้น · path สัมพัทธ์แปลงจาก origin นั้น
+-  let bundleUrl;
+-  try{ bundleUrl = new URL(String(manifest.bundleUrl || ''), origin + '/'); }
+-  catch(err){ teardownPrivateWorkspace(); return; }
+-  if(bundleUrl.origin !== origin || bundleUrl.protocol !== 'https:'){
+-    teardownPrivateWorkspace();
+-    return;
+-  }
+-
+-  // กุญแจต้องมี mode ด้วย ไม่ใช่แค่ version
+-  //
+-  // สองโหมดใช้เลข version เดียวกันได้ตามปกติ ถ้าเทียบแค่ version คนที่ถูกลดสิทธิ์
+-  // ลงมาเป็นโหมดที่แคบกว่า จะยังถือ bundle ของโหมดกว้างไว้ในเบราว์เซอร์ต่อไป
+-  // เพราะโค้ดคิดว่า "ของเดิมยังใช้ได้" · และถ้า manifest ไม่ส่ง version มาเลย
+-  // undefined === undefined จะเป็นจริง แล้วมันจะไม่ mount อะไรเลยตลอดกาล
+-  const pwsKey = String(manifest.version || '') + '\u0000' + String(manifest.mode || '');
+-  if(pwsState && pwsState.key === pwsKey) return;
+-  teardownPrivateWorkspace();
+-
+-  let source;
+-  try{
+-    const res = await fetch(bundleUrl.toString(), {
+-      method:'GET',
+-      headers:{Authorization:'Bearer ' + authSession.access_token},
+-      credentials:'omit', cache:'no-store'
+-    });
+-    if(!res.ok){ return; }
+-    source = await res.text();
+-  }catch(err){ return; }
+-
+-  // สร้าง panel ก่อน · ถ้าสร้างปุ่มก่อนแล้ว panel ล้ม ปุ่มจะค้างอยู่โดยที่ pwsState
+-  // ยังเป็น null ทำให้ teardown เอาออกไม่ได้ตลอดกาล
+-  const panel = pwsCreatePanel();
+-  if(!panel) return;
+-  const nav = pwsCreateNav(manifest.label);
+-  if(!nav){ if(panel.parentNode) panel.parentNode.removeChild(panel); return; }
+-
+-  let blobUrl = '';
++  const token = authSession.access_token;
++  const request = {context, controller:new AbortController()};
++  pwsPending = request;
++  const current = ()=>{
++    if(pwsPending !== request || request.controller.signal.aborted) return false;
++    if(pwsContext() !== context){ teardownPrivateWorkspace(); return false; }
++    return true;
++  };
++  const options = {method:'GET', headers:{Authorization:'Bearer ' + token},
++    credentials:'omit', cache:'no-store', signal:request.controller.signal};
+   try{
+-    blobUrl = URL.createObjectURL(new Blob([source], {type:'text/javascript'}));
+-  }catch(err){ blobUrl = ''; }
+-
+-  pwsState = {navEl:nav, panelEl:panel, blobUrl:blobUrl, key:pwsKey, handle:null};
+-
+-  if(blobUrl){
++    const response = await fetch(origin + '/api/private-workspaces/formula', options);
++    if(!current()) return;
++    if(!response.ok){ teardownPrivateWorkspace(); return; }
++    const manifest = await response.json();
++    if(!current()) return;
++    if(!manifest || manifest.allowed !== true || typeof manifest.label !== 'string' || !manifest.label){
++      teardownPrivateWorkspace(); return;
++    }
++    const bundleUrl = new URL(String(manifest.bundleUrl || ''), origin + '/');
++    if(bundleUrl.origin !== origin || bundleUrl.protocol !== 'https:' || bundleUrl.username || bundleUrl.password){
++      teardownPrivateWorkspace(); return;
++    }
++    const key = String(manifest.version || '') + '\u0000' + String(manifest.mode || '');
++    if(pwsState && pwsState.key === key && pwsState.context === context) return;
++    pwsRemoveState();
++    const bundle = await fetch(bundleUrl.toString(), options);
++    if(!current()) return;
++    if(!bundle.ok) return;
++    const source = await bundle.text();
++    if(!current()) return;
++    const panel = pwsCreatePanel();
++    if(!panel) return;
++    const nav = pwsCreateNav(manifest.label);
++    if(!nav){ panel.remove(); return; }
++    const state = {navEl:nav, panelEl:panel, blobUrl:'', key, context,
++      controller:request.controller, handle:null};
++    pwsState = state;
+     try{
+-      const mod = await import(blobUrl);
+-      // ชื่อ export ต้องเป็นชื่อกลาง ๆ · ไฟล์นี้ต้องไม่รู้ว่า workspace ที่โหลดมาคืออะไร
+-      const mount = (mod && (mod.mount || mod.default)) || window.__pwsMounted;
+-      if(typeof mount === 'function'){
+-        // เก็บ handle ไว้ · ถ้าทิ้ง destroy() จะไม่มีวันถูกเรียก แล้ว bundle ที่ตั้ง
+-        // timer หรือผูก listener ไว้ที่ window จะรอดจากการออกจากระบบ
+-        const handle = mount(panel, {mode:manifest.mode});
+-        if(pwsState) pwsState.handle = handle;
++      state.blobUrl = URL.createObjectURL(new Blob([source], {type:'text/javascript'}));
++      const mod = await import(state.blobUrl);
++      if(!current()) return;
++      const mount = mod && (mod.mount || mod.default);
++      if(typeof mount !== 'function') throw new Error('Missing mount');
++      const handle = await mount(panel, {mode:manifest.mode, signal:request.controller.signal});
++      if(!current() || pwsState !== state){
++        try{ if(typeof handle?.destroy === 'function') handle.destroy(); }catch(err){}
++        return;
+       }
++      state.handle = handle;
+     }catch(err){
+-      // bundle รันไม่ได้ ก็ยังคงแท็บไว้พร้อมข้อความ ดีกว่าหายไปเฉย ๆ โดยไม่บอกอะไร
+-      panel.textContent = 'เปิดพื้นที่ทำงานส่วนตัวไม่สำเร็จ กรุณาลองใหม่';
++      if(current() && pwsState === state){
++        panel.textContent = 'เปิดพื้นที่ทำงานส่วนตัวไม่สำเร็จ กรุณาลองใหม่';
++      }
+     }
++  }catch(err){
++    // ผลผิดพลาดเก่าห้ามถอนพื้นที่ทำงานของ session ใหม่
++    if(current()) teardownPrivateWorkspace();
++  }finally{
++    if(pwsPending === request) pwsPending = null;
+   }
+ }
+ 
+diff --git a/tests/formula-studio.test.js b/tests/formula-studio.test.js
+index 861d774..ab6e3cf 100644
+--- a/tests/formula-studio.test.js
++++ b/tests/formula-studio.test.js
+@@ -8,6 +8,7 @@
+     if(actual !== expected) throw new Error((message || 'values differ') + ` (expected ${expected}, got ${actual})`);
+   }
+   function reset(){
++    if(typeof teardownPrivateWorkspace === 'function') teardownPrivateWorkspace();
+     localStorage.clear();
+     sessionStorage.clear();
+     window.__fetchCalls.length = 0;
+@@ -236,16 +237,13 @@
+   // ต้องไม่เปลี่ยนเลยเมื่อไม่มีสิทธิ์หรือไม่ได้ตั้งค่า
+ 
+   function domFingerprint(){
+-    // ลายนิ้วมือของหน้าจอเดิม: ปุ่มเมนู หัวข้อ และจำนวนโหนดใน .main
+-    const nav = [...document.querySelectorAll('.side-item, .side-group')].map(el=>el.id || el.textContent.trim()).join('|');
+-    const main = document.querySelector('.main');
+-    return nav + '##' + (main ? main.children.length : -1);
++    return document.documentElement.outerHTML;
+   }
+ 
+   function workspaceSession(){
+     authSession = {access_token:'ws-token', refresh_token:'r', expires_at:Date.now()/1000+3600,
+       user:{id:'55555555-5555-5555-5555-555555555555', email:'rd@example.test'}};
+-    authMembership = {name:'อาร์แอนด์ดี', role:'rd', active:true};
++    authMembership = {user_id:authSession.user.id, name:'อาร์แอนด์ดี', role:'rd', active:true};
+     currentUser = 'อาร์แอนด์ดี';
+   }
+ 
+@@ -313,6 +311,181 @@
+     assert(!Object.keys(localStorage).some(k=>/pws|science|workspace/i.test(k)), 'มี key ค้างใน localStorage');
+   });
+ 
++  function deferred(){
++    let resolve;
++    const promise = new Promise(r=>{ resolve=r; });
++    return {promise, resolve};
++  }
++  function allowWorkspace(mode='workspace'){
++    return window.__mockResponse(200, {allowed:true,label:'Private test',
++      bundleUrl:'/bundle',version:'1',mode});
++  }
++  function prepareWorkspace(){
++    reset(); workspaceSession(); SCIENCE_WORKSPACE_API_ORIGIN='https://opc.example.test';
++  }
++
++  test('denied roles, inactive and missing membership make zero requests and preserve exact DOM', async function(){
++    for(const role of ['sales','opc','crm','monitor','pd','mkt','marketing','purchasing','unknown','toString','']){
++      prepareWorkspace(); authMembership.role=role;
++      const before=domFingerprint();
++      await mountPrivateWorkspace();
++      equal(window.__fetchCalls.length,0,'request for denied role '+role);
++      equal(domFingerprint(),before,'DOM changed for '+role);
++    }
++    for(const membership of [null,{role:'rd',active:false},{role:'rd',active:true},
++      {role:'rd',active:true,user_id:'different-user'}]){
++      prepareWorkspace(); authMembership=membership;
++      const before=domFingerprint();
++      await mountPrivateWorkspace();
++      equal(window.__fetchCalls.length,0,'request without active membership');
++      equal(domFingerprint(),before,'DOM changed without active membership');
++    }
++  });
++
++  test('logout during manifest response, manifest body or bundle body cannot recreate workspace', async function(){
++    for(const stage of ['response','manifest','bundle']){
++      prepareWorkspace(); const before=domFingerprint();
++      const entered=deferred(), release=deferred();
++      if(stage==='response') window.__fetchQueue.push(()=>{entered.resolve(); return release.promise;});
++      else if(stage==='manifest') window.__fetchQueue.push({ok:true,json:()=>{entered.resolve();return release.promise;}});
++      else {
++        window.__fetchQueue.push(allowWorkspace());
++        window.__fetchQueue.push({ok:true,text:()=>{entered.resolve();return release.promise;}});
++      }
++      const pending=mountPrivateWorkspace(); await entered.promise;
++      authClearSession();
++      release.resolve(stage==='response'?allowWorkspace():stage==='manifest'?
++        {allowed:true,label:'Private test',bundleUrl:'/bundle',version:'1',mode:'workspace'}:
++        'export function mount(host){host.textContent="late";}');
++      await pending;
++      equal(pwsState,null,'late state at '+stage);
++      equal(domFingerprint(),before,'late DOM at '+stage);
++      equal(window.__fetchCalls.length,stage==='bundle'?2:1,'extra request after logout');
++      assert(window.__fetchCalls[0].options.signal.aborted,'request was not aborted');
++    }
++  });
++
++  test('logout while async mount is pending destroys the late handle and listener', async function(){
++    prepareWorkspace(); const before=domFingerprint();
++    window.__lateMountEntered=deferred(); window.__lateMountRelease=deferred();
++    window.__lateHandleDestroyed=0; window.__lateEventCount=0;
++    window.__fetchQueue.push(allowWorkspace());
++    window.__fetchQueue.push(window.__mockResponse(200, `export async function mount(host){
++      const listener=()=>window.__lateEventCount++;
++      window.addEventListener('private-test-event',listener);
++      window.__lateMountEntered.resolve(); await window.__lateMountRelease.promise;
++      return {destroy(){window.__lateHandleDestroyed++;window.removeEventListener('private-test-event',listener);}};
++    }`));
++    const pending=mountPrivateWorkspace(); await window.__lateMountEntered.promise;
++    authClearSession(); window.__lateMountRelease.resolve(); await pending;
++    window.dispatchEvent(new Event('private-test-event'));
++    equal(window.__lateHandleDestroyed,1,'late handle not destroyed once');
++    equal(window.__lateEventCount,0,'late listener retained');
++    equal(pwsState,null,'late handle retained'); equal(domFingerprint(),before,'late DOM retained');
++  });
++
++  test('logout during module import cannot call mount or attach its handle', async function(){
++    prepareWorkspace();const before=domFingerprint();
++    window.__importEntered=deferred();window.__importRelease=deferred();window.__importMounts=0;
++    window.__fetchQueue.push(allowWorkspace());
++    window.__fetchQueue.push(window.__mockResponse(200, `
++      window.__importEntered.resolve();await window.__importRelease.promise;
++      export function mount(){window.__importMounts++;return {destroy(){}};}
++    `));
++    const pending=mountPrivateWorkspace();await window.__importEntered.promise;
++    authClearSession();window.__importRelease.resolve();await pending;
++    equal(window.__importMounts,0,'stale module called mount');
++    equal(pwsState,null,'stale import retained state');equal(domFingerprint(),before,'stale import changed DOM');
++  });
++
++  test('mounted workspace is replaced on token or identity change despite equal version and mode', async function(){
++    for(const change of [()=>authSession.access_token='next-token',()=>{authSession.user.id='next-user';authMembership.user_id='next-user';}]){
++      prepareWorkspace();window.__replacedDestroyed=0;
++      window.__fetchQueue.push(allowWorkspace());
++      window.__fetchQueue.push(window.__mockResponse(200,'export function mount(){return {destroy(){window.__replacedDestroyed++;}};}'));
++      await mountPrivateWorkspace();const old=pwsState;change();
++      window.__fetchQueue.push(allowWorkspace());
++      window.__fetchQueue.push(window.__mockResponse(200,'export function mount(host){host.textContent="new context";}'));
++      await mountPrivateWorkspace();
++      assert(pwsState!==old,'stale same-version state reused');
++      equal(window.__replacedDestroyed,1,'old handle not removed');
++      equal(pwsState.panelEl.textContent,'new context','new identity not rendered');
++    }
++  });
++
++  test('session storage update immediately withdraws the mounted workspace', async function(){
++    prepareWorkspace();window.__fetchQueue.push(allowWorkspace());
++    window.__fetchQueue.push(window.__mockResponse(200,'export function mount(){return {destroy(){}};}'));
++    await mountPrivateWorkspace();assert(pwsState,'setup failed');
++    authStoreSession({...authSession,access_token:'refreshed-token'});
++    equal(pwsState,null,'token update retained workspace');
++    equal(document.getElementById('pwsPanel'),null,'token update retained panel');
++    clearTimeout(authRefreshTimer);
++  });
++
++  test('older denied response cannot tear down a newer identity workspace', async function(){
++    prepareWorkspace(); const entered=deferred(),release=deferred();
++    window.__fetchQueue.push(()=>{entered.resolve();return release.promise;});
++    const old=mountPrivateWorkspace(); await entered.promise;
++    authSession={...authSession,access_token:'new-token',user:{...authSession.user,id:'66666666-6666-6666-6666-666666666666'}};
++    authMembership={...authMembership,user_id:authSession.user.id};
++    window.__fetchQueue.push(allowWorkspace());
++    window.__fetchQueue.push(window.__mockResponse(200,'export function mount(host){host.textContent="new identity";}'));
++    await mountPrivateWorkspace();
++    const state=pwsState; assert(state,'new identity did not mount');
++    release.resolve(window.__mockResponse(403,{})); await old;
++    equal(pwsState,state,'older denial tore down newer state');
++    equal(state.panelEl.textContent,'new identity','wrong identity rendered');
++  });
++
++  test('older network rejection cannot remove a newer workspace', async function(){
++    prepareWorkspace();const entered=deferred();let rejectOld;
++    window.__fetchQueue.push(()=>{entered.resolve();return new Promise((resolve,reject)=>{rejectOld=reject;});});
++    const old=mountPrivateWorkspace();await entered.promise;
++    authSession.access_token='new-token';
++    window.__fetchQueue.push(allowWorkspace());
++    window.__fetchQueue.push(window.__mockResponse(200,'export function mount(host){host.textContent="current";}'));
++    await mountPrivateWorkspace();const state=pwsState;
++    rejectOld(new Error('synthetic old failure'));await old;
++    equal(pwsState,state,'old catch removed new workspace');
++    equal(state.panelEl.textContent,'current','new workspace changed');
++  });
++
++  test('eligible roles still require server permission before fetching a bundle', async function(){
++    for(const role of ['rd','ra','admin']){
++      prepareWorkspace();authMembership.role=role;const before=domFingerprint();
++      window.__fetchQueue.push(window.__mockResponse(403,{}));await mountPrivateWorkspace();
++      equal(window.__fetchCalls.length,1,'did not stop after server denial for '+role);
++      equal(domFingerprint(),before,'server denied role changed DOM');
++    }
++  });
++
++  test('token, identity, membership, origin and local-mode changes fence pending bundle results', async function(){
++    for(const change of [()=>authSession.access_token='replacement',()=>authSession.user.id='replacement',
++      ()=>authMembership.role='ra',()=>authMembership.active=false,()=>{SB_URL='';SB_KEY='';},
++      ()=>SCIENCE_WORKSPACE_API_ORIGIN='https://other.example.test']){
++      prepareWorkspace(); const entered=deferred(),release=deferred();
++      window.__fetchQueue.push(allowWorkspace());
++      window.__fetchQueue.push({ok:true,text:()=>{entered.resolve();return release.promise;}});
++      const pending=mountPrivateWorkspace();await entered.promise;change();
++      release.resolve('export function mount(host){host.textContent="stale";}');await pending;
++      equal(pwsState,null,'changed context retained stale state');
++      equal(document.getElementById('pwsPanel'),null,'changed context created panel');
++    }
++  });
++
++  test('mode change replaces the old handle even when version stays the same', async function(){
++    prepareWorkspace();window.__oldModeDestroyed=0;
++    window.__fetchQueue.push(allowWorkspace('first'));
++    window.__fetchQueue.push(window.__mockResponse(200,'export function mount(){return {destroy(){window.__oldModeDestroyed++;}};}'));
++    await mountPrivateWorkspace();const old=pwsState;
++    window.__fetchQueue.push(allowWorkspace('second'));
++    window.__fetchQueue.push(window.__mockResponse(200,'export function mount(host,{mode}){host.textContent=mode;}'));
++    await mountPrivateWorkspace();
++    assert(pwsState!==old,'old mode reused');equal(window.__oldModeDestroyed,1,'old mode not destroyed');
++    equal(pwsState.panelEl.textContent,'second','wrong mode');
++  });
++
+   test('manifest request ใช้ bearer token ของผู้ใช้ ไม่ส่ง cookie และไม่ cache', async function(){
+     reset();
+     workspaceSession();
+@@ -339,7 +512,7 @@
+       version:'1', mode:'workspace'
+     }));
+     window.__fetchQueue.push(window.__mockResponse(200,
+-      'window.__pwsMounted = (host)=>{ host.textContent = "workspace ready"; };'));
++      'export function mount(host){ host.textContent = "workspace ready"; }'));
+ 
+     await mountPrivateWorkspace();
+ 
+@@ -363,7 +536,7 @@
+       allowed:true, label:'<img src=x onerror="window.__pwsXss=1">', 
+       bundleUrl:'/api/private-workspaces/formula/bundle', version:'1', mode:'workspace'
+     }));
+-    window.__fetchQueue.push(window.__mockResponse(200, 'window.__pwsMounted=()=>{};'));
++    window.__fetchQueue.push(window.__mockResponse(200, 'export function mount(){}'));
+ 
+     await mountPrivateWorkspace();
+ 
+@@ -397,7 +570,7 @@
+       allowed:true, label:'RD Science', bundleUrl:'/api/private-workspaces/formula/bundle',
+       version:'1', mode:'workspace'
+     }));
+-    window.__fetchQueue.push(window.__mockResponse(200, 'window.__pwsMounted=()=>{};'));
++    window.__fetchQueue.push(window.__mockResponse(200, 'export function mount(){}'));
+     await mountPrivateWorkspace();
+     assert(document.getElementById('pwsNav'), 'setup: ไม่ได้ mount');
+ 
+@@ -416,7 +589,7 @@
+       allowed:true, label:'RD Science', bundleUrl:'/api/private-workspaces/formula/bundle',
+       version:'1', mode:'workspace'
+     }));
+-    window.__fetchQueue.push(window.__mockResponse(200, 'window.__pwsMounted=()=>{};'));
++    window.__fetchQueue.push(window.__mockResponse(200, 'export function mount(){}'));
+     await mountPrivateWorkspace();
+     assert(document.getElementById('pwsNav'), 'setup: ไม่ได้ mount');
+ 
+@@ -436,7 +609,7 @@
+       allowed:true, label:'RD Science', bundleUrl:'/api/private-workspaces/formula/bundle',
+       version:'1', mode:'workspace'
+     }));
+-    window.__fetchQueue.push(window.__mockResponse(200, 'window.__pwsMounted=()=>{};'));
++    window.__fetchQueue.push(window.__mockResponse(200, 'export function mount(){}'));
+     await mountPrivateWorkspace();
+ 
+     // repo นี้ใช้ class 'on' เป็นตัวบอกว่า view ไหนเปิดอยู่ ไม่ใช่ attribute hidden
+-- 
+2.39.5 (Apple Git-154)
+

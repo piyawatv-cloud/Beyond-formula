@@ -178,6 +178,24 @@
     assert(panel.querySelector('.job-stale'),'stale warning is missing');
     assert(!panel.textContent.includes('A00092'),'hidden job leaked into warnings');
   });
+  test('Sales can load an existing job from its detail popup to retrieve price', function(){
+    reset();
+    SB_URL='';
+    currentUser='Sales One';
+    userList=[{name:'Sales One',role:'sales',pass:null}];
+    const r={id:'A00091',customer:'Synthetic job',brand:'Synthetic brand',createdBy:'Sales One',
+      salesOwner:'Sales One',price:'150',rows:[],allConcepts:[],benefits:[],cons:[]};
+    records=[r]; chats=[]; activities=[];
+
+    openRecordPopup(r.id);
+    const box=document.getElementById('gModalBox');
+    const openButton=Array.from(box.querySelectorAll('button'))
+      .find(button=>button.textContent.includes('เปิดใน Customer Data'));
+    assert(openButton,'existing job has no Sales reload action');
+    openButton.click();
+    equal(document.getElementById('f_price').value,'150','existing price was not loaded');
+    equal(window._editingRecordId,r.id,'reload action did not preserve the existing job id');
+  });
   test('locked invalid identifiers cannot inject code through recovery buttons', function(){
     const r=savedJobFixture(); r.id="A00091');window.__jobUnsafe=true;//"; jobSession(r);
     const box=document.createElement('div'); box.innerHTML=jobLockedHTML(r);
