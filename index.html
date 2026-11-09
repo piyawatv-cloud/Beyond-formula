@@ -677,7 +677,7 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
   <div class="logo"><svg viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-1.73-3L9 11.35V4H8a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2h-1v7.35L19.73 19A2 2 0 0 1 18 22H6Zm5-10.11L8.31 16.5h7.38L13 11.89V4h-2v7.89Z"/></svg></div>
   <div>
     <div class="hdr-title">Formula Studio</div>
-    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-10-07.1</div>
+    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-10-17.1</div>
   </div>
   <div class="sync-chip" id="syncChip" onclick="sbManualSync()" title="สถานะการซิงก์ข้อมูลกับเซิร์ฟเวอร์กลาง"></div>
 </div>
@@ -2853,7 +2853,8 @@ function loadActivities(){
   catch(e){ activities = []; }
 }
 function saveActivities(){
-  try{ localStorage.setItem('fs_activities', JSON.stringify(activities)); }catch(e){}
+  try{ localStorage.setItem('fs_activities', JSON.stringify(activities)); delete sbLocalStoreFailures.activities; }
+  catch(e){ sbLocalStoreFailures.activities=true; }
   sbQueue();
 }
 // บันทึก 1 เหตุการณ์ — เก็บผู้ใช้จริง (กรณีสวมบทบาทจะเก็บทั้งคนสวมและคนถูกสวม)
@@ -3063,7 +3064,8 @@ function saveUsers(){
       localStorage.setItem('fs_imp', impersonator);
       localStorage.setItem('fs_userlist', JSON.stringify(userList));
     }
-  }catch(e){}
+    delete sbLocalStoreFailures.users;
+  }catch(e){ sbLocalStoreFailures.users=true; }
   // currentUser / impersonator เป็นสถานะของเครื่องนี้เท่านั้น ไม่ส่งขึ้นเซิร์ฟเวอร์
   sbQueue();
 }
@@ -3908,7 +3910,8 @@ function saveRecordsStore(){
   try{
     localStorage.setItem('fs_records', JSON.stringify(records));
     localStorage.setItem('fs_reccounter', String(recCounter));
-  }catch(e){}
+    delete sbLocalStoreFailures.records;
+  }catch(e){ sbLocalStoreFailures.records=true; }
   sbQueue();
 }
 // ---------- รหัสชุดข้อมูล: A00001 … A99999 → B00001 … Z99999 → AA00001 … ----------
@@ -4646,7 +4649,9 @@ function loadChats(){
   try{ chatDeleteOutbox = JSON.parse(localStorage.getItem('fs_chat_delete_outbox') || '[]'); }
   catch(e){ chatDeleteOutbox = []; }
 }
-function saveChats(){ try{ localStorage.setItem('fs_chats', JSON.stringify(chats)); }catch(e){}
+function saveChats(){
+  try{ localStorage.setItem('fs_chats', JSON.stringify(chats)); delete sbLocalStoreFailures.chats; }
+  catch(e){ sbLocalStoreFailures.chats=true; }
   sbQueue();
 }
 function sbChatEventsOn(){ return !!(sbOn() && authSession); }
@@ -4659,7 +4664,8 @@ function saveChatOutboxes(){
     localStorage.setItem('fs_chat_event_outbox', JSON.stringify(chatEventOutbox));
     localStorage.setItem('fs_chat_read_outbox', JSON.stringify(chatReadOutbox));
     localStorage.setItem('fs_chat_delete_outbox', JSON.stringify(chatDeleteOutbox));
-  }catch(e){}
+    delete sbLocalStoreFailures.chatOutbox;
+  }catch(e){ sbLocalStoreFailures.chatOutbox=true; }
 }
 function queueChatEvent(jobId, payload, eventId){
   if(!sbChatEventsOn() || !jobId || !payload) return null;
@@ -6483,6 +6489,49 @@ let sbErr = '';             // ข้อความ error ล่าสุด
 let sbPushTimer = null;
 let sbLastPush = 0;
 let sbPollingStarted = false;
+let sbLocalStoreFailures = {};
+let sbDeferredStateError = false;
+const SB_DEFERRED_PREFIX='fs_deferred_write:';
+function sbLoadDeferredWrites(){
+  try{
+    return Object.keys(localStorage).filter(k=>k.indexOf(SB_DEFERRED_PREFIX)===0);
+  }catch(err){ sbDeferredStateError=true; return []; }
+}
+let sbDeferredWrites=sbLoadDeferredWrites();
+function sbHasDeferredWrites(){
+  sbDeferredWrites=sbLoadDeferredWrites();
+  return sbDeferredWrites.length>0;
+}
+function sbDeferredOwnerBlocked(){
+  if(!sbHasDeferredWrites()) return false;
+  const userId=(authMembership&&authMembership.user_id)||(authSession&&authSession.user&&authSession.user.id)||'';
+  if(!userId) return true;
+  try{
+    return sbDeferredWrites.some(token=>{
+      const state=JSON.parse(localStorage.getItem(token)||'null');
+      if(!state || !state.userId){ sbDeferredStateError=true; return true; }
+      return state.userId!==userId;
+    });
+  }catch(err){ sbDeferredStateError=true; return true; }
+}
+function sbMarkDeferredWrite(){
+  const token=SB_DEFERRED_PREFIX+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,12);
+  try{
+    localStorage.setItem(token,JSON.stringify({at:Date.now(),userId:(authMembership&&authMembership.user_id)||(authSession&&authSession.user&&authSession.user.id)||null}));
+    if(sbDeferredWrites.indexOf(token)<0) sbDeferredWrites.push(token);
+    sbDeferredStateError=false;
+  }catch(err){ sbDeferredStateError=true; }
+}
+function sbClearDeferredWrites(tokens){
+  if(sbReadOnlyNote || sbDeferredStateError || Object.keys(sbLocalStoreFailures).some(k=>sbLocalStoreFailures[k]) || sbDeferredOwnerBlocked() || chatDeadLetter.length || chatEventOutbox.length || chatReadOutbox.length || chatDeleteOutbox.length || sbHasDeferredData()) return;
+  try{
+    (tokens||[]).forEach(token=>localStorage.removeItem(token));
+    sbDeferredStateError=false;
+    sbDeferredWrites=sbLoadDeferredWrites();
+  }catch(err){
+    sbDeferredStateError=true;
+  }
+}
 // สแนปช็อตของสิ่งที่เซิร์ฟเวอร์มี (เท่าที่เรารู้) ใช้หาว่าอะไรเปลี่ยน/ถูกลบ
 function sbEmptySnapshot(){ return {records:{},chats:{},users:{},acts:{},counter:null}; }
 function sbLoadSnapshot(){
@@ -6607,17 +6656,31 @@ function sbChip(){
   if(!el) return;
   if(!sbOn()){ el.className='sync-chip'; return; }
   let cls = 'sync-chip on', txt;
-  if(sbErr){ cls += ' err'; txt = 'ซิงก์ไม่สำเร็จ — กดเพื่อลองใหม่'; }
+  if(Object.keys(sbLocalStoreFailures).some(k=>sbLocalStoreFailures[k]) || sbDeferredStateError){
+    cls += ' err'; txt = 'บันทึกในเครื่องไม่ครบ — อย่าปิดหน้านี้';
+  }
+  else if(sbDeferredOwnerBlocked()){ cls += ' err'; txt = 'มีข้อมูลค้างจากบัญชีเดิม · เข้าบัญชีเดิมเพื่อส่ง'; }
+  else if(sbReadOnlyNote){ cls += ' err'; txt = 'มีข้อมูลค้าง · บัญชีนี้ไม่มีสิทธิ์ส่ง'; }
+  else if(chatDeadLetter.length){ cls += ' err'; txt = 'มีรายการแชทถูกปฏิเสธ · ต้องตรวจสอบ'; }
+  else if(sbBusy && sbHasDeferredWrites()){ cls += ' busy'; txt = 'กำลังส่งข้อมูลที่ค้างไว้…'; }
+  else if(sbHasDeferredWrites()){ cls += ' busy'; txt = 'บันทึกในเครื่องแล้ว · รอส่งส่วนกลาง'; }
+  else if(sbErr && !sbReady){ cls += ' err'; txt = 'ฐานกลางติดต่อไม่ได้ · บันทึกในเครื่องได้'; }
+  else if(sbErr){ cls += ' err'; txt = 'ซิงก์ไม่สำเร็จ — กดเพื่อลองใหม่'; }
   else if(sbBusy){ cls += ' busy'; txt = 'กำลังซิงก์…'; }
-  else if(sbReadOnlyNote){ cls += ' ok'; txt = 'ซิงก์แล้ว (ดูอย่างเดียว)'; }
   else if(sbReady){ cls += ' ok'; txt = 'ซิงก์แล้ว' + (sbLastPush ? ' · ' + new Date(sbLastPush).toLocaleTimeString('th-TH') : ''); }
   else { txt = 'กำลังเชื่อมต่อ…'; }
   el.className = cls;
   el.textContent = txt;
   // บอกให้ชัดว่าทำไมงานในเครื่องถึงไม่ขึ้นเซิร์ฟเวอร์ แทนที่จะเงียบแล้วให้เดาเอง
-  el.title = sbErr ? ('ข้อผิดพลาด: ' + sbErr + '\nกดเพื่อลองซิงก์ใหม่')
-    : (sbReadOnlyNote ? (sbReadOnlyNote + '\nกดเพื่อซิงก์ทันที')
-    : 'ข้อมูลซิงก์กับเซิร์ฟเวอร์กลาง — กดเพื่อซิงก์ทันที');
+  el.title = Object.keys(sbLocalStoreFailures).some(k=>sbLocalStoreFailures[k]) || sbDeferredStateError
+    ? 'พื้นที่เก็บข้อมูลในเครื่องอาจเต็มหรือบันทึกคิวไม่สำเร็จ ข้อมูลบางส่วนอาจยังไม่ถูกเก็บไว้'
+    : (sbDeferredOwnerBlocked() ? 'ข้อมูลที่รอส่งถูกสร้างโดยบัญชีเดิม ให้เข้าบัญชีเดิมก่อนเพื่อป้องกันส่งข้อมูลภายใต้ผู้ใช้ผิดคน'
+    : (sbReadOnlyNote ? (sbReadOnlyNote + '\nติดต่อผู้ดูแลระบบเพื่อตรวจสิทธิ์')
+    : (chatDeadLetter.length ? ('มีรายการแชท ' + chatDeadLetter.length + ' รายการที่เซิร์ฟเวอร์ปฏิเสธถาวร ข้อมูลยังไม่ถือว่าส่งถึงส่วนกลาง โปรดให้ผู้ดูแลตรวจสอบ')
+    : (sbHasDeferredWrites()
+    ? 'ข้อมูลยังอยู่ในเครื่องนี้และรอส่งไปฐานกลาง อย่าล้างข้อมูลเว็บไซต์หรือเปลี่ยนเครื่องจนกว่าป้ายนี้จะกลับเป็นซิงก์แล้ว'
+    : (sbErr ? ('ข้อผิดพลาด: ' + sbErr + '\nกดเพื่อลองซิงก์ใหม่')
+    : 'ข้อมูลซิงก์กับเซิร์ฟเวอร์กลาง — กดเพื่อซิงก์ทันที'))))));
 }
 
 // ---------- ดึงข้อมูลจากเซิร์ฟเวอร์ลงเครื่อง ----------
@@ -6768,17 +6831,52 @@ function sbSnapshot(){
   sbSnap = m;
   sbPersistSnapshot();
 }
+function sbHasDeferredData(){
+  const recordIds={};
+  let pending=records.some(r=>{
+    recordIds[r.id]=1;
+    return sbSnap.records[r.id]!==JSON.stringify(r);
+  });
+  if(!pending && Object.keys(sbSnap.records).some(id=>!recordIds[id])) pending=true;
+  if(!pending && !sbChatEventsOn()){
+    const chatIds={};
+    pending=chats.some(c=>{ chatIds[c.jobId]=1; return sbSnap.chats[c.jobId]!==JSON.stringify(c); });
+    if(!pending && Object.keys(sbSnap.chats).some(id=>!chatIds[id])) pending=true;
+  }
+  if(!pending && sbCanWriteMeta() && Number(recCounter||0)>Number(sbSnap.counter||0)) pending=true;
+  if(!pending){
+    pending=activities.some(e=>{
+      const allowed=currentRole()==='admin' || (e.user===currentUser && !e.via);
+      const id=actUid(e);
+      return allowed && !sbSnap.acts[id] && !actPushed[id];
+    });
+  }
+  return pending || chatEventOutbox.length>0 || chatReadOutbox.length>0 || chatDeleteOutbox.length>0;
+}
 
 // รายการที่เซิร์ฟเวอร์ปฏิเสธถาวร — เก็บไว้ให้ตรวจได้ ไม่ทิ้งเงียบ ๆ
 let chatDeadLetter = (function(){
-  try{ const v=JSON.parse(localStorage.getItem('fs_chat_dead_letter')||'null'); return Array.isArray(v)?v:[]; }
-  catch(err){ return []; }
+  try{
+    const raw=localStorage.getItem('fs_chat_dead_letter');
+    if(raw==null) return [];
+    const v=JSON.parse(raw);
+    if(Array.isArray(v)) return v;
+    sbLocalStoreFailures.chatDeadLetter=true;
+    return [];
+  }catch(err){
+    sbLocalStoreFailures.chatDeadLetter=true;
+    return [];
+  }
 })();
 function saveChatDeadLetter(){
   try{
-    if(chatDeadLetter.length>200) chatDeadLetter = chatDeadLetter.slice(-200);
     localStorage.setItem('fs_chat_dead_letter',JSON.stringify(chatDeadLetter));
-  }catch(err){}
+    sbLocalStoreFailures.chatDeadLetter=false;
+    return true;
+  }catch(err){
+    sbLocalStoreFailures.chatDeadLetter=true;
+    return false;
+  }
 }
 
 async function sbPushChatEvents(){
@@ -6797,9 +6895,10 @@ async function sbPushChatEvents(){
       // ออกไป sbPush จะหยุดตั้งแต่บรรทัดแรก แล้ว records/activities/counter จะไม่ถูก
       // ส่งอีกเลย — แชทข้อความเดียวทำให้ทั้งระบบหยุดซิงก์ถาวรและไม่มี UI ให้เคลียร์
       if(!sbIsPermanent(err)) throw err;
+      // Keep the rejected payload locally so an operator can recover the exact message later.
+      chatDeadLetter.push({kind:'event', jobId:item.jobId, eventId:item.eventId, payload:item.payload, at:Date.now(), err:safeError(err)});
+      if(!saveChatDeadLetter()) continue;
       chatEventOutbox = chatEventOutbox.filter(x=>x.eventId!==item.eventId);
-      chatDeadLetter.push({kind:'event', jobId:item.jobId, eventId:item.eventId, at:Date.now(), err:safeError(err)});
-      saveChatDeadLetter();
       saveChatOutboxes();
       console.warn('[sync] เซิร์ฟเวอร์ปฏิเสธ chat event ถาวร ข้ามไปก่อน', safeError(err));
       continue;
@@ -6820,9 +6919,10 @@ async function sbPushChatReads(){
       });
     }catch(err){
       if(!sbIsPermanent(err)) throw err;
-      chatReadOutbox = chatReadOutbox.filter(x=>x.jobId!==item.jobId);
       chatDeadLetter.push({kind:'read', jobId:item.jobId, at:Date.now(), err:safeError(err)});
-      saveChatDeadLetter(); saveChatOutboxes();
+      if(!saveChatDeadLetter()) continue;
+      chatReadOutbox = chatReadOutbox.filter(x=>x.jobId!==item.jobId);
+      saveChatOutboxes();
       continue;
     }
     chatReadOutbox = chatReadOutbox.filter(x=>x.jobId!==item.jobId);
@@ -6837,9 +6937,10 @@ async function sbPushChatDeletes(){
       await sbReq('rpc/fs_delete_chat', {method:'POST',body:{p_job_id:jobId}});
     }catch(err){
       if(!sbIsPermanent(err)) throw err;
-      chatDeleteOutbox = chatDeleteOutbox.filter(x=>x!==jobId);
       chatDeadLetter.push({kind:'delete', jobId:jobId, at:Date.now(), err:safeError(err)});
-      saveChatDeadLetter(); saveChatOutboxes();
+      if(!saveChatDeadLetter()) continue;
+      chatDeleteOutbox = chatDeleteOutbox.filter(x=>x!==jobId);
+      saveChatOutboxes();
       continue;
     }
     chatDeleteOutbox = chatDeleteOutbox.filter(x=>x!==jobId);
@@ -6912,7 +7013,11 @@ async function sbPush(){
 
 // เรียกจากทุกจุดที่แอปบันทึกข้อมูล — รวบหลาย ๆ การบันทึกที่ติดกันเป็นครั้งเดียว
 function sbQueue(){
-  if(!sbOn() || !authSession || !sbReady || sbApplying) return;
+  if(!sbOn() || sbApplying) return;
+  if(!authSession || !authMembership){ sbChip(); return; }
+  sbMarkDeferredWrite();
+  sbChip();
+  if(!authSession || !sbReady) return;
   clearTimeout(sbPushTimer);
   sbPushTimer = setTimeout(sbCycle, 400);
 }
@@ -6922,10 +7027,18 @@ let sbCycleRunning = false;
 async function sbCycle(){
   if(!sbOn() || !authSession || sbCycleRunning) return;
   const beforeConfirmation=JSON.stringify([sbErr,sbConfirmedScope,sbConfirmedRecords]);
+  const deferredTokens=sbLoadDeferredWrites();
+  sbDeferredWrites=deferredTokens;
   sbCycleRunning = true; sbBusy = true; sbChip();
   try{
-    await sbPush();
-    sbApply(await sbPull());
+    // ถ้ายังไม่เคยดึงฐานกลางสำเร็จ ห้ามส่งของในเครื่องก่อน
+    // เพราะอาจเป็นสำเนาเก่าหรือมีรายการใหม่จากผู้ใช้อื่นที่ยังไม่ถูกรวม
+    if(!sbReady || sbHasDeferredWrites()){ sbApply(await sbPull()); sbReady=true; }
+    if(!sbDeferredOwnerBlocked()){
+      await sbPush();
+      sbApply(await sbPull());
+    }
+    sbClearDeferredWrites(deferredTokens);
     sbErr = '';
     // ตรวจสิทธิ์ของพื้นที่ทำงานส่วนตัวซ้ำทุกรอบ
     //
@@ -7190,6 +7303,8 @@ async function sbBoot(sessionAlreadyChecked){
   if(authChecking) return;
   authChecking = true;
   sbChip();
+  const deferredTokens=sbLoadDeferredWrites();
+  sbDeferredWrites=deferredTokens;
   try{
     if(!sessionAlreadyChecked){
       const session = await authRestoreSession();
@@ -7199,8 +7314,9 @@ async function sbBoot(sessionAlreadyChecked){
     const d = await sbPull();
     sbApply(d);
     sbReady = true;
-    // ส่งเฉพาะ local delta ที่เทียบกับ server snapshot แล้ว จากนั้นยืนยัน snapshot ใหม่
-    if(await sbPush()) sbApply(await sbPull());
+    // ส่งเฉพาะ local delta ของบัญชีที่สร้างคิวไว้ หลังดึงฐานกลางแล้วเท่านั้น
+    if(!sbDeferredOwnerBlocked() && await sbPush()) sbApply(await sbPull());
+    sbClearDeferredWrites(deferredTokens);
     sbErr = '';
   }catch(err){
     sbErr = safeError(err);
@@ -7230,6 +7346,13 @@ loadUsers();
 // ซิงก์ข้ามแท็บ — ถ้าเปิดแอปไว้หลายแท็บ แท็บอื่นปิดงาน/แก้ข้อมูล แท็บนี้จะอัพเดตตามทันที
 window.addEventListener('storage', e=>{
   if(!e || !e.key) return;
+  if(e.key.indexOf(SB_DEFERRED_PREFIX)===0){
+    if(e.newValue!=null){
+      if(sbDeferredWrites.indexOf(e.key)<0) sbDeferredWrites.push(e.key);
+    }else sbDeferredWrites=sbDeferredWrites.filter(k=>k!==e.key);
+    sbChip();
+    return;
+  }
   if(e.key==='fs_records' || e.key==='fs_reccounter') loadRecords();
   else if(e.key==='fs_chats') loadChats();
   else if(e.key==='fs_activities') loadActivities();
