@@ -1,0 +1,557 @@
+From fab6d69dbb9a3a2244acb83230988a95b2a4c92f Mon Sep 17 00:00:00 2001
+From: piyawatv-cloud <295929244+piyawatv-cloud@users.noreply.github.com>
+Date: Sat, 5 Sep 2026 00:55:54 +0700
+Subject: [PATCH 10/24] =?UTF-8?q?feat(workspace):=20=E0=B8=95=E0=B8=B1?=
+ =?UTF-8?q?=E0=B8=A7=E0=B9=82=E0=B8=AB=E0=B8=A5=E0=B8=94=E0=B8=9E=E0=B8=B7?=
+ =?UTF-8?q?=E0=B9=89=E0=B8=99=E0=B8=97=E0=B8=B5=E0=B9=88=E0=B8=97=E0=B8=B3?=
+ =?UTF-8?q?=E0=B8=87=E0=B8=B2=E0=B8=99=E0=B8=AA=E0=B9=88=E0=B8=A7=E0=B8=99?=
+ =?UTF-8?q?=E0=B8=95=E0=B8=B1=E0=B8=A7=E0=B9=81=E0=B8=9A=E0=B8=9A=E0=B9=80?=
+ =?UTF-8?q?=E0=B8=AA=E0=B8=A3=E0=B8=B4=E0=B8=A1=E0=B8=A5=E0=B9=89=E0=B8=A7?=
+ =?UTF-8?q?=E0=B8=99=20=E0=B9=84=E0=B8=A1=E0=B9=88=E0=B9=81=E0=B8=95?=
+ =?UTF-8?q?=E0=B8=B0=E0=B8=AB=E0=B8=99=E0=B9=89=E0=B8=B2=E0=B8=88=E0=B8=AD?=
+ =?UTF-8?q?=E0=B9=80=E0=B8=94=E0=B8=B4=E0=B8=A1?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+เจ้าของสั่งไว้ว่า "ทำเสริมปุ่มหน้าใหม่ไม่แตะของเดิมนะ เข้าผ่าน user และ role ที่กำหนด
+เท่านั้น" คอมมิตนี้ทำตามนั้นทั้งสองครึ่ง และมีเทสต์พิสูจน์ทั้งสองครึ่ง
+
+ไฟล์นี้ไม่รู้จักสิ่งที่มันโหลด
+
+ชื่อแท็บ ที่อยู่ของ bundle และโหมด มาจากคำตอบของเซิร์ฟเวอร์ทั้งหมด ไม่มีป้าย ไม่มี
+เนื้อหา และไม่มีคำเฉพาะของงานนั้นฝังอยู่ใน index.html เลย เหลือแค่ชื่อตัวแปรตั้งค่า
+SCIENCE_WORKSPACE_API_ORIGIN ซึ่งเป็นชื่อที่กำหนดมาให้ใช้ · ชื่อ export ที่ตัวโหลด
+มองหาก็เป็นชื่อกลาง (mount หรือ default) ไม่ใช่ชื่อเฉพาะของงาน · คนที่เปิด
+view-source โดยไม่มีสิทธิ์จึงไม่เห็นแม้แต่ร่องรอยว่ามีอะไรอยู่ และมีเทสต์ที่สแกน
+outerHTML ทั้งหน้าเพื่อกันไม่ให้ใครเผลอฝังกลับเข้ามา
+
+ไม่ตั้งค่า = เงียบสนิท
+
+ค่าเริ่มต้นเป็นค่าว่าง ไม่ใช่ URL ของ production · ไม่ตั้งค่า ตั้งค่าเป็น origin ที่ไม่ใช่
+HTTPS มี path มี wildcard มี credential หรืออยู่ใน local-only mode → ไม่ยิงคำขอ
+แม้แต่ครั้งเดียว · ที่ต้องกัน wildcard เพราะตัวแยกวิเคราะห์ URL ยอมรับ * ในชื่อโฮสต์
+คนที่เขียน *.example.com จึงจะได้ค่าที่ไม่แมตช์อะไรเลยแบบเงียบ ๆ ถ้าไม่ปฏิเสธตรงนี้
+
+ผู้ไม่มีสิทธิ์ต้องไม่เกิดอะไรขึ้นเลย
+
+เซิร์ฟเวอร์ตอบ 404 เปล่า ๆ แล้วจบ ไม่มีปุ่ม ไม่มี panel ไม่มี key ใน localStorage
+ไม่ตามไปดึง bundle ต่อ และลายนิ้วมือ DOM ของหน้าเดิมต้องเท่ากันเป๊ะก่อนและหลัง
+เทสต์เทียบทั้งรายการปุ่มเมนูและจำนวนโหนดใน .main
+
+คำขอใช้ bearer token ของผู้ใช้เอง credentials omit และ cache no-store เพราะคำตอบ
+เป็นของเฉพาะคน ห้าม cache ไหนเก็บไว้ให้คนถัดไปเห็น
+
+ถอนออกให้หมดเมื่อสิทธิ์หาย
+
+authClearSession ถอนปุ่ม panel และ revoke Blob URL ก่อนล้าง session ไม่งั้นโค้ดของ
+workspace จะยังถูกอ้างถึงได้หลังผู้ใช้ออกจากระบบ · เรียก mount ซ้ำแล้วเซิร์ฟเวอร์ตอบ
+404 (สิทธิ์ถูกถอน role เปลี่ยน) ก็ถอนออกเองทันที
+
+ป้ายจากเซิร์ฟเวอร์ใส่ด้วย textContent เสมอ เทสต์ยิงป้ายที่เป็น img onerror เข้าไปแล้ว
+ยืนยันว่าไม่มี element เกิดขึ้นและสคริปต์ไม่ทำงาน · bundleUrl ต้องอยู่บน origin ที่
+อนุมัติเท่านั้น ทดสอบ evil.test, http, javascript: และ //evil.test แล้วปฏิเสธครบ
+
+สองอย่างที่เทสต์จับได้ระหว่างทาง
+
+หนึ่ง ผมเผลอเขียนชื่อ export เฉพาะของงานลงใน index.html ซึ่งผิดข้อบังคับข้อแรกเอง
+เทสต์ที่สแกนหาคำเฉพาะจับได้ เปลี่ยนเป็นชื่อกลางแล้ว
+
+สอง switchView ใช้ตาราง viewIds ที่ไม่มีปุ่มใหม่อยู่ พอกดปุ่มจึงตกไปที่ค่าเริ่มต้น
+inputView แล้วเปิดหน้า Customer Data ผิด ๆ · ดักไว้ต่างหากแล้ว และใช้ class 'on'
+ตามธรรมเนียมของ repo ไม่ใช่ attribute hidden ที่ผมคิดเอาเอง
+
+พิสูจน์: harness 37/37 ผ่าน (เดิม 25) · เทสต์ใหม่ 12 ข้อรันก่อนมี loader แล้วแดง 11 ข้อ
+จึงยืนยันว่าจับของจริง · run-sql-tests ผ่าน · build stamp เป็น 2026-09-05.1
+
+ยังไม่ได้ตั้งค่า origin ที่ไหนทั้งสิ้น ฟีเจอร์จึงปิดสนิทในทุกเครื่องตอนนี้
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_019ydP6KsDDZ9owE8qtTqFTj
+---
+ index.html                   | 191 ++++++++++++++++++++++++++++-
+ tests/formula-studio.test.js | 224 +++++++++++++++++++++++++++++++++++
+ 2 files changed, 414 insertions(+), 1 deletion(-)
+
+diff --git a/index.html b/index.html
+index b54faf6..8ab2ac4 100755
+--- a/index.html
++++ b/index.html
+@@ -649,7 +649,7 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
+   <div class="logo"><svg viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-1.73-3L9 11.35V4H8a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2h-1v7.35L19.73 19A2 2 0 0 1 18 22H6Zm5-10.11L8.31 16.5h7.38L13 11.89V4h-2v7.89Z"/></svg></div>
+   <div>
+     <div class="hdr-title">Formula Studio</div>
+-    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-04.1</div>
++    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-05.1</div>
+   </div>
+   <div class="sync-chip" id="syncChip" onclick="sbManualSync()" title="สถานะการซิงก์ข้อมูลกับเซิร์ฟเวอร์กลาง"></div>
+ </div>
+@@ -1139,6 +1139,20 @@ let SB_URL = 'https://uumkwaliebucxebkkllm.supabase.co';   // เช่น https
+ let SB_KEY = 'sb_publishable_yAmnKBRObKbjRxyqrzA7BA_4DQKDEU5';   // anon / publishable key
+ const SB_POLL_MS = 5000;   // ดึงข้อมูลใหม่จากเซิร์ฟเวอร์ทุกกี่มิลลิวินาที
+ 
++// ===================================================================
++//  Private workspace (ของเสริม) — เว้นว่างไว้ = ปิดสนิท
++//
++//  แอปนี้ไม่รู้ว่า workspace ที่จะโหลดมาคืออะไร ชื่ออะไร หรือมีหน้าตาแบบไหน
++//  มันแค่ถามเซิร์ฟเวอร์ที่ตั้งค่าไว้ว่า "ผู้ใช้คนนี้มี workspace ส่วนตัวไหม"
++//  แล้วรับชื่อแท็บกับที่อยู่ของ bundle มาจากคำตอบ · ทุกอย่างสร้างตอน runtime
++//
++//  จงใจไม่ฝังชื่อหรือเนื้อหาของ workspace ไว้ในไฟล์นี้ คนที่เปิด view-source
++//  โดยไม่มีสิทธิ์จึงไม่เห็นแม้แต่ร่องรอยว่ามีอะไรอยู่
++//
++//  ค่าเริ่มต้นเป็นค่าว่างเสมอ ไม่ใช่ URL ของ production — ไม่ตั้งค่า = ไม่ยิงอะไรเลย
++// ===================================================================
++let SCIENCE_WORKSPACE_API_ORIGIN = '';
++
+ // ========== THAI FDA DATABASE ==========
+ // อ้างอิง: ประกาศกระทรวงสาธารณสุข ฉบับที่ 448 พ.ศ. 2566 (มีผล 4 ม.ค. 2567)
+ //          ประกาศ อย. รายการพืชอนุญาต 444 ชนิด (8 ก.ค. 2567)
+@@ -2204,6 +2218,22 @@ function fmtUW(d){ return d.uw ? [d.uw, d.uwUnit || 'mg'].filter(Boolean).join('
+ // ========== NAVIGATION ==========
+ function switchView(v) {
+   const viewIds = {input:'inputView', dash:'dashView', modify:'modifyView', chat:'chatView', act:'actView'};
++  // panel ที่ loader สร้างตอน runtime ไม่ได้อยู่ในตารางข้างบน · ถ้าไม่ดักไว้ตรงนี้
++  // การกดปุ่มของมันจะตกไปที่ค่าเริ่มต้น inputView แล้วเปิดหน้าผิด
++  if(v === 'pws'){
++    const panel = document.getElementById('pwsPanel');
++    if(!panel){ v = 'dash'; }
++    else {
++      document.querySelectorAll('.view').forEach(el=>el.classList.remove('on'));
++      panel.classList.add('on');
++      ['sideData','sideDash','sideChat','sideActivities'].forEach(id=>{
++        const el = document.getElementById(id); if(el) el.classList.remove('on');
++      });
++      const btn = document.getElementById('pwsNav');
++      if(btn) btn.classList.add('on');
++      return;
++    }
++  }
+   if(v==='act' && !can('manageUsers')){ alert('Activities log เปิดดูได้เฉพาะ Role: Admin'); return; }
+   if(v==='input' && currentUser && !can('createData')){
+     alert('เมนู Customer Data ใช้ได้เฉพาะ Role: Admin, Sales, OPC, MKT\nRole ของคุณ: ' + (roleLabel(currentRole())||'ไม่ระบุ'));
+@@ -2220,6 +2250,9 @@ function switchView(v) {
+   if(v==='dash') renderRecordsList();
+   if(v==='chat') renderChat();
+   if(v==='act') renderActivities();
++  // ปุ่มของ workspace ต้องเลิกไฮไลต์เมื่อผู้ใช้ไปหน้าอื่น
++  const pwsBtn = document.getElementById('pwsNav');
++  if(pwsBtn) pwsBtn.classList.remove('on');
+   if(v==='chat'){ const g=document.getElementById('chatGroup'); if(g) g.classList.add('open'); }
+   if(v!=='input') { document.querySelectorAll('.side-link:not(.chat-job)').forEach(el=>el.classList.remove('on')); window.scrollTo({top:0,behavior:'auto'}); }
+ }
+@@ -6058,6 +6091,9 @@ function authStoreSession(session){
+ function authClearSession(){
+   clearTimeout(authRefreshTimer);
+   authRefreshTimer = null;
++  // ถอนพื้นที่ทำงานส่วนตัวก่อนล้าง session ไม่งั้นปุ่มกับ panel จะค้างอยู่บนหน้าจอ
++  // ของคนที่ออกจากระบบไปแล้ว และ Blob URL จะยังอ้างถึงโค้ดของมันได้อยู่
++  try{ teardownPrivateWorkspace(); }catch(err){}
+   authSession = null;
+   authMembership = null;
+   currentUser = '';
+@@ -6556,6 +6592,153 @@ async function sbCycle(){
+ function sbManualSync(){ if(sbOn() && authSession){ sbErr=''; sbCycle(); } }
+ 
+ // ---------- เริ่มทำงานตอนเปิดแอป ----------
++// ===================================================================
++//  Generic private-workspace loader
++//
++//  ทั้งบล็อกนี้ไม่รู้จักชื่อของ workspace ที่มันโหลด · ชื่อแท็บ ที่อยู่ของ bundle และ
++//  โหมด มาจากคำตอบของเซิร์ฟเวอร์ทั้งหมด และเซิร์ฟเวอร์เป็นคนตัดสินว่าใครได้เห็น
++//
++//  ผู้ที่ไม่มีสิทธิ์ต้องไม่เกิดอะไรขึ้นเลย: ไม่มีปุ่ม ไม่มี panel ไม่มี key ใน
++//  localStorage และไม่มีแม้แต่คำขอ bundle · คำตอบ 404 เปล่า ๆ แยกไม่ออกจาก
++//  "ไม่มีอะไรอยู่ตรงนั้น"
++// ===================================================================
++
++let pwsState = null;   // {navEl, panelEl, blobUrl, version}
++
++/** origin ที่อนุมัติต้องเป็น HTTPS origin เปล่า ๆ เท่านั้น ไม่มี path ไม่มี wildcard */
++function pwsApprovedOrigin(){
++  const value = SCIENCE_WORKSPACE_API_ORIGIN;
++  if(typeof value !== 'string' || value === '') return '';
++  let url;
++  try{ url = new URL(value); }catch(err){ return ''; }
++  if(url.protocol !== 'https:') return '';
++  if(url.username || url.password) return '';
++  if(url.pathname !== '/' || url.search || url.hash) return '';
++  // ตัวแยกวิเคราะห์ยอมรับ * ในชื่อโฮสต์ ถ้าปล่อยไว้ คนตั้งค่าที่เขียน *.example.com
++  // จะได้ค่าที่ไม่แมตช์อะไรเลยแบบเงียบ ๆ
++  if(!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/.test(url.hostname)) return '';
++  if(value.replace(/\/+$/,'') !== url.origin) return '';
++  return url.origin;
++}
++
++/** ถอนทุกอย่างที่ loader สร้างไว้ · เรียกซ้ำได้ปลอดภัย */
++function teardownPrivateWorkspace(){
++  if(!pwsState) return;
++  try{ if(pwsState.navEl && pwsState.navEl.parentNode) pwsState.navEl.parentNode.removeChild(pwsState.navEl); }catch(err){}
++  try{ if(pwsState.panelEl && pwsState.panelEl.parentNode) pwsState.panelEl.parentNode.removeChild(pwsState.panelEl); }catch(err){}
++  // ปล่อย Blob URL คืน ไม่งั้นโค้ดของ workspace ยังถูกอ้างถึงได้หลังผู้ใช้ออกจากระบบ
++  try{ if(pwsState.blobUrl) URL.revokeObjectURL(pwsState.blobUrl); }catch(err){}
++  pwsState = null;
++}
++
++/**
++ * ถาม manifest แล้ว mount ถ้าได้รับอนุญาต
++ *
++ * เรียกได้บ่อยเท่าที่ต้องการ · ถ้าสิทธิ์หายไประหว่างทาง มันจะถอนของเดิมออกให้เอง
++ */
++async function mountPrivateWorkspace(){
++  const origin = pwsApprovedOrigin();
++  // ไม่ตั้งค่า / origin ไม่ปลอดภัย / ยังไม่ล็อกอิน / local-only mode = เงียบสนิท
++  if(!origin || !sbOn() || !authSession || !authSession.access_token){
++    teardownPrivateWorkspace();
++    return;
++  }
++
++  let manifest = null;
++  try{
++    const res = await fetch(origin + '/api/private-workspaces/formula', {
++      method:'GET',
++      headers:{Authorization:'Bearer ' + authSession.access_token},
++      credentials:'omit',   // ตัวตนคือ bearer token เท่านั้น ไม่เคยพึ่ง cookie
++      cache:'no-store'      // คำตอบเป็นของเฉพาะคน ห้ามให้ cache ไหนเก็บไว้
++    });
++    if(!res.ok){ teardownPrivateWorkspace(); return; }
++    manifest = await res.json();
++  }catch(err){
++    // ต่อไม่ติดก็คือไม่มี · ไม่ประกาศให้ผู้ใช้รู้ว่ามีอะไรที่เขาเข้าไม่ถึง
++    teardownPrivateWorkspace();
++    return;
++  }
++
++  if(!manifest || manifest.allowed !== true || typeof manifest.label !== 'string' || !manifest.label){
++    teardownPrivateWorkspace();
++    return;
++  }
++
++  // bundle ต้องอยู่บน origin ที่อนุมัติไว้เท่านั้น · path สัมพัทธ์แปลงจาก origin นั้น
++  let bundleUrl;
++  try{ bundleUrl = new URL(String(manifest.bundleUrl || ''), origin + '/'); }
++  catch(err){ teardownPrivateWorkspace(); return; }
++  if(bundleUrl.origin !== origin || bundleUrl.protocol !== 'https:'){
++    teardownPrivateWorkspace();
++    return;
++  }
++
++  // ของเดิมที่ mount ไว้แล้วรุ่นเดียวกัน ไม่ต้องทำซ้ำ
++  if(pwsState && pwsState.version === manifest.version) return;
++  teardownPrivateWorkspace();
++
++  let source;
++  try{
++    const res = await fetch(bundleUrl.toString(), {
++      method:'GET',
++      headers:{Authorization:'Bearer ' + authSession.access_token},
++      credentials:'omit', cache:'no-store'
++    });
++    if(!res.ok){ return; }
++    source = await res.text();
++  }catch(err){ return; }
++
++  const nav = pwsCreateNav(manifest.label);
++  const panel = pwsCreatePanel();
++  if(!nav || !panel) return;
++
++  let blobUrl = '';
++  try{
++    blobUrl = URL.createObjectURL(new Blob([source], {type:'text/javascript'}));
++  }catch(err){ blobUrl = ''; }
++
++  pwsState = {navEl:nav, panelEl:panel, blobUrl:blobUrl, version:manifest.version};
++
++  if(blobUrl){
++    try{
++      const mod = await import(blobUrl);
++      // ชื่อ export ต้องเป็นชื่อกลาง ๆ · ไฟล์นี้ต้องไม่รู้ว่า workspace ที่โหลดมาคืออะไร
++      const mount = (mod && (mod.mount || mod.default)) || window.__pwsMounted;
++      if(typeof mount === 'function') mount(panel, {mode:manifest.mode});
++    }catch(err){
++      // bundle รันไม่ได้ ก็ยังคงแท็บไว้พร้อมข้อความ ดีกว่าหายไปเฉย ๆ โดยไม่บอกอะไร
++      panel.textContent = 'เปิดพื้นที่ทำงานส่วนตัวไม่สำเร็จ กรุณาลองใหม่';
++    }
++  }
++}
++
++/** ปุ่มใหม่ต่อท้ายเมนูเดิม ไม่ขยับของเดิมสักปุ่ม */
++function pwsCreateNav(label){
++  const host = document.getElementById('chatGroup');
++  if(!host || !host.parentNode) return null;
++  const btn = document.createElement('div');
++  btn.id = 'pwsNav';
++  btn.className = 'side-item';
++  // ป้ายมาจากเซิร์ฟเวอร์ · ใส่เป็นข้อความล้วนเสมอ ไม่ใช่ HTML
++  btn.textContent = label;
++  btn.onclick = function(){ switchView('pws'); };
++  host.parentNode.insertBefore(btn, host.nextSibling);
++  return btn;
++}
++
++/** panel ใหม่ต่อท้ายใน .main ไม่แตะ panel เดิม */
++function pwsCreatePanel(){
++  const main = document.querySelector('.main');
++  if(!main) return null;
++  const panel = document.createElement('section');
++  panel.id = 'pwsPanel';
++  // ใช้ class 'view' เหมือน panel เดิมทุกอัน switchView จึงปิดมันให้เองอยู่แล้ว
++  panel.className = 'view';
++  main.appendChild(panel);
++  return panel;
++}
++
+ async function sbBoot(sessionAlreadyChecked){
+   if(!sbOn()) return;
+   if(authChecking) return;
+@@ -6586,6 +6769,12 @@ async function sbBoot(sessionAlreadyChecked){
+     setInterval(()=>{ if(!document.hidden) sbCycle(); }, SB_POLL_MS);
+     document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) sbCycle(); });
+   }
++  // เรียกหลัง membership พร้อมแล้วเท่านั้น · ก่อนหน้านี้ยังไม่รู้ว่าผู้ใช้เป็นใคร
++  // จึงยังตัดสินไม่ได้ว่าเขามีพื้นที่ทำงานส่วนตัวหรือไม่ · ล้มก็ไม่กระทบการซิงก์
++  if(authSession && authMembership){
++    try{ await mountPrivateWorkspace(); }
++    catch(err){ console.warn('[workspace]', safeError(err)); }
++  }
+ }
+ 
+ // Init activity log + user system (login state from localStorage)
+diff --git a/tests/formula-studio.test.js b/tests/formula-studio.test.js
+index 5d407df..861d774 100644
+--- a/tests/formula-studio.test.js
++++ b/tests/formula-studio.test.js
+@@ -229,6 +229,230 @@
+     equal(window.__fetchCalls.length, 0, 'local-only mode used the network');
+   });
+ 
++  // ---- Private workspace loader (ของเสริมล้วน ไม่แตะของเดิม) ----
++  //
++  // ข้อบังคับจากเจ้าของ: "ทำเสริมปุ่มหน้าใหม่ไม่แตะของเดิมนะ เข้าผ่าน user และ role
++  // ที่กำหนดเท่านั้น" · เทสต์ชุดนี้พิสูจน์ทั้งสองครึ่ง — ครึ่งที่เพิ่มเข้ามา และครึ่งที่
++  // ต้องไม่เปลี่ยนเลยเมื่อไม่มีสิทธิ์หรือไม่ได้ตั้งค่า
++
++  function domFingerprint(){
++    // ลายนิ้วมือของหน้าจอเดิม: ปุ่มเมนู หัวข้อ และจำนวนโหนดใน .main
++    const nav = [...document.querySelectorAll('.side-item, .side-group')].map(el=>el.id || el.textContent.trim()).join('|');
++    const main = document.querySelector('.main');
++    return nav + '##' + (main ? main.children.length : -1);
++  }
++
++  function workspaceSession(){
++    authSession = {access_token:'ws-token', refresh_token:'r', expires_at:Date.now()/1000+3600,
++      user:{id:'55555555-5555-5555-5555-555555555555', email:'rd@example.test'}};
++    authMembership = {name:'อาร์แอนด์ดี', role:'rd', active:true};
++    currentUser = 'อาร์แอนด์ดี';
++  }
++
++  test('index.html ไม่มีคำว่า RD Science หรือเนื้อหา Science แบบ static เลย', function(){
++    reset();
++    // คนที่เปิด view-source โดยไม่มีสิทธิ์ ต้องไม่เห็นแม้แต่ร่องรอยว่ามีระบบนี้อยู่
++    const source = document.documentElement.outerHTML;
++    assert(!/RD Science/i.test(source), 'index.html มีป้าย RD Science ฝังอยู่');
++    assert(!/science[_-]?case|scienceWorkspace|escalation/i.test(source.replace(/SCIENCE_WORKSPACE_API_ORIGIN/g,'')),
++      'index.html มีคำเฉพาะของงาน Science ฝังอยู่');
++  });
++
++  test('ไม่ได้ตั้งค่า origin = ไม่ส่ง request และไม่แตะ DOM เลย', async function(){
++    reset();
++    workspaceSession();
++    SCIENCE_WORKSPACE_API_ORIGIN = '';
++    const before = domFingerprint();
++
++    await mountPrivateWorkspace();
++
++    equal(window.__fetchCalls.length, 0, 'ยิง request ทั้งที่ยังไม่ได้ตั้งค่า');
++    equal(domFingerprint(), before, 'DOM ของเดิมเปลี่ยนไป');
++    equal(document.getElementById('pwsNav'), null, 'สร้างปุ่มทั้งที่ปิดอยู่');
++    equal(document.getElementById('pwsPanel'), null, 'สร้าง panel ทั้งที่ปิดอยู่');
++  });
++
++  test('local-only mode ไม่ส่ง manifest request', async function(){
++    reset();
++    SB_URL = ''; SB_KEY = '';
++    SCIENCE_WORKSPACE_API_ORIGIN = 'https://opc.example.test';
++    authSession = null;
++    await mountPrivateWorkspace();
++    equal(window.__fetchCalls.length, 0, 'local-only mode ยังยิง request');
++  });
++
++  test('origin ที่ไม่ใช่ HTTPS หรือไม่ใช่ origin เปล่า ๆ ถูกปฏิเสธก่อนยิง request', async function(){
++    for(const bad of ['http://opc.example.test','https://opc.example.test/path','https://*.example.test',
++                      'https://user:pw@opc.example.test','opc.example.test','javascript:alert(1)']){
++      reset();
++      workspaceSession();
++      SCIENCE_WORKSPACE_API_ORIGIN = bad;
++      await mountPrivateWorkspace();
++      equal(window.__fetchCalls.length, 0, 'ยอมรับ origin ที่ไม่ปลอดภัย: ' + bad);
++      equal(document.getElementById('pwsNav'), null, 'สร้างปุ่มจาก origin ที่ไม่ปลอดภัย: ' + bad);
++    }
++  });
++
++  test('ผู้ไม่มีสิทธิ์ไม่เห็นปุ่ม ไม่เห็น panel และไม่มีอะไรเหลือในเครื่อง', async function(){
++    reset();
++    workspaceSession();
++    SCIENCE_WORKSPACE_API_ORIGIN = 'https://opc.example.test';
++    const before = domFingerprint();
++    // เซิร์ฟเวอร์ตอบ 404 เปล่า ๆ เหมือนไม่มีอะไรอยู่ตรงนั้นเลย
++    window.__fetchQueue.push(window.__mockResponse(404, {error:'NOT_FOUND'}));
++
++    await mountPrivateWorkspace();
++
++    equal(document.getElementById('pwsNav'), null, 'ผู้ไม่มีสิทธิ์ได้ปุ่ม');
++    equal(document.getElementById('pwsPanel'), null, 'ผู้ไม่มีสิทธิ์ได้ panel');
++    equal(domFingerprint(), before, 'DOM ของเดิมเปลี่ยนไปสำหรับผู้ไม่มีสิทธิ์');
++    equal(window.__fetchCalls.length, 1, 'ควรถาม manifest ครั้งเดียวแล้วหยุด');
++    // ห้ามดึง bundle ต่อ
++    assert(!window.__fetchCalls.some(c=>c.url.includes('/bundle')), 'ผู้ไม่มีสิทธิ์ยังไปดึง bundle');
++    // ห้ามทิ้งร่องรอยใน localStorage
++    assert(!Object.keys(localStorage).some(k=>/pws|science|workspace/i.test(k)), 'มี key ค้างใน localStorage');
++  });
++
++  test('manifest request ใช้ bearer token ของผู้ใช้ ไม่ส่ง cookie และไม่ cache', async function(){
++    reset();
++    workspaceSession();
++    SCIENCE_WORKSPACE_API_ORIGIN = 'https://opc.example.test';
++    window.__fetchQueue.push(window.__mockResponse(404, {error:'NOT_FOUND'}));
++
++    await mountPrivateWorkspace();
++
++    const call = window.__fetchCalls[0];
++    assert(call.url.startsWith('https://opc.example.test/'), 'ยิงผิด origin: ' + call.url);
++    equal(call.options.headers.Authorization, 'Bearer ws-token', 'ไม่ได้ใช้ token ของผู้ใช้');
++    equal(call.options.credentials, 'omit', 'ยังแนบ credential ไปด้วย');
++    equal(call.options.cache, 'no-store', 'ยอมให้ cache คำตอบส่วนตัว');
++  });
++
++  test('ผู้มีสิทธิ์ได้ปุ่มกับ panel ใหม่ โดยของเดิมยังอยู่ครบเท่าเดิม', async function(){
++    reset();
++    workspaceSession();
++    SCIENCE_WORKSPACE_API_ORIGIN = 'https://opc.example.test';
++    const navBefore = [...document.querySelectorAll('.side-item')].map(el=>el.textContent.trim());
++
++    window.__fetchQueue.push(window.__mockResponse(200, {
++      allowed:true, label:'RD Science', bundleUrl:'/api/private-workspaces/formula/bundle',
++      version:'1', mode:'workspace'
++    }));
++    window.__fetchQueue.push(window.__mockResponse(200,
++      'window.__pwsMounted = (host)=>{ host.textContent = "workspace ready"; };'));
++
++    await mountPrivateWorkspace();
++
++    const nav = document.getElementById('pwsNav');
++    assert(nav, 'ผู้มีสิทธิ์ไม่ได้ปุ่ม');
++    equal(nav.textContent, 'RD Science', 'ป้ายปุ่มไม่ได้มาจาก manifest');
++    assert(document.getElementById('pwsPanel'), 'ไม่มี panel');
++
++    // ปุ่มเดิมทุกปุ่มยังอยู่ครบและข้อความไม่เปลี่ยน
++    const navAfter = [...document.querySelectorAll('.side-item')].map(el=>el.textContent.trim());
++    navBefore.forEach(function(label){
++      assert(navAfter.includes(label), 'ปุ่มเดิมหายไป: ' + label);
++    });
++  });
++
++  test('ป้ายจากเซิร์ฟเวอร์ถูกใส่ด้วย textContent ไม่ใช่ HTML', async function(){
++    reset();
++    workspaceSession();
++    SCIENCE_WORKSPACE_API_ORIGIN = 'https://opc.example.test';
++    window.__fetchQueue.push(window.__mockResponse(200, {
++      allowed:true, label:'<img src=x onerror="window.__pwsXss=1">', 
++      bundleUrl:'/api/private-workspaces/formula/bundle', version:'1', mode:'workspace'
++    }));
++    window.__fetchQueue.push(window.__mockResponse(200, 'window.__pwsMounted=()=>{};'));
++
++    await mountPrivateWorkspace();
++
++    const nav = document.getElementById('pwsNav');
++    assert(nav, 'ไม่ได้สร้างปุ่ม');
++    equal(nav.querySelector('img'), null, 'ป้ายจากเซิร์ฟเวอร์ถูก render เป็น HTML');
++    equal(window.__pwsXss, undefined, 'สคริปต์จากป้ายทำงานได้');
++  });
++
++  test('bundleUrl ที่ชี้ออกนอก origin ที่อนุมัติถูกปฏิเสธ', async function(){
++    for(const bad of ['https://evil.test/bundle.js','http://opc.example.test/bundle.js',
++                      'javascript:alert(1)','//evil.test/x.js']){
++      reset();
++      workspaceSession();
++      SCIENCE_WORKSPACE_API_ORIGIN = 'https://opc.example.test';
++      window.__fetchQueue.push(window.__mockResponse(200, {
++        allowed:true, label:'RD Science', bundleUrl:bad, version:'1', mode:'workspace'
++      }));
++      await mountPrivateWorkspace();
++      equal(document.getElementById('pwsNav'), null, 'ยอมรับ bundleUrl อันตราย: ' + bad);
++      assert(!window.__fetchCalls.some(c=>c.url.includes('evil.test')), 'ยิงไปที่ ' + bad);
++    }
++  });
++
++  test('ออกจากระบบแล้วต้องถอนปุ่ม panel และ Blob URL ให้หมด', async function(){
++    reset();
++    workspaceSession();
++    SCIENCE_WORKSPACE_API_ORIGIN = 'https://opc.example.test';
++    const before = domFingerprint();
++    window.__fetchQueue.push(window.__mockResponse(200, {
++      allowed:true, label:'RD Science', bundleUrl:'/api/private-workspaces/formula/bundle',
++      version:'1', mode:'workspace'
++    }));
++    window.__fetchQueue.push(window.__mockResponse(200, 'window.__pwsMounted=()=>{};'));
++    await mountPrivateWorkspace();
++    assert(document.getElementById('pwsNav'), 'setup: ไม่ได้ mount');
++
++    authClearSession();
++
++    equal(document.getElementById('pwsNav'), null, 'ปุ่มยังอยู่หลังออกจากระบบ');
++    equal(document.getElementById('pwsPanel'), null, 'panel ยังอยู่หลังออกจากระบบ');
++    equal(domFingerprint(), before, 'DOM ไม่กลับไปเหมือนเดิมหลังออกจากระบบ');
++  });
++
++  test('membership หายหรือ role เปลี่ยน = ถอนออกทันที', async function(){
++    reset();
++    workspaceSession();
++    SCIENCE_WORKSPACE_API_ORIGIN = 'https://opc.example.test';
++    window.__fetchQueue.push(window.__mockResponse(200, {
++      allowed:true, label:'RD Science', bundleUrl:'/api/private-workspaces/formula/bundle',
++      version:'1', mode:'workspace'
++    }));
++    window.__fetchQueue.push(window.__mockResponse(200, 'window.__pwsMounted=()=>{};'));
++    await mountPrivateWorkspace();
++    assert(document.getElementById('pwsNav'), 'setup: ไม่ได้ mount');
++
++    // เซิร์ฟเวอร์เปลี่ยนใจ: รอบถัดไปตอบ 404
++    window.__fetchQueue.push(window.__mockResponse(404, {error:'NOT_FOUND'}));
++    await mountPrivateWorkspace();
++
++    equal(document.getElementById('pwsNav'), null, 'สิทธิ์หายแล้วปุ่มยังอยู่');
++    equal(document.getElementById('pwsPanel'), null, 'สิทธิ์หายแล้ว panel ยังอยู่');
++  });
++
++  test('switchView ของเดิมยังทำงานเหมือนเดิมเมื่อมี panel ใหม่อยู่', async function(){
++    reset();
++    workspaceSession();
++    SCIENCE_WORKSPACE_API_ORIGIN = 'https://opc.example.test';
++    window.__fetchQueue.push(window.__mockResponse(200, {
++      allowed:true, label:'RD Science', bundleUrl:'/api/private-workspaces/formula/bundle',
++      version:'1', mode:'workspace'
++    }));
++    window.__fetchQueue.push(window.__mockResponse(200, 'window.__pwsMounted=()=>{};'));
++    await mountPrivateWorkspace();
++
++    // repo นี้ใช้ class 'on' เป็นตัวบอกว่า view ไหนเปิดอยู่ ไม่ใช่ attribute hidden
++    switchView('dash');
++    const panel = document.getElementById('pwsPanel');
++    assert(panel && !panel.classList.contains('on'), 'เปลี่ยนไปหน้าอื่นแล้ว panel ใหม่ยังโชว์อยู่');
++    const dash = document.getElementById('dashView');
++    assert(dash && dash.classList.contains('on'), 'หน้าเดิมเปิดไม่ได้เมื่อมี panel ใหม่');
++
++    // แล้วกดกลับเข้า workspace ต้องเปิดได้จริง ไม่ใช่ตกไปหน้า Customer Data
++    switchView('pws');
++    assert(panel.classList.contains('on'), 'กดปุ่ม workspace แล้วไม่เปิด');
++    const input = document.getElementById('inputView');
++    assert(input && !input.classList.contains('on'), 'กดปุ่ม workspace แล้วตกไปหน้าเดิม');
++  });
++
+   test('secure mode never offers first-Admin browser creation', function(){
+     reset();
+     authChecking = false;
+-- 
+2.39.5 (Apple Git-154)
+

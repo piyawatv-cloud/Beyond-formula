@@ -1,0 +1,373 @@
+From 43b5cfb89ba0b1ee928509367ee54f113d4286e8 Mon Sep 17 00:00:00 2001
+From: piyawatv-cloud <295929244+piyawatv-cloud@users.noreply.github.com>
+Date: Fri, 25 Sep 2026 19:06:09 +0700
+Subject: [PATCH 22/24] =?UTF-8?q?feat(chat):=20=E0=B8=8A=E0=B9=88=E0=B8=AD?=
+ =?UTF-8?q?=E0=B8=87=E0=B8=84=E0=B9=89=E0=B8=99=E0=B8=AB=E0=B8=B2=E0=B8=A3?=
+ =?UTF-8?q?=E0=B8=AB=E0=B8=B1=E0=B8=AA=E0=B8=87=E0=B8=B2=E0=B8=99=20+=20?=
+ =?UTF-8?q?=E0=B9=84=E0=B8=A1=E0=B9=88=E0=B8=A5=E0=B9=89=E0=B8=B2=E0=B8=87?=
+ =?UTF-8?q?=E0=B8=AA=E0=B8=B4=E0=B9=88=E0=B8=87=E0=B8=97=E0=B8=B5=E0=B9=88?=
+ =?UTF-8?q?=E0=B8=9E=E0=B8=B4=E0=B8=A1=E0=B8=9E=E0=B9=8C=E0=B8=84=E0=B9=89?=
+ =?UTF-8?q?=E0=B8=B2=E0=B8=87=E0=B9=80=E0=B8=A1=E0=B8=B7=E0=B9=88=E0=B8=AD?=
+ =?UTF-8?q?=E0=B8=A7=E0=B8=B2=E0=B8=94=E0=B8=AB=E0=B8=99=E0=B9=89=E0=B8=B2?=
+ =?UTF-8?q?=E0=B9=83=E0=B8=AB=E0=B8=A1=E0=B9=88=E0=B9=80=E0=B8=9A=E0=B8=B7?=
+ =?UTF-8?q?=E0=B9=89=E0=B8=AD=E0=B8=87=E0=B8=AB=E0=B8=A5=E0=B8=B1=E0=B8=87?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- แทน dropdown เลือกห้องแชทด้วยช่องค้นหา รหัสงาน / ลูกค้า / แบรนด์ / Sales
+- preserveTypedFields(): เก็บทุก input/textarea ที่มี id ซึ่งกำลังพิมพ์หรือ focus อยู่
+  แล้วคืนค่า/เคอร์เซอร์/focus หลังวาดใหม่ · ใช้ทั้ง sbRerender() (sync 5 วิ) และตัวฟัง storage (ข้ามแท็บ)
+- chatPickBlur(): blur ของช่องเก่าที่ถูกถอดออกไม่ไปปิดรายการของช่องใหม่
+- เทสต์ใหม่ 4 ตัว (ก่อนแก้พัง, หลังแก้ 64/64) · build 2026-09-25.1 · บันทึกใน docs/DEBUG_LOG.md
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01CC8bBxhqNnJw6Bn44Chm67
+---
+ docs/DEBUG_LOG.md            |  21 +++++
+ index.html                   | 157 ++++++++++++++++++++++++++++-------
+ tests/formula-studio.test.js | 100 ++++++++++++++++++++++
+ 3 files changed, 249 insertions(+), 29 deletions(-)
+
+diff --git a/docs/DEBUG_LOG.md b/docs/DEBUG_LOG.md
+index 2d5aa87..8cde3e2 100644
+--- a/docs/DEBUG_LOG.md
++++ b/docs/DEBUG_LOG.md
+@@ -48,3 +48,24 @@ Focused browser tests failed before implementation **48 passed / 2 failed** (mis
+ Rendered evidence uses sanitized actual Formula HTML, its real loader, the emitted private workspace bundle, synthetic responses, and the existing showcase's licensed embedded fonts. Noto Sans Thai 400/500/700 and Roboto 400/500 all loaded; computed inherited font stack matches Formula. Screenshots: `/tmp/science-formula-host-1440.png`, `-390.png`, `-360.png`; metrics `/tmp/science-formula-host-evidence.json`, reproduction `/tmp/science-formula-host.mjs`. No external requests or page errors. This is local visual verification, not UAT. The private repository has separate real-handler/application-role PostgreSQL integration evidence.
+ 
+ No schema/storage/dependency or existing feature-flow changes. Rollback is a reviewed revert of this isolated change with origin disabled. Independent QA and CODEOWNER approval remain separate; no merge, release, production access or deployment. Same-origin bundle/CSP isolation remains an owner decision; transport fencing does not sandbox module code.
++
++## 2026-09-25 — ช่องค้นหารหัสงานหน้าแชท: พิมพ์อยู่แล้วข้อความหาย / รายการปิดเอง
++รายงานโดย: ผู้ใช้ (ทดลองใช้ build 2026-09-19.1 บน branch `feat/chat-job-search`)
++อาการ: พิมพ์คำค้นในช่องค้นหารหัสงาน แล้วข้อความหายหรือเด้งกลับเป็นชื่อห้องเดิม รายการผลค้นหาปิดเอง และช่องหลุด focus
++ทำให้เกิดซ้ำ: เปิดหน้า Chat → พิมพ์ในช่องค้นหา → เรียก `sbRerender()` (sync ทุก 5 วินาทีเรียกเมื่อมีข้อมูลใหม่จากเซิร์ฟเวอร์) → คำค้นหาย (เทสต์ใหม่พัง 60/2 ก่อนแก้)
++สาเหตุจริง (มี 2 ชั้น):
++1. `index.html` `sbRerender()` วาดหน้าแชทใหม่ด้วย `innerHTML` และเก็บค่าไว้เฉพาะ `#chatInput` ทำให้ `#chatPickInput` ถูกสร้างใหม่ด้วยค่าเริ่มต้น
++2. ช่องเดิมที่ถูกถอดออกยิง `blur` → `setTimeout(chatPickClose,150)` ซึ่งไปปิดรายการของช่องใหม่ (หา element จาก id) แม้ผู้ใช้ยัง focus อยู่
++แก้อย่างไร: `sbRerender()` เก็บและคืนค่า value/selection/focus ของ `#chatPickInput` (focus กลับจะเรียก `chatPickFilter()` เปิดรายการตามคำค้นเอง) และ onblur เรียก `chatPickBlur()` ที่ปิดรายการเฉพาะเมื่อช่องค้นหาไม่ได้ focus อยู่จริง · build stamp `2026-09-25.1`
++test ที่เพิ่ม: `sync ต้องไม่ล้างคำค้นในช่องค้นหารหัสงาน` ทั้งหน้ารายการแชทและในห้องแชท (รอเลย 150ms เพื่อจับชั้นที่ 2) · ก่อนแก้ 60 ผ่าน / 2 พัง → แก้ชั้น 1 แล้วยังพัง 2 (รายการปิดเอง) → หลังแก้ครบ `node harness.js` 62/62 ผ่าน, `./tests/run-sql-tests.sh` ผ่าน
++ผลกระทบอื่น: ไม่แตะโครงสร้างข้อมูลหรือ storage · `chatPickClose()` ที่ใช้กับ Escape/เลือกรายการยังปิดทันทีเหมือนเดิม · เรื่อง sync ข้ามแท็บที่ค้างไว้ ปิดแล้วในเคสถัดไป
++
++## 2026-09-25 — แท็บอื่นแก้แชทแล้วข้อความที่พิมพ์ค้างหาย + กันเกิดซ้ำทั้งตระกูล
++รายงานโดย: งานค้างจากเคสก่อนหน้า (พบระหว่างไล่ช่องค้นหารหัสงาน)
++อาการ: เปิดแอปหลายแท็บ เมื่อแท็บอื่นแก้ `fs_chats`/`fs_records` ข้อความที่พิมพ์ค้างในห้องแชทและคำค้นหายพร้อมหลุด focus
++ทำให้เกิดซ้ำ: พิมพ์ใน `#chatInput` → ยิง `StorageEvent('storage',{key:'fs_chats'})` → ช่องว่าง (เทสต์ใหม่พัง 63/1 กับโค้ดก่อนแก้)
++สาเหตุจริง: `index.html` ตัวฟัง `window 'storage'` เรียก `renderChat()` ตรง ๆ โดยไม่เก็บค่าใด ๆ · ต้นตอร่วมของทั้งสองเคสคือการเก็บค่าแบบลงชื่อ id ทีละช่องไว้ใน `sbRerender()` เท่านั้น ช่องใหม่หรือเส้นทางวาดใหม่อื่นจึงหลุดได้เสมอ
++แก้อย่างไร: เพิ่ม `preserveTypedFields(render)` เก็บทุก `input[id]`/`textarea[id]` ที่กำลังพิมพ์ (ค่า ≠ defaultValue) หรือถูก focus แล้วคืนค่า/เคอร์เซอร์/focus ให้ช่องที่ถูกสร้างใหม่ ข้าม checkbox/radio/file ฯลฯ และไม่แตะช่องที่ผู้ใช้ไม่ได้พิมพ์ (ค่าใหม่จากเซิร์ฟเวอร์ยังแสดงได้) · `sbRerender()` และตัวฟัง `storage` ใช้ helper ตัวเดียวกัน
++กติกาใหม่: ทุกจุดที่วาดหน้าใหม่เบื้องหลังโดยผู้ใช้ไม่ได้สั่ง ต้องห่อด้วย `preserveTypedFields()`
++test ที่เพิ่ม: `แท็บอื่นแก้แชท ต้องไม่ล้างข้อความที่พิมพ์ค้างในห้องแชท` และ `preserveTypedFields เก็บทุกช่องที่กำลังพิมพ์ แต่ไม่ยุ่งกับช่องที่ไม่ได้แตะ` · ก่อนแก้ 63/1 → หลังแก้ `node harness.js` 64/64 ผ่าน, `./tests/run-sql-tests.sh` ผ่าน, OPC adapter 3/3, headless Chrome โหลด `index.html` ไม่มี console error
++ผลกระทบอื่น: ไม่แตะโครงสร้างข้อมูล/storage/dependency · build stamp `2026-09-25.1` (ยังไม่ได้ปล่อย จึงไม่ขยับเลข)
+diff --git a/index.html b/index.html
+index deaf556..822feb4 100755
+--- a/index.html
++++ b/index.html
+@@ -230,7 +230,17 @@ input.fi.rec-date{width:auto;min-width:150px;padding:0 12px;height:36px}
+ .chat-badge{margin-left:auto;background:var(--card2);color:var(--muted);border-radius:10px;padding:1px 8px;font-size:11px;font-weight:500}
+ .side-item.on .chat-badge{background:rgba(11,87,208,.14);color:var(--ontint)}
+ .chat-toolbar{display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap}
+-select.fi.chat-picker{width:auto;height:36px;padding:0 12px;min-width:300px;max-width:460px;font-family:'Roboto Mono','Noto Sans Thai',monospace;font-size:13px}
++.chat-pick{position:relative;flex:1 1 360px;min-width:260px;max-width:560px}
++.chat-pick input.fi{height:36px;padding:0 12px;font-size:13px}
++.chat-pick-list{position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:50;max-height:320px;overflow-y:auto;background:var(--card);border:1px solid var(--bd);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.14)}
++.chat-pick-list[hidden]{display:none}
++.chat-pick-it{display:flex;align-items:center;gap:10px;padding:8px 12px;cursor:pointer;font-size:13px;color:var(--tx);border-bottom:1px solid var(--line)}
++.chat-pick-it:last-child{border-bottom:none}
++.chat-pick-it.on,.chat-pick-it:hover{background:var(--tint)}
++.chat-pick-id{font-family:'Roboto Mono',monospace;font-weight:500;color:var(--ontint);flex-shrink:0}
++.chat-pick-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
++.chat-pick-sale{flex-shrink:0;font-size:12px;color:var(--muted)}
++.chat-pick-empty{padding:10px 12px;font-size:13px;color:var(--muted)}
+ .chat-list{display:flex;flex-direction:column;gap:1px;border:1px solid var(--bd);border-radius:8px;overflow:hidden;background:var(--card)}
+ .chat-item{background:var(--card);border:none;border-bottom:1px solid var(--line);padding:14px 18px;display:flex;align-items:center;gap:14px;cursor:pointer;transition:.15s;text-align:left;font-family:inherit;color:var(--tx);width:100%}
+ .chat-item:last-child{border-bottom:none}
+@@ -659,7 +669,7 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
+   <div class="logo"><svg viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-1.73-3L9 11.35V4H8a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2h-1v7.35L19.73 19A2 2 0 0 1 18 22H6Zm5-10.11L8.31 16.5h7.38L13 11.89V4h-2v7.89Z"/></svg></div>
+   <div>
+     <div class="hdr-title">Formula Studio</div>
+-    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-18.1</div>
++    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-25.1</div>
+   </div>
+   <div class="sync-chip" id="syncChip" onclick="sbManualSync()" title="สถานะการซิงก์ข้อมูลกับเซิร์ฟเวอร์กลาง"></div>
+ </div>
+@@ -4858,20 +4868,84 @@ function chatListHTML(){
+           <div class="empty-d">กด “New Chat” เพื่อสร้างห้องแชทตามรหัสงาน หรือคลิกรหัสงานในหน้า Dashboard แล้วกด New Chat</div></div>`}`;
+ }
+ 
+-// ดรอปดาวน์เลือกห้องแชท — แสดงรหัสงาน + สถานะอนุมัติ PD / RA / RD (✓ หรือ –)
+-function chatApproveText(c){
+-  return CHAT_PARTS.map(p=>`${p.key.toUpperCase()} ${c.approvals[p.key]?'✓':'–'}`).join('  ');
++// ช่องค้นหารหัสงาน — พิมพ์รหัส / ชื่อลูกค้า / แบรนด์ / Sales แล้วเลือกจากรายการที่ใกล้เคียง
++function chatPickItems(){
++  return visibleChats().map(c=>{
++    const r = records.find(x=>x.id===c.jobId);
++    return { id:c.jobId,
++      name: r ? (r.customer || r.brand || '') : 'ไม่พบชุดข้อมูล',
++      brand: (r && r.brand) || '',
++      sale: shortSalesName(r && r.salesOwner) };
++  });
+ }
+ function chatPickerHTML(currentId){
+-  if(!chats.filter(c=>canSeeRecord(records.find(x=>x.id===c.jobId))).length) return '';
+-  const opts = chats.filter(c=>canSeeRecord(records.find(x=>x.id===c.jobId))).map(c=>{
+-    const r = records.find(x=>x.id===c.jobId);
+-    const name = r ? (r.brand || r.customer || '') : 'ไม่พบชุดข้อมูล';
+-    const label = `${c.jobId}${name?' — '+name:''}   ${chatApproveText(c)}`;
+-    return `<option value="${esc(c.jobId)}"${c.jobId===currentId?' selected':''}>${esc(label)}</option>`;
+-  }).join('');
+-  return `<select class="fi chat-picker" onchange="onChatPick(this.value)" title="เลือกรหัสงาน">
+-    <option value=""${currentId?'':' selected'}>— เลือกรหัสงาน —</option>${opts}</select>`;
++  if(!visibleChats().length) return '';
++  const cur = currentId ? chatPickItems().find(it=>it.id===currentId) : null;
++  const val = cur ? `${cur.id} — ${cur.name}${cur.sale?' · Sales: '+cur.sale:''}` : '';
++  return `<div class="chat-pick">
++    <input class="fi" id="chatPickInput" type="text" autocomplete="off" spellcheck="false"
++      placeholder="พิมพ์รหัสงาน / ชื่อลูกค้า / ชื่อ Sales เพื่อค้นหา" title="ค้นหารหัสงาน"
++      value="${esc(val)}" onfocus="this.select();chatPickFilter()" oninput="chatPickFilter()"
++      onkeydown="chatPickKey(event)" onblur="setTimeout(chatPickBlur,150)">
++    <div class="chat-pick-list" id="chatPickList" hidden></div>
++  </div>`;
++}
++let chatPickHits = [], chatPickIdx = -1;
++function chatPickFilter(){
++  const inp = document.getElementById('chatPickInput'), box = document.getElementById('chatPickList');
++  if(!inp || !box) return;
++  const words = inp.value.toLowerCase().split(/\s+/).filter(Boolean);
++  const items = chatPickItems();
++  // ถ้าค่าในช่องคือห้องที่เปิดอยู่ (ยังไม่ได้พิมพ์ใหม่) ให้แสดงทั้งหมด
++  const showAll = !words.length || (inp.defaultValue && inp.value===inp.defaultValue);
++  chatPickHits = (showAll ? items : items.filter(it=>{
++    const hay = `${it.id} ${it.name} ${it.brand} ${it.sale}`.toLowerCase();
++    return words.every(w=>hay.includes(w));
++  })).sort((a,b)=>{
++    if(showAll) return 0;
++    const q = words[0], ap = a.id.toLowerCase().includes(q), bp = b.id.toLowerCase().includes(q);
++    return ap===bp ? 0 : (ap ? -1 : 1);            // รหัสงานตรงขึ้นก่อน
++  }).slice(0,50);
++  chatPickIdx = chatPickHits.length ? 0 : -1;
++  box.innerHTML = chatPickHits.length
++    ? chatPickHits.map((it,i)=>`<div class="chat-pick-it${i===chatPickIdx?' on':''}" onmousedown="event.preventDefault();chatPickGo('${esc(it.id)}')">
++        <span class="chat-pick-id">${esc(it.id)}</span>
++        <span class="chat-pick-name">${esc(it.name||'-')}${it.brand&&it.brand!==it.name?` <span style="color:var(--muted)">(${esc(it.brand)})</span>`:''}</span>
++        <span class="chat-pick-sale">${it.sale?'Sales: '+esc(it.sale):''}</span>
++      </div>`).join('')
++    : '<div class="chat-pick-empty">ไม่พบรหัสงานที่ตรงกับคำค้น</div>';
++  box.hidden = false;
++}
++function chatPickKey(e){
++  const box = document.getElementById('chatPickList');
++  if(e.key==='ArrowDown' || e.key==='ArrowUp'){
++    e.preventDefault();
++    if(!box || box.hidden){ chatPickFilter(); return; }
++    if(!chatPickHits.length) return;
++    chatPickIdx = (chatPickIdx + (e.key==='ArrowDown'?1:-1) + chatPickHits.length) % chatPickHits.length;
++    box.querySelectorAll('.chat-pick-it').forEach((el,i)=>{
++      el.classList.toggle('on', i===chatPickIdx);
++      if(i===chatPickIdx) el.scrollIntoView({block:'nearest'});
++    });
++  } else if(e.key==='Enter'){
++    e.preventDefault();
++    if(chatPickIdx>=0 && chatPickHits[chatPickIdx]) chatPickGo(chatPickHits[chatPickIdx].id);
++  } else if(e.key==='Escape'){
++    chatPickClose(); e.target.blur();
++  }
++}
++// blur ของช่องเดิมที่ถูกวาดใหม่ (เช่นตอน sync) ต้องไม่ไปปิดรายการของช่องใหม่ที่ยัง focus อยู่
++function chatPickBlur(){
++  if(document.activeElement===document.getElementById('chatPickInput')) return;
++  chatPickClose();
++}
++function chatPickClose(){
++  const box = document.getElementById('chatPickList');
++  if(box) box.hidden = true;
++}
++function chatPickGo(id){
++  chatPickClose();
++  onChatPick(id);
+ }
+ function onChatPick(id){
+   if(id) openChatRoom(id);
+@@ -6510,19 +6584,42 @@ function sbApply(d){
+   return true;
+ }
+ 
+-// วาดหน้าจอใหม่โดยไม่ให้ข้อความที่ผู้ใช้พิมพ์ค้างอยู่หายไป
++// วาดหน้าจอใหม่เบื้องหลัง (sync / แท็บอื่น) โดยไม่ให้สิ่งที่ผู้ใช้พิมพ์ค้างอยู่หายไป
++//
++// innerHTML สร้างช่องกรอกใหม่ทั้งหมด · เดิมเก็บค่าไว้ทีละช่องตาม id (#chatInput) ทำให้ช่องที่
++// เพิ่มทีหลัง (#chatPickInput) หลุดไป · ตัวนี้เก็บทุกช่องที่มี id และกำลังพิมพ์/ถูก focus อยู่
++// ทุกจุดที่วาดหน้าใหม่โดยผู้ใช้ไม่ได้สั่ง ต้องห่อด้วยฟังก์ชันนี้
++const KEEP_FIELD_SKIP = /^(checkbox|radio|file|hidden|button|submit|reset|image|range|color)$/;
++function preserveTypedFields(render){
++  const active = document.activeElement;
++  const kept = [...document.querySelectorAll('input[id], textarea[id]')]
++    .filter(el=>!(el.tagName==='INPUT' && KEEP_FIELD_SKIP.test(el.type)))
++    .filter(el=>el===active || el.value!==el.defaultValue)
++    .map(el=>{
++      let s = null, e = null;
++      try{ s = el.selectionStart; e = el.selectionEnd; }catch(err){}
++      return {el, id:el.id, v:el.value, s, e, focus:el===active};
++    });
++  render();
++  kept.forEach(k=>{
++    const now = document.getElementById(k.id);
++    if(!now || now===k.el) return;               // ช่องเดิมไม่ได้ถูกสร้างใหม่ ค่ายังอยู่ครบ
++    if(now.tagName!==k.el.tagName || now.type!==k.el.type) return;
++    now.value = k.v;
++    if(k.focus){
++      now.focus();
++      if(k.s!=null){ try{ now.setSelectionRange(k.s, k.e); }catch(err){} }
++    }
++  });
++}
+ function sbRerender(){
+-  const ta = document.getElementById('chatInput');
+-  const keep = ta ? {v:ta.value, s:ta.selectionStart, e:ta.selectionEnd, focus:document.activeElement===ta} : null;
+-  renderUserUI();
+-  updateChatBadge();
+-  renderRecordsList();
+-  if(document.getElementById('chatView') && document.getElementById('chatView').classList.contains('on')) renderChat();
+-  if(document.getElementById('actView') && document.getElementById('actView').classList.contains('on')) renderActivities();
+-  if(keep){
+-    const nta = document.getElementById('chatInput');
+-    if(nta){ nta.value = keep.v; if(keep.focus){ nta.focus(); try{ nta.setSelectionRange(keep.s, keep.e); }catch(e){} } }
+-  }
++  preserveTypedFields(()=>{
++    renderUserUI();
++    updateChatBadge();
++    renderRecordsList();
++    if(document.getElementById('chatView') && document.getElementById('chatView').classList.contains('on')) renderChat();
++    if(document.getElementById('actView') && document.getElementById('actView').classList.contains('on')) renderActivities();
++  });
+ }
+ 
+ // ---------- จำสภาพปัจจุบันว่าตรงกับเซิร์ฟเวอร์แล้ว ----------
+@@ -6994,9 +7091,11 @@ window.addEventListener('storage', e=>{
+   else if(e.key==='fs_activities') loadActivities();
+   else if(e.key==='fs_userlist') loadUsers();
+   else return;
+-  updateChatBadge();
+-  renderRecordsList();
+-  if(document.getElementById('chatView').classList.contains('on')) renderChat();
++  preserveTypedFields(()=>{
++    updateChatBadge();
++    renderRecordsList();
++    if(document.getElementById('chatView').classList.contains('on')) renderChat();
++  });
+ });
+ 
+ // Init saved Customer Data records (จาก localStorage) แล้วแสดงใน Dashboard
+diff --git a/tests/formula-studio.test.js b/tests/formula-studio.test.js
+index c97e3ed..9cfe69a 100644
+--- a/tests/formula-studio.test.js
++++ b/tests/formula-studio.test.js
+@@ -313,6 +313,106 @@
+     equal(window.__fetchCalls.length, 0, 'local-only mode used the network');
+   });
+ 
++  // sync ทุก 5 วินาทีเรียก sbRerender() ซึ่งวาดหน้าแชทใหม่ทั้งก้อน · เดิมช่องค้นหารหัสงาน
++  // ถูกสร้างใหม่ ข้อความที่พิมพ์ค้างหายและรายการผลค้นหาปิดเอง (build 2026-09-19.1)
++  async function chatSearchSurvivesSync(openId){
++    reset();
++    SB_URL = '';
++    SB_KEY = '';
++    userList = [{name:'แอดมิน', role:'admin', email:'', pass:null}];
++    currentUser = 'แอดมิน';
++    const savedRecords = records, savedChats = chats, savedOpen = chatOpenId;
++    const view = document.getElementById('chatView');
++    const wasOn = view.classList.contains('on');
++    const room = id=>({jobId:id, createdAt:'', createdBy:'แอดมิน', messages:[], parts:[], approvals:{pd:false, ra:false, rd:false}});
++    try{
++      records = [{id:'A00001', customer:'ลูกค้าหนึ่ง', createdBy:'แอดมิน'}, {id:'A00002', customer:'ลูกค้าสอง', createdBy:'แอดมิน'}];
++      chats = [room('A00001'), room('A00002')];
++      chatOpenId = openId;
++      view.classList.add('on');
++      renderChat();
++      const inp = document.getElementById('chatPickInput');
++      assert(inp, 'ไม่มีช่องค้นหารหัสงาน');
++      inp.focus();
++      inp.value = 'สอง';
++      chatPickFilter();
++
++      sbRerender();
++      await new Promise(done=>setTimeout(done, 250));   // เลยเวลา onblur → chatPickClose (150ms)
++
++      const after = document.getElementById('chatPickInput');
++      const list = document.getElementById('chatPickList');
++      equal(after.value, 'สอง', 'ข้อความที่พิมพ์ค้างหายหลัง sync');
++      assert(document.activeElement === after, 'ช่องค้นหาหลุด focus หลัง sync');
++      assert(list && !list.hidden, 'รายการผลค้นหาปิดเองหลัง sync');
++      const ids = [...list.querySelectorAll('.chat-pick-id')].map(el=>el.textContent);
++      equal(ids.join(','), 'A00002', 'ผลค้นหาหลัง sync ไม่ตรงกับคำค้น');
++    }finally{
++      records = savedRecords; chats = savedChats; chatOpenId = savedOpen;
++      if(!wasOn) view.classList.remove('on');
++      renderChat();
++    }
++  }
++  test('sync ต้องไม่ล้างคำค้นในช่องค้นหารหัสงาน (หน้ารายการแชท)', function(){ return chatSearchSurvivesSync(null); });
++  test('sync ต้องไม่ล้างคำค้นในช่องค้นหารหัสงาน (ในห้องแชท)', function(){ return chatSearchSurvivesSync('A00001'); });
++
++  // แท็บอื่นแก้ fs_chats → ตัวฟัง storage วาดหน้าแชทใหม่ · เดิมไม่เก็บค่าอะไรเลย
++  test('แท็บอื่นแก้แชท ต้องไม่ล้างข้อความที่พิมพ์ค้างในห้องแชท', async function(){
++    reset();
++    SB_URL = '';
++    SB_KEY = '';
++    userList = [{name:'แอดมิน', role:'admin', email:'', pass:null}];
++    currentUser = 'แอดมิน';
++    const savedRecords = records, savedChats = chats, savedOpen = chatOpenId;
++    const view = document.getElementById('chatView');
++    const wasOn = view.classList.contains('on');
++    try{
++      records = [{id:'A00001', customer:'ลูกค้าหนึ่ง', createdBy:'แอดมิน'}];
++      chats = [{jobId:'A00001', createdAt:'', createdBy:'แอดมิน', messages:[], parts:[], approvals:{pd:false, ra:false, rd:false}}];
++      localStorage.setItem('fs_chats', JSON.stringify(chats));
++      chatOpenId = 'A00001';
++      view.classList.add('on');
++      renderChat();
++      const ta = document.getElementById('chatInput');
++      assert(ta, 'ไม่มีช่องพิมพ์ข้อความในห้องแชท');
++      ta.focus();
++      ta.value = 'ร่างข้อความยาว ๆ';
++
++      window.dispatchEvent(new StorageEvent('storage', {key:'fs_chats'}));
++
++      const after = document.getElementById('chatInput');
++      assert(after !== ta, 'เทสต์ไม่ได้จำลองการวาดใหม่จริง');
++      equal(after.value, 'ร่างข้อความยาว ๆ', 'ข้อความที่พิมพ์ค้างหายเมื่อแท็บอื่นแก้แชท');
++      assert(document.activeElement === after, 'ช่องพิมพ์หลุด focus เมื่อแท็บอื่นแก้แชท');
++    }finally{
++      records = savedRecords; chats = savedChats; chatOpenId = savedOpen;
++      if(!wasOn) view.classList.remove('on');
++      renderChat();
++    }
++  });
++
++  // กันเกิดซ้ำ: ช่องที่เพิ่มในอนาคตต้องรอดการวาดใหม่เองโดยไม่ต้องลงชื่อ id ไว้ที่ไหน
++  test('preserveTypedFields เก็บทุกช่องที่กำลังพิมพ์ แต่ไม่ยุ่งกับช่องที่ไม่ได้แตะ', function(){
++    const host = document.createElement('div');
++    document.body.appendChild(host);
++    const html = '<input id="kfA" value="ค่าเดิม"><input id="kfB" value="ค่าเดิม"><textarea id="kfC"></textarea><input id="kfD" type="checkbox">';
++    try{
++      host.innerHTML = html;
++      document.getElementById('kfA').value = 'พิมพ์ใหม่';
++      document.getElementById('kfC').value = 'ร่าง';
++      document.getElementById('kfC').focus();
++      document.getElementById('kfD').checked = true;
++      preserveTypedFields(()=>{ host.innerHTML = html.replace('id="kfB" value="ค่าเดิม"', 'id="kfB" value="ค่าใหม่จากเซิร์ฟเวอร์"'); });
++      equal(document.getElementById('kfA').value, 'พิมพ์ใหม่', 'ช่องที่พิมพ์ค้างไม่ได้ถูกเก็บ');
++      equal(document.getElementById('kfB').value, 'ค่าใหม่จากเซิร์ฟเวอร์', 'ช่องที่ผู้ใช้ไม่ได้แตะถูกทับด้วยค่าเก่า');
++      equal(document.getElementById('kfC').value, 'ร่าง', 'textarea ที่พิมพ์ค้างไม่ได้ถูกเก็บ');
++      assert(document.activeElement === document.getElementById('kfC'), 'focus ไม่กลับไปที่ช่องเดิม');
++      equal(document.getElementById('kfD').checked, false, 'checkbox ไม่ควรถูกแตะ');
++    }finally{
++      host.remove();
++    }
++  });
++
+   // ---- Private workspace loader (ของเสริมล้วน ไม่แตะของเดิม) ----
+   //
+   // ข้อบังคับจากเจ้าของ: "ทำเสริมปุ่มหน้าใหม่ไม่แตะของเดิมนะ เข้าผ่าน user และ role
+-- 
+2.39.5 (Apple Git-154)
+

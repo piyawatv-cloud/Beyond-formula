@@ -1,0 +1,284 @@
+From 047e358e07e302c7d010ac99bfb21f3edfa324f2 Mon Sep 17 00:00:00 2001
+From: piyawatv-cloud <295929244+piyawatv-cloud@users.noreply.github.com>
+Date: Mon, 10 Aug 2026 07:06:49 +0700
+Subject: [PATCH 02/24] docs: plan Supabase auth hardening
+
+---
+ .../2026-08-10-supabase-auth-governance.md    | 265 ++++++++++++++++++
+ 1 file changed, 265 insertions(+)
+ create mode 100644 docs/superpowers/plans/2026-08-10-supabase-auth-governance.md
+
+diff --git a/docs/superpowers/plans/2026-08-10-supabase-auth-governance.md b/docs/superpowers/plans/2026-08-10-supabase-auth-governance.md
+new file mode 100644
+index 0000000..7f2dd50
+--- /dev/null
++++ b/docs/superpowers/plans/2026-08-10-supabase-auth-governance.md
+@@ -0,0 +1,265 @@
++# Supabase Auth and Governance Hardening Implementation Plan
++
++> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
++
++**Goal:** Make Formula Studio PR-ready with GitHub CODEOWNER controls, Supabase Auth, membership/role RLS, JSON mutation guards, deterministic browser tests and isolated PostgreSQL policy tests.
++
++**Architecture:** Keep `index.html` as the only application file and use direct Supabase Auth/Data REST calls through `fetch()`. Add a separate authorization membership table and database policies/triggers without changing existing JSON object shapes; verify SQL in an isolated local PostgreSQL cluster with synthetic users and data.
++
++**Tech Stack:** Vanilla HTML/CSS/JavaScript, Node.js standard library, headless Google Chrome, PostgreSQL 17 command-line tools, POSIX shell, Supabase Auth/Data REST and Postgres RLS.
++
++## Global Constraints
++
++- Task ID: `governance-auth-hardening-20260810`
++- Reviewer/CODEOWNER: `@phossatron`
++- Environment: development/test only; no production access, migration or deployment
++- Data classification: synthetic test data only
++- Critical change: true
++- Preserve all locked localStorage keys, JSON field names/types and Excel column order
++- Keep the application single-file with no build step and no new runtime dependency
++- Core runtime must work without AI and an authenticated open session must tolerate network loss
++- Codex must not change repository visibility, permissions, branch protection or production state
++
++---
++
++### Task 1: GitHub ownership and governance controls
++
++**Files:**
++- Create: `.github/CODEOWNERS`
++- Modify: `AGENTS.md`
++- Modify: `.github/pull_request_template.md`
++- Modify: `CLAUDE.md`
++- Modify: `README.md`
++- Modify: `RUNTIME_OPERATIONS.md`
++
++**Interfaces:**
++- Consumes: approved governance design and repository owner `@phossatron`
++- Produces: repository-wide independent-review ownership and accurate secure-runtime instructions
++
++- [ ] **Step 1: Add CODEOWNERS**
++
++Use `@phossatron` for the default and explicitly repeat ownership for `.github/`, `runtime/`, `supabase/`, `index.html`, `AGENTS.md` and `CLAUDE.md` so critical areas remain obvious during review.
++
++- [ ] **Step 2: Align governance text**
++
++State that publishable frontend keys are configuration protected by Auth/RLS while secret/service-role keys are forbidden, and add the selected secure-auth design/runbook references.
++
++- [ ] **Step 3: Verify the control diff**
++
++Run: `git diff --check && rg -n "@phossatron|service-role|secret key|Supabase Auth" .github AGENTS.md CLAUDE.md README.md RUNTIME_OPERATIONS.md`
++
++Expected: exit 0; no conflicting Codex/runtime roles and no secret value output.
++
++### Task 2: Deterministic browser test foundation and RED auth tests
++
++**Files:**
++- Create: `harness.js`
++- Create: `tests/formula-studio.test.js`
++- Generate (ignored): `test.html`
++
++**Interfaces:**
++- Consumes: real `index.html`
++- Produces: `node harness.js` and a headless-browser result containing `FORMULA_STUDIO_TESTS: PASS <count>` or a non-zero failure marker
++
++- [ ] **Step 1: Add the dependency-free harness**
++
++`harness.js` reads `index.html`, replaces only the test copy's Supabase configuration with empty values, injects `tests/formula-studio.test.js` immediately before `</body>`, and writes `test.html`. It must fail if the expected script/config/body markers are absent.
++
++- [ ] **Step 2: Write failing browser tests**
++
++Cover these observable behaviors using real `localStorage`/`sessionStorage` and a fake only at the external `fetch` boundary:
++
++```text
++secure login stores a normalized session and authenticated membership
++Data REST sends publishable apikey plus Bearer access token
++secure boot never trusts fs_user without an Auth session
++refresh replaces an expiring access token
++logout clears Auth/local identity without clearing application records
++401/403 pauses sync and requires login
++local-only mode keeps the legacy login path
++```
++
++- [ ] **Step 3: Run RED**
++
++Run: `node harness.js` then headless Chrome against `test.html`.
++
++Expected: FAIL because `authSignIn`, `authRestoreSession` and authenticated Data REST behavior do not exist.
++
++### Task 3: Minimal Supabase Auth client and secure boot
++
++**Files:**
++- Modify: `index.html`
++
++**Interfaces:**
++- Consumes: `SB_URL`, `SB_KEY`, login form, `sessionStorage`, `fetch`, current local stores
++- Produces: `authSignIn(email,password)`, `authRestoreSession()`, `authRefreshSession()`, `authSignOut()`, `authFetchMembership()`, `authDataHeaders()` and an auth-gated `sbBoot()`
++
++- [ ] **Step 1: Implement session normalization/storage**
++
++Use optional key `fs_auth_session`; persist only in `sessionStorage`; compute `expires_at` from `expires_in` when needed; never log token contents.
++
++- [ ] **Step 2: Implement Auth REST requests**
++
++POST password and refresh grants to `/auth/v1/token`, call `/auth/v1/logout`, accept all `response.ok` 2xx responses, and use generic credential errors.
++
++- [ ] **Step 3: Gate identity and cached data**
++
++When `sbOn()` is true, do not trust persisted `fs_user`; restore/refresh Auth first, fetch the caller's active membership, then set `currentUser/currentMembership` and begin Data REST synchronization. Local-only mode retains the legacy path.
++
++- [ ] **Step 4: Authenticate Data REST**
++
++Keep the publishable key in `apikey`; use the access token, never the publishable key, as the Bearer credential. On 401/403, stop synchronization, clear identity/session and show login without deleting records.
++
++- [ ] **Step 5: Remove weak password behavior from secure mode**
++
++Secure mode uses email/password Auth only, never creates a first local Admin, never changes another user's password in-browser, and normalizes server `fs_users[].pass` to `null` while retaining the field.
++
++- [ ] **Step 6: Run GREEN browser tests**
++
++Run the same harness/Chrome command.
++
++Expected: all Task 2 tests pass with no console error.
++
++### Task 4: RED isolated PostgreSQL authorization tests
++
++**Files:**
++- Create: `tests/sql/bootstrap.sql`
++- Create: `tests/sql/auth_rls_test.sql`
++- Create: `tests/run-sql-tests.sh`
++
++**Interfaces:**
++- Consumes: local `initdb`, `pg_ctl`, `psql`, forward schema and rollback SQL
++- Produces: isolated synthetic PostgreSQL assertions with no network or production database
++
++- [ ] **Step 1: Build the Supabase-compatible test fixture**
++
++Create synthetic `anon`, `authenticated`, `service_role`, `auth.users` and `auth.uid()` behavior using `request.jwt.claim.sub`; never include real project values.
++
++- [ ] **Step 2: Add failing policy/guard assertions**
++
++Tests must demonstrate:
++
++```text
++anon cannot read/write application tables
++unknown/inactive Auth user cannot access data
++active member can read shared records
++Sales can change own record but not another owner's record
++PD can change formula fields but not customer/owner fields
++RA can change RA approval but not PD approval
++non-Admin can append activity but cannot read or mutate the log
++Admin can manage memberships and users
++pass remains present and null in server user JSON
++forward SQL can run twice without failure
++rollback SQL restores the named legacy policies without dropping data
++```
++
++- [ ] **Step 3: Run RED**
++
++Run: `./tests/run-sql-tests.sh`
++
++Expected: FAIL because the secure schema, policies and guards are absent.
++
++### Task 5: Secure forward schema and rollback
++
++**Files:**
++- Modify: `supabase/schema.sql`
++- Create: `supabase/rollback_auth_rls.sql`
++
++**Interfaces:**
++- Consumes: existing locked tables and Supabase `auth.users/auth.uid()`
++- Produces: idempotent membership schema, grants, RLS policies, mutation guards and explicit rollback
++
++- [ ] **Step 1: Restore locked application tables**
++
++Recreate the five existing JSON tables and timestamp trigger exactly with `IF NOT EXISTS`, preserving keys/data columns.
++
++- [ ] **Step 2: Add membership and helpers**
++
++Create `public.fs_memberships`, role constraint/index, `private.fs_is_active_member()`, `private.fs_current_role()` and `private.fs_current_name()` with fixed search path and explicit grants/revokes.
++
++- [ ] **Step 3: Replace anonymous policies transactionally**
++
++Drop `anon_all`, revoke `anon`, grant minimum authenticated operations, enable/force RLS and create membership/role policies.
++
++- [ ] **Step 4: Add JSON guards**
++
++Add record and chat `BEFORE INSERT OR UPDATE` guards that compare old/new JSON, enforce Sales ownership, limit PD record fields, constrain close state, protect immutable IDs and restrict each approval key to its matching role/Admin.
++
++- [ ] **Step 5: Add initial membership migration block**
++
++Join existing `fs_users.data.email` to `auth.users.email`; insert only valid known roles; leave unmatched users unauthorized; set every server `fs_users.data.pass` to JSON null without deleting the key.
++
++- [ ] **Step 6: Add explicit rollback**
++
++Restore legacy anonymous policies only as a reviewed emergency compatibility rollback; retain all tables/data and document that it reopens the legacy security risk.
++
++- [ ] **Step 7: Run GREEN SQL tests twice**
++
++Run: `./tests/run-sql-tests.sh && ./tests/run-sql-tests.sh`
++
++Expected: both isolated runs pass and clean up their temporary clusters.
++
++### Task 6: Secure user-management UI and synchronization regressions
++
++**Files:**
++- Modify: `index.html`
++- Modify: `tests/formula-studio.test.js`
++
++**Interfaces:**
++- Consumes: secure membership/current role and existing user modal/sync engine
++- Produces: safe secure-mode UI, offline queue preservation and no Auth token leakage
++
++- [ ] **Step 1: Write RED regression tests**
++
++Add tests that secure mode disables first-Admin creation, Admin invite/reset controls explain Dashboard ownership, offline queued records survive boot reconciliation, and activity/error rendering never contains tokens.
++
++- [ ] **Step 2: Verify RED**
++
++Run harness/Chrome and confirm failures name the missing secure behavior.
++
++- [ ] **Step 3: Implement minimal UI/sync changes**
++
++Keep legacy local-only controls unchanged. In secure mode show Dashboard-managed onboarding guidance, preserve queued local objects before applying a server snapshot, and strip token-like values from displayed/logged errors.
++
++- [ ] **Step 4: Verify GREEN**
++
++Run browser tests and confirm all pass without console errors.
++
++### Task 7: Documentation, verification and PR-ready commits
++
++**Files:**
++- Modify: `README.md`
++- Modify: `CLAUDE.md`
++- Modify: `RUNTIME_OPERATIONS.md`
++- Create: `supabase/AUTH_RLS_RUNBOOK.md`
++
++**Interfaces:**
++- Consumes: final implementation and verified commands
++- Produces: exact Owner/Reviewer/Runtime steps, health evidence and rollback instructions
++
++- [ ] **Step 1: Document one-time Owner actions**
++
++Private repository, development write access, branch protection, disabled public signup/anonymous sign-in, staging Auth invitations, reviewed SQL execution and UAT.
++
++- [ ] **Step 2: Document Reviewer and Runtime gates**
++
++Require `@phossatron`, test evidence, staging RLS negative tests, immutable commit SHA, health check and rollback target. Do not imply Codex deploys.
++
++- [ ] **Step 3: Run full fresh verification**
++
++```sh
++node --check <(sed -n '/<script>/,/<\/script>/p' index.html)
++node harness.js
++./tests/run-sql-tests.sh
++headless Chrome test.html
++plutil -lint runtime/com.beyond-formula.runtime.plist
++for f in runtime/*.sh tests/*.sh; do sh -n "$f"; done
++git diff --check
++git status --short
++```
++
++Expected: every executable check exits 0, browser report contains only PASS, no secret/service-role key is found and unrelated pre-existing work remains preserved.
++
++- [ ] **Step 4: Review and commit coherent changes**
++
++Create separate local commits for governance/test foundation, secure schema, secure application behavior and documentation. Do not push if GitHub permission remains read-only; report the exact Owner action needed.
+-- 
+2.39.5 (Apple Git-154)
+

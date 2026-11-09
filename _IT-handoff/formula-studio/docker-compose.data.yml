@@ -1,0 +1,83 @@
+# ชั้นข้อมูลในเครื่องของ Formula Studio — PostgreSQL + PostgREST
+#
+# ต้องรันด้วย -p เสมอ:
+#     docker compose -p formuladata -f docker-compose.data.yml --env-file runtime/data.env ...
+#
+# ทำไมต้องมี PostgREST ไม่ใช่ต่อ SQL ตรง:
+# ตัวแอป (index.html) พูดภาษา PostgREST อยู่แล้ว และ formula-proxy.mjs เป็นแค่
+# ตัวส่งต่อที่แนบคีย์ให้ — มันยิง `${SB_ORIGIN}/rest/v1/<ตาราง><query string เดิม>`
+# ตรง ๆ ถ้าเปลี่ยนไปเขียน SQL เอง ต้องไปไล่เดาว่าแอปใช้ไวยากรณ์ PostgREST ท่าไหนบ้าง
+# (on_conflict · Prefer: resolution=merge-duplicates · order · gt. · select=)
+# เดาผิดข้อเดียว = เขียนข้อมูลผิดโดยไม่มีใครเห็น ซึ่งกฎข้อ 2 บอกว่ากู้ไม่ได้
+# วาง PostgREST ตัวจริงไว้ตรงนั้นแทน แล้วประโยคที่แอปส่งมาก็ยังหมายความเหมือนเดิมทุกตัว
+#
+# ฐานนี้ใช้ร่วมกันทั้งสแตกจริงและสแตกทดสอบ ตามที่เจ้าของเลือกไว้ 2026-08-24
+# (พฤติกรรมเดียวกับตอนที่ทั้งคู่ชี้ Supabase ตัวเดียวกัน — งานที่สร้างตอนทดสอบยังกินเลขจริง)
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: formula-postgres
+    restart: unless-stopped
+    labels:
+      com.beyond.formula-runtime.managed: "true"
+      com.beyond.formula-runtime.role: "postgres"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: "${FORMULA_PG_SUPER_PASSWORD}"
+      POSTGRES_DB: formula
+    volumes:
+      - formula_pgdata:/var/lib/postgresql/data
+    ports:
+      # เปิดไว้ที่ loopback อย่างเดียว เพื่อให้ psql จากเครื่องเข้ามาดูแลได้
+      - "127.0.0.1:${FORMULA_PG_PORT}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d formula"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - data
+
+  postgrest:
+    image: postgrest/postgrest:v12.2.3
+    container_name: formula-postgrest
+    restart: unless-stopped
+    labels:
+      com.beyond.formula-runtime.managed: "true"
+      com.beyond.formula-runtime.role: "postgrest"
+    environment:
+      PGRST_DB_URI: "postgres://authenticator:${FORMULA_PG_AUTHENTICATOR_PASSWORD}@postgres:5432/formula"
+      PGRST_DB_SCHEMAS: "public"
+      # ไม่ตั้ง PGRST_JWT_SECRET โดยตั้งใจ — ไม่มีใครยิงถึงตัวนี้ได้นอกจาก proxy
+      # ที่อยู่บนเครือข่ายเดียวกัน และด่านสิทธิ์จริงอยู่ที่ formula-proxy.mjs
+      # (allowlist ตาราง+เมธอด และคุกกี้เซสชันที่เซ็น HMAC) ถ้าตั้ง secret ไว้ที่นี่ด้วย
+      # จะกลายเป็นความลับอีกดอกที่ต้องหมุนและไม่ได้กันอะไรเพิ่ม
+      PGRST_DB_ANON_ROLE: "anon"
+      PGRST_SERVER_PORT: "3000"
+      PGRST_LOG_LEVEL: "error"
+      # เซิร์ฟเวอร์ผู้ดูแลของ PostgREST เอง มี /live กับ /ready ให้ถาม
+      PGRST_ADMIN_SERVER_PORT: "3001"
+    ports:
+      - "127.0.0.1:${FORMULA_POSTGREST_PORT}:3000"
+      - "127.0.0.1:${FORMULA_POSTGREST_ADMIN_PORT}:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # ไม่ตั้ง healthcheck ในคอนเทนเนอร์โดยตั้งใจ — image ของ PostgREST ไม่มีแม้แต่ shell
+    # (ไม่มี sh, wget, curl, nc) ด่านที่เขียนไปก็จะ "แดงตลอด" ทั้งที่ตัวมันทำงานปกติ
+    # ด่านที่แดงตลอดแย่กว่าไม่มีด่าน เพราะทำให้คำว่า unhealthy เลิกมีความหมาย
+    # ด่านจริงอยู่ที่ scripts/healthcheck-data.sh (ถาม /live กับ /ready จากฝั่งโฮสต์)
+    # และที่ด่าน "ประตูข้อมูลอ่านข้อมูลได้" ใน blue-green-formula.sh ซึ่งจะตกทันทีถ้าตัวนี้ล่ม
+    networks:
+      - data
+
+volumes:
+  formula_pgdata:
+    name: formula_pgdata
+
+networks:
+  data:
+    name: formula-data
+    external: true

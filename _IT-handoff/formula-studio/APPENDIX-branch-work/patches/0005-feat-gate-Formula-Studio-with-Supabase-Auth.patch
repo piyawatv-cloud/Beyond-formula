@@ -1,0 +1,1211 @@
+From b3114073188eb5fbe815fec1097bdbc6ebb45662 Mon Sep 17 00:00:00 2001
+From: piyawatv-cloud <295929244+piyawatv-cloud@users.noreply.github.com>
+Date: Mon, 10 Aug 2026 07:32:58 +0700
+Subject: [PATCH 05/24] feat: gate Formula Studio with Supabase Auth
+
+---
+ .github/workflows/verify.yml |  41 ++++
+ harness.js                   |  71 ++++++
+ index.html                   | 422 +++++++++++++++++++++++++++--------
+ tests/formula-studio.test.js | 209 +++++++++++++++++
+ 4 files changed, 646 insertions(+), 97 deletions(-)
+ create mode 100644 .github/workflows/verify.yml
+ create mode 100644 harness.js
+ create mode 100644 tests/formula-studio.test.js
+
+diff --git a/.github/workflows/verify.yml b/.github/workflows/verify.yml
+new file mode 100644
+index 0000000..18ddca5
+--- /dev/null
++++ b/.github/workflows/verify.yml
+@@ -0,0 +1,41 @@
++name: Formula Studio Verify
++
++on:
++  pull_request:
++    branches: [main]
++
++permissions:
++  contents: read
++
++concurrency:
++  group: formula-studio-verify-${{ github.event.pull_request.number || github.ref }}
++  cancel-in-progress: true
++
++jobs:
++  browser-auth:
++    name: Browser auth tests
++    runs-on: ubuntu-latest
++    timeout-minutes: 10
++    steps:
++      - name: Checkout reviewed revision
++        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
++        with:
++          persist-credentials: false
++      - name: Run deterministic browser harness
++        env:
++          CHROME_BIN: /usr/bin/google-chrome
++        run: node harness.js
++
++  postgres-rls:
++    name: PostgreSQL RLS tests
++    runs-on: ubuntu-latest
++    timeout-minutes: 10
++    steps:
++      - name: Checkout reviewed revision
++        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
++        with:
++          persist-credentials: false
++      - name: Add bundled PostgreSQL tools to PATH
++        run: echo "$(pg_config --bindir)" >> "$GITHUB_PATH"
++      - name: Run isolated authorization tests
++        run: ./tests/run-sql-tests.sh
+diff --git a/harness.js b/harness.js
+new file mode 100644
+index 0000000..7cd83b2
+--- /dev/null
++++ b/harness.js
+@@ -0,0 +1,71 @@
++#!/usr/bin/env node
++'use strict';
++
++const fs = require('node:fs');
++const path = require('node:path');
++const { spawnSync } = require('node:child_process');
++
++const root = __dirname;
++const sourcePath = path.join(root, 'index.html');
++const testPath = path.join(root, 'test.html');
++const browser = process.env.CHROME_BIN || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
++
++let html = fs.readFileSync(sourcePath, 'utf8');
++const originalUrl = (html.match(/let SB_URL = '([^']*)';/) || [,''])[1];
++const originalKey = (html.match(/let SB_KEY = '([^']*)';/) || [,''])[1];
++html = html
++  .replace(/let SB_URL = '[^']*';/, "let SB_URL = 'https://test-project.supabase.co';")
++  .replace(/let SB_KEY = '[^']*';/, "let SB_KEY = 'sb_publishable_test_only';");
++
++const mockPrelude = `<script>
++window.__FS_TEST__ = true;
++window.__fetchCalls = [];
++window.__fetchQueue = [];
++window.__mockResponse = function(status, body){
++  const text = body == null ? '' : (typeof body === 'string' ? body : JSON.stringify(body));
++  return {ok:status >= 200 && status < 300,status:status,text:async()=>text,json:async()=>text?JSON.parse(text):null};
++};
++window.fetch = async function(url, options){
++  const call = {url:String(url),options:options||{}};
++  window.__fetchCalls.push(call);
++  const next = window.__fetchQueue.shift();
++  if(typeof next === 'function') return next(call);
++  if(next) return next;
++  return window.__mockResponse(200, []);
++};
++</script>`;
++
++html = html.replace(/<script>\s*\/\/ ===================================================================/, mockPrelude + '\n<script>\n// ===================================================================');
++html = html.replace('</body>', '<script src="tests/formula-studio.test.js"></script>\n</body>');
++
++if(!html.includes('window.__FS_TEST__ = true') || !html.includes('tests/formula-studio.test.js')){
++  throw new Error('Could not inject the deterministic browser harness');
++}
++if((originalUrl && html.includes(originalUrl)) || (originalKey && html.includes(originalKey))){
++  throw new Error('The generated harness still contains production configuration');
++}
++
++fs.writeFileSync(testPath, html);
++
++const result = spawnSync(browser, [
++  '--headless=new',
++  '--disable-gpu',
++  '--no-sandbox',
++  '--disable-background-networking',
++  '--virtual-time-budget=7000',
++  '--dump-dom',
++  'file://' + testPath
++], {encoding:'utf8', maxBuffer:32 * 1024 * 1024});
++
++if(result.error) throw result.error;
++const output = result.stdout || '';
++const match = output.match(/<pre id="fs-test-results">([\s\S]*?)<\/pre>/);
++const report = match ? match[1]
++  .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
++  .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&') : '';
++
++if(report) process.stdout.write(report + '\n');
++if(result.status !== 0 || !/<html[^>]*data-test-status="passed"/.test(output)){
++  if(!report) process.stderr.write((result.stderr || 'Browser test did not produce a report') + '\n');
++  process.exit(1);
++}
+diff --git a/index.html b/index.html
+index 409e118..23c2779 100755
+--- a/index.html
++++ b/index.html
+@@ -649,7 +649,7 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
+   <div class="logo"><svg viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-1.73-3L9 11.35V4H8a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2h-1v7.35L19.73 19A2 2 0 0 1 18 22H6Zm5-10.11L8.31 16.5h7.38L13 11.89V4h-2v7.89Z"/></svg></div>
+   <div>
+     <div class="hdr-title">Formula Studio</div>
+-    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-08-10.5</div>
++    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-08-10.6</div>
+   </div>
+   <div class="sync-chip" id="syncChip" onclick="sbManualSync()" title="สถานะการซิงก์ข้อมูลกับเซิร์ฟเวอร์กลาง"></div>
+ </div>
+@@ -692,11 +692,11 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
+     <div class="modal-hd">
+       <div>
+         <div class="modal-t">จัดการผู้ใช้</div>
+-        <div class="modal-desc">คลิกชื่อของคุณเพื่อเข้าใช้งาน · ผู้ใช้ที่สร้างใหม่จะได้รหัสผ่านตั้งต้น 123456</div>
++        <div class="modal-desc" id="userModalDesc">คลิกชื่อของคุณเพื่อเข้าใช้งาน · ผู้ใช้ที่สร้างใหม่จะได้รหัสผ่านตั้งต้น 123456</div>
+       </div>
+       <button class="modal-x" onclick="closeUserModal()" title="ปิด">×</button>
+     </div>
+-    <div style="display:flex;gap:8px;margin:14px 0 6px;flex-wrap:wrap">
++    <div id="userCreateControls" style="display:flex;gap:8px;margin:14px 0 6px;flex-wrap:wrap">
+       <input class="fi" id="userInput" style="flex:1;min-width:120px" placeholder="ชื่อผู้ใช้ / Username" onkeydown="if(event.key==='Enter')createUser()">
+       <input class="fi" id="userEmail" style="flex:1.4;min-width:160px" placeholder="User ID / อีเมล" onkeydown="if(event.key==='Enter')createUser()">
+       <select class="fi role-select" id="newUserRole" title="Role ของผู้ใช้ใหม่">
+@@ -2265,11 +2265,18 @@ function addTag(e, containerId, inputId) {
+   const val = inp.value.trim();
+   if(!val) return;
+   const container = document.getElementById(containerId);
++  appendTag(container, inp, val);
++  inp.value='';
++}
++function appendTag(container, inp, val){
+   const tag = document.createElement('span');
+   tag.className='tag';
+-  tag.innerHTML=`${val}<button class="tag-x" onclick="this.parentElement.remove()">×</button>`;
++  tag.appendChild(document.createTextNode(String(val)));
++  const remove=document.createElement('button');
++  remove.className='tag-x'; remove.type='button'; remove.textContent='×';
++  remove.onclick=function(){ tag.remove(); };
++  tag.appendChild(remove);
+   container.insertBefore(tag, inp);
+-  inp.value='';
+ }
+ function getTagValues(containerId) {
+   return Array.from(document.querySelectorAll(`#${containerId} .tag`)).map(t=>t.textContent.trim().replace('×','').trim());
+@@ -2284,13 +2291,13 @@ function addRow(data={}) {
+   tr.innerHTML=`
+     <td style="color:var(--muted);font-size:11px;text-align:center">${document.querySelectorAll('#ingBody tr').length+1}</td>
+     <td style="text-align:center"><span class="hero-star${data.hero?' on':''}" onclick="toggleHero(this)" title="Hero Ingredient">⭐</span></td>
+-    <td><input list="ing_list" value="${data.name||''}" placeholder="ชื่อสาร..." oninput="onIngChange(this,${id})" style="min-width:180px"></td>
+-    <td><input type="number" value="${data.w||''}" placeholder="0" oninput="calcRow(${id})" style="min-width:100px"></td>
+-    <td><input value="${data.o||''}" placeholder="Origin..." style="min-width:140px"></td>
+-    <td><input type="number" value="${data.p||''}" placeholder="100" step="0.01" oninput="calcRow(${id})" style="min-width:90px"></td>
++    <td><input list="ing_list" value="${esc(data.name||'')}" placeholder="ชื่อสาร..." oninput="onIngChange(this,${id})" style="min-width:180px"></td>
++    <td><input type="number" value="${esc(data.w||'')}" placeholder="0" oninput="calcRow(${id})" style="min-width:100px"></td>
++    <td><input value="${esc(data.o||'')}" placeholder="Origin..." style="min-width:140px"></td>
++    <td><input type="number" value="${esc(data.p||'')}" placeholder="100" step="0.01" oninput="calcRow(${id})" style="min-width:90px"></td>
+     <td class="calc" id="actual_${id}">—</td>
+     <td class="fda-cell" id="fda_${id}"><span class="fda-unknown">⚪</span><div class="fda-tip">ยังไม่มีข้อมูล</div></td>
+-    <td><input value="${data.note||''}" placeholder="หมายเหตุ..." style="min-width:120px"></td>
++    <td><input value="${esc(data.note||'')}" placeholder="หมายเหตุ..." style="min-width:120px"></td>
+     <td><button class="btn-del" onclick="delRow(${id})">🗑</button></td>
+   `;
+   document.getElementById('ingBody').appendChild(tr);
+@@ -2314,7 +2321,7 @@ function onIngChange(inp, id) {
+   if(fdaCell && name.trim()) {
+     const result = checkFDA(name.trim(), 0);
+     if(result.status === 'not_approved') {
+-      fdaCell.innerHTML = `<span class="${result.cls}">${result.icon}</span><div class="fda-tip">${result.tip.replace(/\n/g,'<br>')}</div>`;
++      fdaCell.innerHTML = `<span class="${esc(result.cls)}">${esc(result.icon)}</span><div class="fda-tip">${esc(result.tip).replace(/\n/g,'<br>')}</div>`;
+     }
+   }
+ }
+@@ -2333,7 +2340,7 @@ function calcRow(id) {
+   const fdaCell = document.getElementById(`fda_${id}`);
+   if(fdaCell && nameInput && nameInput.value.trim()) {
+     const result = checkFDA(nameInput.value.trim(), actual);
+-    fdaCell.innerHTML = `<span class="${result.cls}" title="">${result.icon}</span><div class="fda-tip">${result.tip.replace(/\n/g,'<br>')}</div>`;
++    fdaCell.innerHTML = `<span class="${esc(result.cls)}" title="">${esc(result.icon)}</span><div class="fda-tip">${esc(result.tip).replace(/\n/g,'<br>')}</div>`;
+   }
+   updateTotals();
+ }
+@@ -2505,11 +2512,11 @@ function renderDashboard(d){
+   document.getElementById('d_title').textContent = brand ? `${brand}` : customer;
+   document.getElementById('d_sub').textContent = customer ? `ลูกค้า: ${customer}` : '';
+   document.getElementById('d_meta').innerHTML = [
+-    `<span><b>รหัส:</b> ${d.id}</span>`,
+-    form ? `<span><b>รูปแบบ:</b> ${form}</span>` : '',
+-    size ? `<span><b>บรรจุ:</b> ${fmtSize(d)}</span>` : '',
+-    uw ? `<span><b>น้ำหนัก/หน่วย:</b> ${fmtUW(d)}</span>` : '',
+-    `<span><b>สร้างวันที่:</b> ${d.metaDate}</span>`,
++    `<span><b>รหัส:</b> ${esc(d.id)}</span>`,
++    form ? `<span><b>รูปแบบ:</b> ${esc(form)}</span>` : '',
++    size ? `<span><b>บรรจุ:</b> ${esc(fmtSize(d))}</span>` : '',
++    uw ? `<span><b>น้ำหนัก/หน่วย:</b> ${esc(fmtUW(d))}</span>` : '',
++    `<span><b>สร้างวันที่:</b> ${esc(d.metaDate)}</span>`,
+     d.createdBy ? `<span><b>โดย:</b> ${esc(d.createdBy)}</span>` : '',
+   ].filter(Boolean).join('');
+ 
+@@ -2525,16 +2532,16 @@ function renderDashboard(d){
+   rows.forEach(r=>{
+     const tr = document.createElement('tr');
+     if(r.hero) tr.className='hero-row';
+-    const fdaStatusHTML = `<div class="fda-cell" style="text-align:center"><span class="${r.fda.cls}">${r.fda.icon}</span><div class="fda-tip">${r.fda.tip.replace(/\n/g,'<br>')}</div></div>`;
++    const fdaStatusHTML = `<div class="fda-cell" style="text-align:center"><span class="${esc(r.fda.cls)}">${esc(r.fda.icon)}</span><div class="fda-tip">${esc(r.fda.tip).replace(/\n/g,'<br>')}</div></div>`;
+     tr.innerHTML=`
+       <td style="color:var(--muted);text-align:center">${r.num}</td>
+-      <td><b>${r.name}</b>${r.hero?'<span class="hero-badge">HERO</span>':''}</td>
++      <td><b>${esc(r.name)}</b>${r.hero?'<span class="hero-badge">HERO</span>':''}</td>
+       <td>${r.w.toFixed(2)} mg</td>
+-      <td>${r.o}</td>
++      <td>${esc(r.o)}</td>
+       <td>${r.p}%</td>
+       <td class="actual">${r.actual.toFixed(2)} mg</td>
+       <td>${fdaStatusHTML}</td>
+-      <td style="color:var(--muted);font-size:12px">${r.note}</td>
++      <td style="color:var(--muted);font-size:12px">${esc(r.note)}</td>
+     `;
+     fb.appendChild(tr);
+     totW+=r.w; totA+=r.actual;
+@@ -2547,21 +2554,21 @@ function renderDashboard(d){
+ 
+   // Benefits
+   document.getElementById('d_benefits').innerHTML = allBenefits.slice(0,6).map(b=>`
+-    <div class="bitem"><span>✅</span><span>${b}</span></div>
++    <div class="bitem"><span>✅</span><span>${esc(b)}</span></div>
+   `).join('');
+ 
+   // Heroes
+   const heroList = heroes.length>0 ? heroes : rows.slice(0,3);
+   document.getElementById('d_heroes').innerHTML = heroList.map(r=>`
+     <div class="chip">
+-      <div class="chip-n">${r.name}</div>
++      <div class="chip-n">${esc(r.name)}</div>
+       <div class="chip-v">${r.actual.toFixed(2)} mg actual</div>
+     </div>
+   `).join('') || '<span style="color:var(--muted);font-size:13px">ไม่ได้ระบุ Hero Ingredient</span>';
+ 
+   // Selling points
+   document.getElementById('d_selling').innerHTML = allSP.slice(0,6).map(s=>`
+-    <div class="sp"><span style="font-size:16px">${s.split(' ')[0]}</span><span>${s.substring(s.indexOf(' ')+1)}</span></div>
++    <div class="sp"><span style="font-size:16px">${esc(s.split(' ')[0])}</span><span>${esc(s.substring(s.indexOf(' ')+1))}</span></div>
+   `).join('');
+ 
+   // Target
+@@ -2572,12 +2579,12 @@ function renderDashboard(d){
+     form ? {lbl:'รูปแบบ', val: form} : null,
+   ].filter(Boolean);
+   document.getElementById('d_target').innerHTML = tgtParts.map(p=>`
+-    <div class="tgt-c"><div class="tgt-lbl">${p.lbl}</div><div class="tgt-val">${p.val}</div></div>
++    <div class="tgt-c"><div class="tgt-lbl">${esc(p.lbl)}</div><div class="tgt-val">${esc(p.val)}</div></div>
+   `).join('');
+ 
+   // Constraints
+   const allCons = cons.length>0 ? cons : (conceptStr.includes('ลดน้ำหนัก')?['ไม่มีน้ำตาล']:['ไม่มีข้อจำกัดพิเศษ']);
+-  document.getElementById('d_cons').innerHTML = allCons.map(c=>`<span class="con-tag">${c}</span>`).join('');
++  document.getElementById('d_cons').innerHTML = allCons.map(c=>`<span class="con-tag">${esc(c)}</span>`).join('');
+ 
+   // Notes
+   const nw = document.getElementById('d_notes_wrap');
+@@ -2603,9 +2610,9 @@ function renderDashboard(d){
+       ${notApproved.map(r=>`<div class="fda-row">
+         <div class="fda-row-icon">🔴</div>
+         <div class="fda-row-body">
+-          <div class="fda-row-name">${r.name} (${r.actual.toFixed(2)} mg actual)</div>
+-          <div class="fda-row-detail">${r.fda.tip.split('\n')[1]||''}</div>
+-          <div class="fda-row-limit" style="color:#F85149">⚠️ ${r.fda.tip.split('\n')[2]||''}</div>
++          <div class="fda-row-name">${esc(r.name)} (${r.actual.toFixed(2)} mg actual)</div>
++          <div class="fda-row-detail">${esc(r.fda.tip.split('\n')[1]||'')}</div>
++          <div class="fda-row-limit" style="color:#F85149">⚠️ ${esc(r.fda.tip.split('\n')[2]||'')}</div>
+         </div>
+       </div>`).join('')}
+     </div>`;
+@@ -2620,10 +2627,10 @@ function renderDashboard(d){
+         return `<div class="fda-row">
+           <div class="fda-row-icon">🟡</div>
+           <div class="fda-row-body">
+-            <div class="fda-row-name">${r.name}</div>
+-            <div class="fda-row-detail">${lines[1]||''}</div>
+-            <div class="fda-row-limit" style="color:#D29922">${lines[2]||''}</div>
+-            <div class="fda-row-detail" style="margin-top:3px;color:#F85149">${lines[3]||''}</div>
++            <div class="fda-row-name">${esc(r.name)}</div>
++            <div class="fda-row-detail">${esc(lines[1]||'')}</div>
++            <div class="fda-row-limit" style="color:#D29922">${esc(lines[2]||'')}</div>
++            <div class="fda-row-detail" style="margin-top:3px;color:#F85149">${esc(lines[3]||'')}</div>
+           </div>
+         </div>`;
+       }).join('')}
+@@ -2637,7 +2644,7 @@ function renderDashboard(d){
+       ${unknown.map(r=>`<div class="fda-row">
+         <div class="fda-row-icon">⚪</div>
+         <div class="fda-row-body">
+-          <div class="fda-row-name">${r.name} (${r.actual.toFixed(2)} mg actual)</div>
++          <div class="fda-row-name">${esc(r.name)} (${r.actual.toFixed(2)} mg actual)</div>
+           <div class="fda-row-detail">ไม่พบในฐานข้อมูล อย. — กรุณาตรวจสอบกับ อย. ก่อนขึ้นทะเบียนผลิตภัณฑ์</div>
+         </div>
+       </div>`).join('')}
+@@ -2719,7 +2726,10 @@ const ROLES = {
+ const ROLE_KEYS = Object.keys(ROLES);
+ 
+ function findUser(name){ return userList.find(u=>u.name===name) || null; }
+-function currentRole(){ const u = findUser(currentUser); return u ? u.role : ''; }
++function currentRole(){
++  if(sbOn() && authMembership && currentUser===authMembership.name) return authMembership.role;
++  const u = findUser(currentUser); return u ? u.role : '';
++}
+ function roleLabel(role){ return ROLES[role] ? ROLES[role].label : '—'; }
+ function can(cap){
+   const r = ROLES[currentRole()];
+@@ -2823,6 +2833,7 @@ function filterImpList(q){
+   if(el) el.innerHTML = impListHTML(q);
+ }
+ function openImpersonate(){
++  if(sbOn()){ alert('โหมด Supabase Auth ไม่อนุญาตให้สวมบทบาทใน browser'); return; }
+   const realRole = impersonator ? (findUser(impersonator)||{}).role : currentRole();
+   if(realRole !== 'admin'){ alert('สวมบทบาทผู้ใช้ได้เฉพาะ Role: Admin'); return; }
+   if(impersonator){ alert('กำลังสวมบทบาทอยู่ — กด "ออกจากการสวมบทบาท" ที่แถบด้านซ้ายก่อน'); return; }
+@@ -2843,6 +2854,7 @@ function openImpersonate(){
+     </div>`);
+ }
+ function startImpersonate(i){
++  if(sbOn()){ alert('โหมด Supabase Auth ไม่อนุญาตให้สวมบทบาทใน browser'); return; }
+   const target = userList[i];
+   if(!target) return;
+   const real = impersonator || currentUser;
+@@ -2953,22 +2965,29 @@ function renderActivities(){
+ 
+ function loadUsers(){
+   try{
+-    currentUser = localStorage.getItem('fs_user') || '';
+-    impersonator = localStorage.getItem('fs_imp') || '';
++    // Server mode trusts Supabase Auth only. Legacy browser identity is never authority.
++    currentUser = sbOn() ? '' : (localStorage.getItem('fs_user') || '');
++    impersonator = sbOn() ? '' : (localStorage.getItem('fs_imp') || '');
+     const raw = JSON.parse(localStorage.getItem('fs_userlist') || '[]');
+     // รองรับข้อมูลเดิมที่เก็บเป็นรายชื่อ (string) — ยกให้เป็น Admin เพื่อไม่ให้ใช้งานต่อไม่ได้
+     userList = raw.map(u => typeof u === 'string'
+       ? {name:u, role:'admin'}
+-      : {name:u.name, role: ROLES[u.role] ? u.role : 'admin', email:u.email||'', pass:u.pass});
++      : {name:u.name, role: ROLES[u.role] ? u.role : 'admin', email:u.email||'', pass:sbOn()?null:u.pass});
+   }catch(e){ currentUser=''; userList=[]; }
+   migrateUserNames();
+   renderUserUI();
+ }
+ function saveUsers(){
+   try{
+-    localStorage.setItem('fs_user', currentUser);
+-    localStorage.setItem('fs_imp', impersonator);
+-    localStorage.setItem('fs_userlist', JSON.stringify(userList));
++    if(sbOn()){
++      localStorage.removeItem('fs_user');
++      localStorage.removeItem('fs_imp');
++      localStorage.setItem('fs_userlist', JSON.stringify(userList.map(u=>Object.assign({},u,{pass:null}))));
++    } else {
++      localStorage.setItem('fs_user', currentUser);
++      localStorage.setItem('fs_imp', impersonator);
++      localStorage.setItem('fs_userlist', JSON.stringify(userList));
++    }
+   }catch(e){}
+   // currentUser / impersonator เป็นสถานะของเครื่องนี้เท่านั้น ไม่ส่งขึ้นเซิร์ฟเวอร์
+   sbQueue();
+@@ -3013,8 +3032,8 @@ let _lgMode = null;   // 'login' | 'first' | 'wait' — จำไว้เพื
+ function loginFormHTML(){
+   return `
+     <div class="fgrp">
+-      <label class="flbl">ชื่อผู้ใช้ / User ID</label>
+-      <input class="fi" id="lgUser" autocomplete="username" placeholder="ชื่อผู้ใช้ หรือ อีเมลบริษัท" onkeydown="if(event.key==='Enter'){var p=document.getElementById('lgPass'); if(p) p.focus();}">
++      <label class="flbl">${sbOn()?'อีเมลบริษัท':'ชื่อผู้ใช้ / User ID'}</label>
++      <input class="fi" id="lgUser" autocomplete="username" placeholder="${sbOn()?'name@company.co.th':'ชื่อผู้ใช้ หรือ อีเมลบริษัท'}" onkeydown="if(event.key==='Enter'){var p=document.getElementById('lgPass'); if(p) p.focus();}">
+     </div>
+     <div class="fgrp">
+       <label class="flbl">รหัสผ่าน</label>
+@@ -3048,8 +3067,8 @@ function renderLoginView(){
+   if(currentUser){ ov.style.display = 'none'; _lgMode = null; return; }
+   ov.style.display = 'flex';
+   // ระหว่างรอข้อมูลผู้ใช้จากเซิร์ฟเวอร์ อย่าเพิ่งชวนสร้าง Admin คนแรก
+-  const waiting = (typeof sbOn === 'function' && sbOn() && typeof sbReady !== 'undefined' && !sbReady);
+-  const mode = userList.length ? 'login' : (waiting ? 'wait' : 'first');
++  const waiting = (typeof sbOn === 'function' && sbOn() && typeof authChecking !== 'undefined' && authChecking);
++  const mode = sbOn() ? (waiting ? 'wait' : 'login') : (userList.length ? 'login' : (waiting ? 'wait' : 'first'));
+   if(mode === _lgMode) return;
+   _lgMode = mode;
+   document.getElementById('loginBody').innerHTML =
+@@ -3065,11 +3084,28 @@ function loginErr(msg){
+   const el = document.getElementById('lgErr');
+   if(el) el.textContent = msg || '';
+ }
+-function doLogin(){
++async function doLogin(){
+   const uEl = document.getElementById('lgUser'), pEl = document.getElementById('lgPass');
+   if(!uEl || !pEl) return;
+   const q = uEl.value.trim().toLowerCase();
+   if(!q){ loginErr('กรอกชื่อผู้ใช้ก่อน'); uEl.focus(); return; }
++  if(sbOn()){
++    loginErr('กำลังตรวจสอบบัญชี…');
++    try{
++      await authSignIn(q, pEl.value);
++      await authFetchMembership();
++      loginErr('');
++      await sbBoot(true);
++      logAct('auth','เข้าใช้งาน', currentUser + ' · Role ' + roleLabel(currentRole()));
++      afterUserChange();
++      switchView('dash');
++    }catch(err){
++      await authSignOut(false);
++      loginErr(authFriendlyError(err));
++      pEl.value=''; pEl.focus();
++    }
++    return;
++  }
+   const u = userList.find(x=>String(x.name||'').toLowerCase() === q)
+          || userList.find(x=>String(x.email||'').toLowerCase() === q);
+   if(!u){ loginErr('ไม่พบผู้ใช้นี้ในระบบ'); return; }
+@@ -3085,6 +3121,7 @@ function doLogin(){
+   switchView('dash');
+ }
+ function createFirstAdmin(){
++  if(sbOn()){ loginErr('สร้างบัญชีผ่าน Supabase Dashboard โดยผู้ดูแลระบบเท่านั้น'); return; }
+   const name = (document.getElementById('lgNewName').value||'').trim();
+   const email = (document.getElementById('lgNewMail').value||'').trim();
+   const pw = document.getElementById('lgNewPass').value || DEFAULT_PW;
+@@ -3106,7 +3143,7 @@ function renderUserUI(){
+   const isAdmin = realRole === 'admin';
+   const imp = document.getElementById('sideImpersonate');
+   const act = document.getElementById('sideActivities');
+-  if(imp) imp.style.display = (isAdmin && !impersonator) ? 'flex' : 'none';
++  if(imp) imp.style.display = (!sbOn() && isAdmin && !impersonator) ? 'flex' : 'none';
+   if(act) act.style.display = (isAdmin && !impersonator) ? 'flex' : 'none';
+   const bar = document.getElementById('impBar');
+   if(bar){
+@@ -3137,6 +3174,12 @@ function renderUserUI(){
+ }
+ function openUserModal(){
+   document.getElementById('userInput').value='';
++  const controls = document.getElementById('userCreateControls');
++  const desc = document.getElementById('userModalDesc');
++  if(controls) controls.style.display = sbOn() ? 'none' : 'flex';
++  if(desc) desc.textContent = sbOn()
++    ? 'บัญชีและรหัสผ่านจัดการโดย System Owner ผ่าน Supabase Dashboard; หน้านี้แสดงสมาชิกที่ซิงก์มาเท่านั้น'
++    : 'คลิกชื่อของคุณเพื่อเข้าใช้งาน · ผู้ใช้ที่สร้างใหม่จะได้รหัสผ่านตั้งต้น 123456';
+   renderUserList();
+   document.getElementById('userModal').style.display='flex';
+   setTimeout(()=>document.getElementById('userInput').focus(), 50);
+@@ -3144,7 +3187,7 @@ function openUserModal(){
+ function closeUserModal(){ document.getElementById('userModal').style.display='none'; }
+ 
+ // เพิ่ม/ลบผู้ใช้ และเปลี่ยน Role ได้เฉพาะ Admin (ยกเว้นตอนยังไม่มีผู้ใช้เลย — สร้างคนแรกเป็น Admin)
+-function canManageUsers(){ return !userList.length || can('manageUsers'); }
++function canManageUsers(){ return !sbOn() && (!userList.length || can('manageUsers')); }
+ 
+ function roleSelectHTML(id, value, disabled){
+   return `<select class="fi role-select" id="${id}"${disabled?' disabled':''}>
+@@ -3153,6 +3196,11 @@ function roleSelectHTML(id, value, disabled){
+ }
+ function renderUserList(){
+   const wrap = document.getElementById('userListWrap');
++  if(sbOn()){
++    wrap.innerHTML = `<div class="perm-note" style="margin:12px 0">เพิ่ม/เชิญผู้ใช้ รีเซ็ตรหัสผ่าน และกำหนด membership ผ่าน <b>Supabase Dashboard</b> ตาม runbook เท่านั้น</div>
++      ${userList.map(u=>`<div class="user-row"><div class="user-chip" style="flex:1;display:block">${esc(u.name)}${u.name===currentUser?' · กำลังใช้งาน':''}${u.email?`<div class="user-mail">${esc(u.email)}</div>`:''}</div><span class="role-badge ${esc(u.role)}">${esc(roleLabel(u.role))}</span></div>`).join('') || '<div class="modal-desc">ยังไม่มี membership ที่อ่านได้</div>'}`;
++    return;
++  }
+   const admin = canManageUsers();
+   const roleHelp = `<div class="role-help">${ROLE_KEYS.map(k=>`<div><b>${ROLES[k].label}</b> — ${ROLES[k].desc}</div>`).join('')}</div>`;
+   if(!userList.length){
+@@ -3175,6 +3223,7 @@ function renderUserList(){
+     ${roleHelp}`;
+ }
+ function saveRoles(){
++  if(sbOn()){ alert('กำหนด membership ผ่าน Supabase Dashboard ตาม runbook'); return; }
+   if(!canManageUsers()){ alert('เฉพาะ Admin เท่านั้นที่เปลี่ยน Role ได้'); return; }
+   const changes = [];
+   userList.forEach((u,i)=>{
+@@ -3197,6 +3246,7 @@ function afterUserChange(){
+   renderRecordsList();
+ }
+ function createUser(){
++  if(sbOn()){ alert('เชิญผู้ใช้ผ่าน Supabase Dashboard ตาม runbook'); return; }
+   const name = document.getElementById('userInput').value.trim();
+   const mailEl = document.getElementById('userEmail');
+   const email = mailEl ? mailEl.value.trim() : '';
+@@ -3251,6 +3301,7 @@ function migrateRecordOwners(){
+ }
+ // เพิ่มผู้ใช้ที่ยังไม่มีในระบบ (ของเดิมไม่ถูกแตะ) — รหัสผ่านเริ่มต้น 123456
+ function seedTeamUsers(){
++  if(sbOn()){ alert('เชิญผู้ใช้ผ่าน Supabase Dashboard ตาม runbook'); return; }
+   if(!canManageUsers()){ alert('เฉพาะ Admin เท่านั้นที่เพิ่มผู้ใช้ได้'); return; }
+   const missing = SEED_USERS.filter(s => !findUser(s.name) && !userList.some(u=>u.email===s.email));
+   if(!missing.length){ alert('มีผู้ใช้ตามรายชื่อทีมครบแล้วทั้ง '+SEED_USERS.length+' คน'); return; }
+@@ -3281,6 +3332,10 @@ function hasPassword(name){ const u = findUser(name); return !!(u && u.pass); }
+ // เปลี่ยน / ตั้งรหัสผ่านของตัวเอง
+ function openChangePassword(){
+   if(!currentUser){ alert('กรุณาเข้าใช้งานด้วย User ก่อนเปลี่ยนรหัสผ่าน'); openUserModal(); return; }
++  if(sbOn()){
++    showGModal(`<div class="modal-hd"><div><div class="modal-t">รหัสผ่าน Supabase Auth</div><div class="modal-desc">รหัสผ่านไม่ถูกเก็บหรือเปลี่ยนใน Formula Studio</div></div><button class="modal-x" onclick="closeGModal()">×</button></div><div class="perm-note" style="margin-top:16px">ใช้ขั้นตอนเปลี่ยน/กู้รหัสผ่านที่ System Owner กำหนดใน Supabase Dashboard แล้วเข้าใช้งานใหม่</div><div class="modal-acts"><button class="btn btn-g btn-sm" onclick="closeGModal()">ปิด</button></div>`);
++    return;
++  }
+   const u = findUser(currentUser);
+   const has = !!(u && u.pass);
+   showGModal(`
+@@ -3377,6 +3432,7 @@ function submitLoginPassword(i){
+ // รหัสผ่านเริ่มต้นหลังรีเซ็ต — Admin รีเซ็ตให้ User คนใดก็ได้ หรือทั้งหมดพร้อมกัน
+ const DEFAULT_PW = '123456';
+ function resetUserPassword(i){
++  if(sbOn()){ alert('รีเซ็ตรหัสผ่านผ่าน Supabase Dashboard ตาม runbook'); return; }
+   if(!canManageUsers()){ alert('เฉพาะ Admin เท่านั้นที่รีเซ็ตรหัสผ่านได้'); return; }
+   const u = userList[i];
+   if(!u) return;
+@@ -3394,6 +3450,7 @@ function doResetUserPassword(i){
+ }
+ // รีเซ็ตรหัสผ่านของผู้ใช้ทุกคนพร้อมกัน
+ function resetAllPasswords(){
++  if(sbOn()){ alert('รีเซ็ตรหัสผ่านผ่าน Supabase Dashboard ตาม runbook'); return; }
+   if(!canManageUsers()){ alert('เฉพาะ Admin เท่านั้นที่รีเซ็ตรหัสผ่านได้'); return; }
+   if(!userList.length) return;
+   askConfirm('รีเซ็ตรหัสผ่านผู้ใช้ทั้งหมด ' + userList.length + ' คน?',
+@@ -3410,6 +3467,7 @@ function doResetAllPasswords(){
+ }
+ 
+ function loginUserAt(i){
++  if(sbOn()){ alert('ต้องออกจากระบบแล้วเข้าใช้บัญชี Supabase Auth ที่ต้องการ'); return; }
+   const u = userList[i];
+   if(u.pass && u.name !== currentUser){ askLoginPassword(i); return; }
+   currentUser = u.name;
+@@ -3417,6 +3475,7 @@ function loginUserAt(i){
+   afterUserChange(); closeUserModal();
+ }
+ function deleteUserAt(i){
++  if(sbOn()){ alert('ปิดสมาชิกผ่าน Supabase Dashboard ตาม runbook'); return; }
+   if(!canManageUsers()){ alert('เฉพาะ Admin เท่านั้นที่ลบผู้ใช้ได้'); return; }
+   const name = userList[i].name;
+   if(!confirm(`ลบผู้ใช้ "${name}" ออกจากรายการ?\n(ประวัติที่บันทึกในชื่อนี้จะยังคงอยู่)`)) return;
+@@ -3437,7 +3496,7 @@ function sideLogout(){
+   ];
+   askConfirm('ออกจากระบบ', lines, 'ออกจากระบบ', function(){ logoutUser(); switchView('dash'); });
+ }
+-function logoutUser(){
++async function logoutUser(){
+   // ออกจากระบบระหว่างสวมบทบาท ต้องล้างสถานะสวมบทบาทด้วย ไม่งั้นค้างเป็นสถานะกำกวม
+   if(impersonator){
+     logAct('auth','ออกจากการสวมบทบาท', currentUser + ' → ' + impersonator);
+@@ -3445,6 +3504,7 @@ function logoutUser(){
+   }
+   logAct('auth','ออกจากระบบ', currentUser);
+   currentUser='';
++  if(sbOn()) await authSignOut(true);
+   afterUserChange(); renderUserList();
+ }
+ 
+@@ -3563,7 +3623,7 @@ function renderModify(){
+   const ingRows = modifyIngs.map((r,i)=>`
+     <tr id="ingrow-${i}" class="${r.verifiedBy?'ver':''}">
+       <td style="color:var(--muted);text-align:center">${i+1}</td>
+-      <td style="text-align:center;white-space:nowrap" id="ingfda-${i}">${r.fdaIcon}${r.hero?' ⭐':''}</td>
++      <td style="text-align:center;white-space:nowrap" id="ingfda-${i}">${esc(r.fdaIcon)}${r.hero?' ⭐':''}</td>
+       <td><input value="${esc(r.name)}" onchange="editIng(${i},'name',this.value)"></td>
+       <td><input value="${esc(r.w)}" onchange="editIng(${i},'w',this.value)" style="max-width:90px"></td>
+       <td><input value="${esc(r.o)}" onchange="editIng(${i},'o',this.value)"></td>
+@@ -3656,7 +3716,7 @@ function refreshIngStatus(i){
+   const tr = document.getElementById('ingrow-'+i);
+   if(tr) tr.classList.toggle('ver', !!modifyIngs[i].verifiedBy);
+   const fda = document.getElementById('ingfda-'+i);   // สถานะ อย. อัพเดตตามค่าที่แก้
+-  if(fda) fda.innerHTML = `${modifyIngs[i].fdaIcon}${modifyIngs[i].hero?' ⭐':''}`;
++  if(fda) fda.innerHTML = `${esc(modifyIngs[i].fdaIcon)}${modifyIngs[i].hero?' ⭐':''}`;
+ }
+ 
+ // ---- เพิ่ม / ลบ สารสกัดใน PD Modify Data ----
+@@ -4497,7 +4557,7 @@ function touchChatPart(c, name, isMsg){
+   return p;
+ }
+ function pushSys(c, text){
+-  c.messages.push({type:'sys', text, ts:Date.now()});
++  c.messages.push({type:'sys', user:currentUser||'', text, ts:Date.now()});
+ }
+ 
+ // สร้างห้องแชทตามรหัสงาน
+@@ -5577,18 +5637,14 @@ function parseCSV(text) {
+         rest.join(',').split(',').forEach(v=>{
+           v=v.replace(/^"|"$/g,'').trim();
+           if(v){ const tc=document.getElementById('tc_cons'),ti=document.getElementById('ti_cons');
+-            const tag=document.createElement('span');tag.className='tag';
+-            tag.innerHTML=`${v}<button class="tag-x" onclick="this.parentElement.remove()">×</button>`;
+-            tc.insertBefore(tag,ti);}
++            appendTag(tc,ti,v);}
+         });
+       }
+       else if(fld==='claims') {
+         rest.join(',').split(',').forEach(v=>{
+           v=v.replace(/^"|"$/g,'').trim();
+           if(v){ const tc=document.getElementById('tc_claims'),ti=document.getElementById('ti_claims');
+-            const tag=document.createElement('span');tag.className='tag';
+-            tag.innerHTML=`${v}<button class="tag-x" onclick="this.parentElement.remove()">×</button>`;
+-            tc.insertBefore(tag,ti);}
++            appendTag(tc,ti,v);}
+         });
+       }
+     }
+@@ -5870,37 +5926,150 @@ addRow();
+ function sbOn(){ return !!(typeof SB_URL!=='undefined' && SB_URL && SB_KEY); }
+ // รับได้ทั้งแบบใส่ Project URL เปล่า ๆ และแบบก๊อป URL ที่ลงท้าย /rest/v1/ มาเลย
+ function sbBase(){ return String(SB_URL||'').replace(/\/+$/,'').replace(/\/rest\/v1$/,''); }
++const AUTH_SESSION_KEY = 'fs_auth_session';
++let authSession = null;
++let authMembership = null;
++let authChecking = false;
++
++function authFriendlyError(err){
++  const msg = String(err && err.message || err || '');
++  if(/invalid login|invalid credentials|400/i.test(msg)) return 'อีเมลหรือรหัสผ่านไม่ถูกต้อง';
++  if(/membership|inactive|403/i.test(msg)) return 'บัญชีนี้ยังไม่ได้รับสิทธิ์ใช้งาน กรุณาติดต่อผู้ดูแลระบบ';
++  return 'เข้าใช้งานไม่สำเร็จ กรุณาตรวจสอบอินเทอร์เน็ตแล้วลองใหม่';
++}
++function safeError(err){
++  return String(err && err.message || err || '')
++    .replace(/Bearer\s+[^\s,}]+/gi,'Bearer [REDACTED]')
++    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g,'[REDACTED_JWT]')
++    .replace(/\bsb_(?:publishable|secret)_[A-Za-z0-9._-]+\b/gi,'[REDACTED_SUPABASE_KEY]')
++    .replace(/((?:access|refresh)_token\s*[=:]\s*)[^\s,}]+/gi,'$1[REDACTED]')
++    .slice(0,500);
++}
++function authStoreSession(session){
++  if(!session || !session.access_token || !session.refresh_token) throw new Error('Invalid Auth session');
++  const normalized = Object.assign({}, session);
++  if(!normalized.expires_at) normalized.expires_at = Math.floor(Date.now()/1000) + Number(normalized.expires_in || 3600);
++  authSession = normalized;
++  sessionStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(normalized));
++  localStorage.removeItem(AUTH_SESSION_KEY);
++  localStorage.removeItem('fs_user');
++  localStorage.removeItem('fs_imp');
++  return normalized;
++}
++function authClearSession(){
++  authSession = null;
++  authMembership = null;
++  currentUser = '';
++  impersonator = '';
++  sessionStorage.removeItem(AUTH_SESSION_KEY);
++  localStorage.removeItem(AUTH_SESSION_KEY);
++  localStorage.removeItem('fs_user');
++  localStorage.removeItem('fs_imp');
++  sbReady = false;
++}
++async function authRequest(path, opt){
++  const o = opt || {};
++  const headers = Object.assign({apikey:SB_KEY,'Content-Type':'application/json'}, o.headers || {});
++  const res = await fetch(sbBase() + '/auth/v1/' + path, {
++    method:o.method || 'POST', headers,
++    body:o.body ? JSON.stringify(o.body) : undefined
++  });
++  const txt = await res.text();
++  if(!res.ok) throw new Error(res.status + ' ' + txt.slice(0,180));
++  return txt ? JSON.parse(txt) : null;
++}
++async function authSignIn(email, password){
++  const session = await authRequest('token?grant_type=password', {body:{email:String(email||'').trim(),password:String(password||'')}});
++  return authStoreSession(session);
++}
++async function authRefreshSession(){
++  if(!authSession || !authSession.refresh_token) throw new Error('No refresh token');
++  try{
++    const session = await authRequest('token?grant_type=refresh_token', {body:{refresh_token:authSession.refresh_token}});
++    return authStoreSession(session);
++  }catch(err){ authClearSession(); throw err; }
++}
++async function authRestoreSession(){
++  if(!sbOn()) return null;
++  try{ authSession = JSON.parse(sessionStorage.getItem(AUTH_SESSION_KEY) || 'null'); }
++  catch(err){ authSession = null; }
++  if(!authSession || !authSession.access_token || !authSession.refresh_token){ authClearSession(); return null; }
++  if(Number(authSession.expires_at || 0) <= Math.floor(Date.now()/1000) + 60) return authRefreshSession();
++  return authSession;
++}
++async function authSignOut(notifyServer){
++  const token = authSession && authSession.access_token;
++  try{
++    if(notifyServer !== false && token){
++      await authRequest('logout', {headers:{Authorization:'Bearer '+token}});
++    }
++  }catch(err){ console.warn('[auth] sign-out server notification failed'); }
++  authClearSession();
++}
++function authDataHeaders(){
++  if(!authSession || !authSession.access_token) throw new Error('Authentication required');
++  return {apikey:SB_KEY,Authorization:'Bearer '+authSession.access_token,'Content-Type':'application/json'};
++}
++async function authFetchMembership(){
++  if(!authSession || !authSession.user || !authSession.user.id) throw new Error('Missing authenticated user');
++  const rows = await sbReq('fs_memberships?select=user_id,name,role,active&user_id=eq.' + encodeURIComponent(authSession.user.id));
++  const membership = rows && rows[0];
++  if(!membership || !membership.active || !ROLES[membership.role]){
++    authClearSession();
++    throw new Error('Inactive or missing membership');
++  }
++  authMembership = membership;
++  currentUser = membership.name;
++  impersonator = '';
++  const local = findUser(membership.name);
++  if(local){ local.role=membership.role; local.email=(authSession.user.email||local.email||''); local.pass=null; }
++  else userList.push({name:membership.name,role:membership.role,email:authSession.user.email||'',pass:null});
++  if(membership.role!=='admin'){
++    activities=[];
++    localStorage.removeItem('fs_activities');
++  }
++  saveUsers();
++  return membership;
++}
+ let sbReady = false;        // pull สำเร็จอย่างน้อย 1 ครั้งแล้ว
+ let sbBusy = false;         // กำลังคุยกับเซิร์ฟเวอร์
+ let sbApplying = false;     // กำลังเอาข้อมูลจากเซิร์ฟเวอร์ลงเครื่อง (ห้าม push กลับ)
+ let sbErr = '';             // ข้อความ error ล่าสุด
+ let sbPushTimer = null;
+ let sbLastPush = 0;
++let sbPollingStarted = false;
+ // สแนปช็อตของสิ่งที่เซิร์ฟเวอร์มี (เท่าที่เรารู้) ใช้หาว่าอะไรเปลี่ยน/ถูกลบ
+-let sbSnap = {records:{}, chats:{}, users:{}, acts:{}, counter:null};
++function sbEmptySnapshot(){ return {records:{},chats:{},users:{},acts:{},counter:null}; }
++function sbLoadSnapshot(){
++  try{
++    const value=JSON.parse(localStorage.getItem('fs_sync_snapshot')||'null');
++    return value && value.records && value.chats && value.users && value.acts ? value : sbEmptySnapshot();
++  }catch(err){ return sbEmptySnapshot(); }
++}
++function sbPersistSnapshot(){
++  try{ localStorage.setItem('fs_sync_snapshot',JSON.stringify(sbSnap)); }catch(err){}
++}
++let sbSnap = sbLoadSnapshot();
+ 
+ async function sbReq(path, opt){
+   const o = opt || {};
+   const res = await fetch(sbBase() + '/rest/v1/' + path, {
+     method: o.method || 'GET',
+-    headers: Object.assign({
+-      apikey: SB_KEY,
+-      Authorization: 'Bearer ' + SB_KEY,
+-      'Content-Type': 'application/json'
+-    }, o.headers || {}),
++    headers: Object.assign(authDataHeaders(), o.headers || {}),
+     body: o.body ? JSON.stringify(o.body) : undefined
+   });
+   if(!res.ok){
+     const t = await res.text();
++    if(res.status===401 || res.status===403) authClearSession();
+     throw new Error(res.status + ' ' + t.slice(0,180));
+   }
+   const txt = await res.text();
+   return txt ? JSON.parse(txt) : null;
+ }
+-function sbUpsert(table, rows){
++function sbUpsert(table, rows, preference){
+   if(!rows.length) return Promise.resolve();
+   return sbReq(table, {method:'POST', body:rows,
+-    headers:{Prefer:'resolution=merge-duplicates,return=minimal'}});
++    headers:{Prefer:(preference||'resolution=merge-duplicates')+',return=minimal'}});
+ }
+ function sbDelete(table, col, keys){
+   if(!keys.length) return Promise.resolve();
+@@ -5942,22 +6111,71 @@ async function sbPull(){
+   };
+ }
+ 
+-// เอาข้อมูลจากเซิร์ฟเวอร์มาแทนที่ในเครื่อง แล้ว re-render ถ้ามีอะไรเปลี่ยนจริง
++function sbMap(list,key){
++  const out={};
++  (list||[]).forEach(item=>{ if(item && item[key]!=null) out[item[key]]=item; });
++  return out;
++}
++// Merge against the last confirmed server snapshot. Local edits made after that
++// snapshot win; unchanged cache follows remote updates/deletes.
++function sbMergeObjects(localList,remoteList,key,prior){
++  const local=sbMap(localList,key), remote=sbMap(remoteList,key), out=[];
++  const keys=new Set(Object.keys(local).concat(Object.keys(remote),Object.keys(prior||{})));
++  keys.forEach(k=>{
++    const hasLocal=Object.prototype.hasOwnProperty.call(local,k);
++    const hasRemote=Object.prototype.hasOwnProperty.call(remote,k);
++    const hasPrior=Object.prototype.hasOwnProperty.call(prior||{},k);
++    if(hasLocal){
++      const localJson=JSON.stringify(local[k]);
++      if(hasPrior && localJson!==(prior||{})[k]) out.push(local[k]);
++      else if(hasRemote) out.push(remote[k]);
++      else if(!hasPrior) out.push(local[k]);
++      // hasPrior + no local remote means an unchanged item was deleted remotely.
++    }else if(hasRemote && !hasPrior){
++      out.push(remote[k]);
++    }
++    // hasPrior + no local means a queued local deletion; do not resurrect it.
++  });
++  return out;
++}
++function sbRemoteSnapshot(d){
++  const m=sbEmptySnapshot();
++  (d.records||[]).forEach(r=>{ m.records[r.id]=JSON.stringify(r); });
++  (d.chats||[]).forEach(c=>{ m.chats[c.jobId]=JSON.stringify(c); });
++  (d.users||[]).forEach(u=>{ m.users[u.name]=JSON.stringify(u); });
++  (d.acts||[]).forEach(e=>{ m.acts[actUid(e)]=1; });
++  m.counter=d.counter;
++  return m;
++}
++
++// เอาข้อมูลจากเซิร์ฟเวอร์มา merge กับงาน offline แล้ว re-render ถ้ามีอะไรเปลี่ยนจริง
+ function sbApply(d){
+   const before = JSON.stringify([records, chats, userList, activities.length, recCounter]);
++  const prior=sbSnap;
++  const remoteSnapshot=sbRemoteSnapshot(d);
+   sbApplying = true;
+   try{
+-    records = d.records.slice().sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+-    chats   = d.chats.slice().sort((a,b)=>chatLastTs(b)-chatLastTs(a));
++    records = sbMergeObjects(records,d.records,'id',prior.records).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
++    chats   = sbMergeObjects(chats,d.chats,'jobId',prior.chats).sort((a,b)=>chatLastTs(b)-chatLastTs(a));
+     chats.forEach(c=>{ c.messages=c.messages||[]; c.parts=c.parts||[]; c.approvals=c.approvals||{}; });
+-    activities = d.acts.slice().sort((a,b)=>(b.ts||0)-(a.ts||0));
+-    if(d.users.length) userList = d.users;
+-    if(d.counter!=null && d.counter > recCounter) recCounter = d.counter;
++    if(currentRole()==='admin'){
++      const actMap={};
++      activities.concat(d.acts||[]).forEach(e=>{ actMap[actUid(e)]=e; });
++      activities=Object.values(actMap).sort((a,b)=>(b.ts||0)-(a.ts||0));
++    }
++    if(d.users.length) userList=d.users.map(u=>Object.assign({},u,{pass:null}));
++    if(authMembership){
++      const me=findUser(authMembership.name);
++      if(me){ me.role=authMembership.role; me.pass=null; }
++      else userList.push({name:authMembership.name,role:authMembership.role,email:(authSession&&authSession.user&&authSession.user.email)||'',pass:null});
++    }
++    if(d.counter!=null) recCounter=Math.max(recCounter,d.counter);
+     syncRecCounter();
+     // เก็บสำเนาไว้ในเครื่องด้วย เผื่อเน็ตหลุดจะยังเปิดดูข้อมูลล่าสุดได้
+     saveRecordsStore(); saveChats(); saveActivities(); saveUsers();
+   } finally { sbApplying = false; }
+-  sbSnapshot();
++  sbSnap=remoteSnapshot;
++  sbPersistSnapshot();
+   if(JSON.stringify([records, chats, userList, activities.length, recCounter]) === before) return false;
+   sbRerender();
+   return true;
+@@ -5986,6 +6204,7 @@ function sbSnapshot(){
+   userList.forEach(u=>{ m.users[u.name] = JSON.stringify(u); });
+   activities.forEach(e=>{ m.acts[actUid(e)] = 1; });
+   sbSnap = m;
++  sbPersistSnapshot();
+ }
+ 
+ // ---------- ส่งเฉพาะสิ่งที่เปลี่ยนขึ้นเซิร์ฟเวอร์ ----------
+@@ -5996,13 +6215,14 @@ async function sbPush(){
+     if(sbSnap.records[r.id] !== j) recUp.push({id:r.id, data:r}); });
+   chats.forEach(c=>{ const j = JSON.stringify(c); seenC[c.jobId]=1;
+     if(sbSnap.chats[c.jobId] !== j) chtUp.push({job_id:c.jobId, data:c}); });
+-  userList.forEach(u=>{ const j = JSON.stringify(u); seenU[u.name]=1;
+-    if(sbSnap.users[u.name] !== j) usrUp.push({name:u.name, data:u}); });
++  // Secure-mode user lifecycle is Dashboard/membership-owned; browser is read-only.
++  userList.forEach(u=>{ seenU[u.name]=1; });
+   // ลบเฉพาะรายการที่เคยอยู่บนเซิร์ฟเวอร์แล้วถูกลบในเครื่องนี้จริง
+   const recDel = Object.keys(sbSnap.records).filter(k=>!seenR[k]);
+   const chtDel = Object.keys(sbSnap.chats).filter(k=>!seenC[k]);
+-  const usrDel = Object.keys(sbSnap.users).filter(k=>!seenU[k]);
+-  activities.forEach(e=>{ const u = actUid(e); if(!sbSnap.acts[u]) actUp.push({uid:u, ts:e.ts||0, data:e}); });
++  const usrDel = [];
++  activities.filter(e=>currentRole()==='admin' || (e.user===currentUser && !e.via))
++    .forEach(e=>{ const u = actUid(e); if(!sbSnap.acts[u]) actUp.push({uid:u, ts:e.ts||0, data:e}); });
+   const counterUp = sbSnap.counter !== recCounter;
+   if(!recUp.length && !chtUp.length && !usrUp.length && !actUp.length
+      && !recDel.length && !chtDel.length && !usrDel.length && !counterUp) return false;
+@@ -6011,7 +6231,7 @@ async function sbPush(){
+   await sbUpsert('fs_chats', chtUp);
+   await sbUpsert('fs_users', usrUp);
+   if(actUp.length){
+-    await sbUpsert('fs_activities', actUp);
++    await sbUpsert('fs_activities', actUp, 'resolution=ignore-duplicates');
+     actUp.forEach(a=>{ sbSnap.acts[a.uid] = 1; });
+   }
+   await sbDelete('fs_records', 'id', recDel);
+@@ -6025,7 +6245,7 @@ async function sbPush(){
+ 
+ // เรียกจากทุกจุดที่แอปบันทึกข้อมูล — รวบหลาย ๆ การบันทึกที่ติดกันเป็นครั้งเดียว
+ function sbQueue(){
+-  if(!sbOn() || !sbReady || sbApplying) return;
++  if(!sbOn() || !authSession || !sbReady || sbApplying) return;
+   clearTimeout(sbPushTimer);
+   sbPushTimer = setTimeout(sbCycle, 400);
+ }
+@@ -6033,45 +6253,53 @@ function sbQueue(){
+ // ---------- รอบการซิงก์: ส่งขึ้น แล้วดึงลง ----------
+ let sbCycleRunning = false;
+ async function sbCycle(){
+-  if(!sbOn() || sbCycleRunning) return;
++  if(!sbOn() || !authSession || sbCycleRunning) return;
+   sbCycleRunning = true; sbBusy = true; sbChip();
+   try{
+     await sbPush();
+     sbApply(await sbPull());
+     sbErr = '';
+   }catch(err){
+-    sbErr = String(err && err.message || err);
++    sbErr = safeError(err);
+     console.warn('[sync]', sbErr);
+   }finally{
+     sbBusy = false; sbCycleRunning = false; sbChip();
++    if(!authSession) renderUserUI();
+   }
+ }
+-function sbManualSync(){ if(sbOn()){ sbErr=''; sbCycle(); } }
++function sbManualSync(){ if(sbOn() && authSession){ sbErr=''; sbCycle(); } }
+ 
+ // ---------- เริ่มทำงานตอนเปิดแอป ----------
+-async function sbBoot(){
++async function sbBoot(sessionAlreadyChecked){
+   if(!sbOn()) return;
++  if(authChecking) return;
++  authChecking = true;
+   sbChip();
+   try{
+-    const d = await sbPull();
+-    if(d.empty && (records.length || chats.length || userList.length)){
+-      // เซิร์ฟเวอร์ยังว่าง แต่เครื่องนี้มีข้อมูลอยู่ → ยกข้อมูลชุดแรกขึ้นไปตั้งต้น
+-      sbReady = true; sbSnap = {records:{}, chats:{}, users:{}, acts:{}, counter:null};
+-      await sbPush();
+-      sbApply(await sbPull());
+-    } else {
+-      sbApply(d);
+-      sbReady = true;
+-      // ข้อมูลในเครื่องที่เซิร์ฟเวอร์ยังไม่มี (เช่นสร้างไว้ตอนเน็ตหลุด) จะถูกส่งขึ้นในรอบถัดไป
++    if(!sessionAlreadyChecked){
++      const session = await authRestoreSession();
++      if(!session){ renderUserUI(); return; }
++      await authFetchMembership();
+     }
++    const d = await sbPull();
++    sbApply(d);
++    sbReady = true;
++    // ส่งเฉพาะ local delta ที่เทียบกับ server snapshot แล้ว จากนั้นยืนยัน snapshot ใหม่
++    if(await sbPush()) sbApply(await sbPull());
+     sbErr = '';
+   }catch(err){
+-    sbErr = String(err && err.message || err);
++    sbErr = safeError(err);
+     console.warn('[sync] เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ — ใช้ข้อมูลในเครื่องต่อไป:', sbErr);
++  }finally{
++    authChecking = false;
++    sbChip();
++    renderUserUI();
++  }
++  if(authSession && !sbPollingStarted){
++    sbPollingStarted = true;
++    setInterval(()=>{ if(!document.hidden) sbCycle(); }, SB_POLL_MS);
++    document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) sbCycle(); });
+   }
+-  sbChip();
+-  setInterval(()=>{ if(!document.hidden) sbCycle(); }, SB_POLL_MS);
+-  document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) sbCycle(); });
+ }
+ 
+ // Init activity log + user system (login state from localStorage)
+diff --git a/tests/formula-studio.test.js b/tests/formula-studio.test.js
+new file mode 100644
+index 0000000..5876aaa
+--- /dev/null
++++ b/tests/formula-studio.test.js
+@@ -0,0 +1,209 @@
++(function(){
++  'use strict';
++
++  const tests = [];
++  function test(name, fn){ tests.push({name, fn}); }
++  function assert(value, message){ if(!value) throw new Error(message); }
++  function equal(actual, expected, message){
++    if(actual !== expected) throw new Error((message || 'values differ') + ` (expected ${expected}, got ${actual})`);
++  }
++  function reset(){
++    localStorage.clear();
++    sessionStorage.clear();
++    window.__fetchCalls.length = 0;
++    window.__fetchQueue.length = 0;
++    SB_URL = 'https://test-project.supabase.co';
++    SB_KEY = 'sb_publishable_test_only';
++    if(typeof authSession !== 'undefined') authSession = null;
++    if(typeof authMembership !== 'undefined') authMembership = null;
++    if(typeof authChecking !== 'undefined') authChecking = false;
++    currentUser = '';
++    impersonator = '';
++    userList = [];
++    sbReady = false;
++    sbErr = '';
++  }
++
++  test('secure mode exposes the required Auth boundary', function(){
++    ['authSignIn','authRestoreSession','authRefreshSession','authSignOut','authFetchMembership','authDataHeaders']
++      .forEach(name=>assert(typeof window[name] === 'function', `${name} is missing`));
++  });
++
++  test('secure boot never reads protected data without a session', async function(){
++    reset();
++    await sbBoot();
++    const restCalls = window.__fetchCalls.filter(call=>call.url.includes('/rest/v1/'));
++    equal(restCalls.length, 0, 'unauthenticated boot reached the Data API');
++    equal(currentUser, '', 'cached browser identity was trusted');
++  });
++
++  test('password sign-in uses Auth API and stores session only in sessionStorage', async function(){
++    reset();
++    window.__fetchQueue.push(window.__mockResponse(200, {
++      access_token:'access-test', refresh_token:'refresh-test', expires_in:3600,
++      user:{id:'11111111-1111-1111-1111-111111111111', email:'owner@example.test'}
++    }));
++    const session = await authSignIn('owner@example.test', 'correct horse');
++    assert(session && session.access_token === 'access-test', 'sign-in did not return the session');
++    const call = window.__fetchCalls[0];
++    assert(call.url.endsWith('/auth/v1/token?grant_type=password'), 'wrong Auth password endpoint');
++    equal(call.options.method, 'POST', 'password grant must use POST');
++    equal(call.options.headers.apikey, SB_KEY, 'publishable key missing from Auth request');
++    assert(sessionStorage.getItem('fs_auth_session'), 'session was not stored in sessionStorage');
++    equal(localStorage.getItem('fs_auth_session'), null, 'session leaked into localStorage');
++    equal(localStorage.getItem('fs_user'), null, 'legacy identity was persisted');
++  });
++
++  test('Data API headers separate publishable key and user bearer token', function(){
++    reset();
++    authSession = {access_token:'user-jwt-test'};
++    const headers = authDataHeaders();
++    equal(headers.apikey, SB_KEY, 'Data API apikey is wrong');
++    equal(headers.Authorization, 'Bearer user-jwt-test', 'Data API bearer is not the user token');
++    assert(!headers.Authorization.includes(SB_KEY), 'publishable key was used as authorization');
++  });
++
++  test('expired sessions refresh through Auth and remain session-only', async function(){
++    reset();
++    authSession = {access_token:'expired',refresh_token:'refresh-old',expires_at:1};
++    sessionStorage.setItem('fs_auth_session', JSON.stringify(authSession));
++    window.__fetchQueue.push(window.__mockResponse(200, {
++      access_token:'access-new',refresh_token:'refresh-new',expires_in:3600,
++      user:{id:'11111111-1111-1111-1111-111111111111',email:'owner@example.test'}
++    }));
++    const session = await authRefreshSession();
++    equal(session.access_token, 'access-new', 'refresh did not replace the token');
++    assert(window.__fetchCalls[0].url.endsWith('/auth/v1/token?grant_type=refresh_token'), 'wrong refresh endpoint');
++    equal(localStorage.getItem('fs_auth_session'), null, 'refreshed session leaked into localStorage');
++  });
++
++  test('401/403 clears authorization instead of falling back to publishable bearer', async function(){
++    reset();
++    authSession = {access_token:'denied-token',refresh_token:'refresh-test',expires_at:Date.now()/1000+3600};
++    window.__fetchQueue.push(window.__mockResponse(403, {message:'denied'}));
++    let failed = false;
++    try{ await sbReq('fs_records?select=id'); }catch(err){ failed = true; }
++    assert(failed, 'forbidden request unexpectedly succeeded');
++    equal(authSession, null, 'forbidden session was retained');
++    equal(sessionStorage.getItem('fs_auth_session'), null, 'forbidden token remained in storage');
++  });
++
++  test('local-only mode works without Auth or network', async function(){
++    reset();
++    SB_URL = '';
++    SB_KEY = '';
++    localStorage.setItem('fs_records', JSON.stringify([{id:'local-1',customer:'Synthetic'}]));
++    loadRecords();
++    await sbBoot();
++    equal(records.length, 1, 'local record was not loaded');
++    equal(window.__fetchCalls.length, 0, 'local-only mode used the network');
++  });
++
++  test('secure mode never offers first-Admin browser creation', function(){
++    reset();
++    authChecking = false;
++    renderLoginView();
++    const body = document.getElementById('loginBody').textContent;
++    assert(!body.includes('สร้างผู้ใช้ Admin คนแรก'), 'secure login offered browser Admin creation');
++    assert(body.includes('อีเมล'), 'secure login did not request Auth email');
++  });
++
++  test('secure user management is Dashboard-owned and has no local reset controls', function(){
++    reset();
++    authSession = {access_token:'admin-token'};
++    authMembership = {name:'Admin Owner',role:'admin',active:true};
++    currentUser = 'Admin Owner';
++    userList = [{name:'Admin Owner',role:'admin',email:'admin@example.test',pass:null}];
++    renderUserList();
++    const html = document.getElementById('userListWrap').innerHTML;
++    assert(html.includes('Supabase Dashboard'), 'Dashboard ownership guidance is missing');
++    assert(!/resetUserPassword|resetAllPasswords|seedTeamUsers|loginUserAt/.test(html), 'legacy account control remains active');
++  });
++
++  test('secure reconciliation preserves offline changes and merges remote additions', function(){
++    reset();
++    authSession = {access_token:'member-token'};
++    authMembership = {name:'Sales One',role:'sales',active:true};
++    currentUser = 'Sales One';
++    const baseline = {id:'A00001',customer:'Before',createdBy:'Sales One'};
++    const changed = {id:'A00001',customer:'Offline edit',createdBy:'Sales One'};
++    records = [changed,{id:'A00003',customer:'Offline new',createdBy:'Sales One'}];
++    chats=[]; userList=[]; activities=[]; recCounter=3;
++    sbSnap = {records:{A00001:JSON.stringify(baseline)},chats:{},users:{},acts:{},counter:1};
++    sbApply({
++      records:[baseline,{id:'A00002',customer:'Remote new',createdBy:'Sales Two'}],
++      chats:[],users:[],acts:[],counter:2,empty:false
++    });
++    equal(records.find(r=>r.id==='A00001').customer, 'Offline edit', 'offline edit was overwritten');
++    assert(records.some(r=>r.id==='A00002'), 'remote addition was not merged');
++    assert(records.some(r=>r.id==='A00003'), 'offline addition was lost');
++    equal(recCounter, 3, 'record counter moved backward');
++  });
++
++  test('displayed sync errors redact tokens and credentials', function(){
++    reset();
++    const jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signature-test';
++    const clean = safeError(`Bearer ${jwt} refresh_token=refresh-secret sb_publishable_leak`);
++    assert(!clean.includes(jwt), 'JWT leaked into displayed error');
++    assert(!clean.includes('refresh-secret'), 'refresh token leaked into displayed error');
++    assert(!clean.includes('sb_publishable_leak'), 'publishable key leaked into displayed error');
++  });
++
++  test('membership role remains authoritative over legacy user JSON', function(){
++    reset();
++    authMembership = {name:'Sales One',role:'sales',active:true};
++    currentUser = 'Sales One';
++    userList = [{name:'Sales One',role:'admin',email:'sales@example.test',pass:null}];
++    equal(currentRole(), 'sales', 'legacy JSON escalated the authenticated membership role');
++  });
++
++  test('user-entered tags and ingredient rows cannot inject HTML', function(){
++    reset();
++    SB_URL=''; SB_KEY='';
++    const tagInput=document.getElementById('ti_claims');
++    tagInput.value='<img src=x onerror="window.__xss=1">';
++    addTag({key:'Enter',preventDefault:function(){}},'tc_claims','ti_claims');
++    assert(!document.querySelector('#tc_claims img'), 'tag input created executable HTML');
++    document.getElementById('ingBody').innerHTML='';
++    const payload='"><img src=x onerror="window.__xss=2">';
++    addRow({name:payload,w:1,o:payload,p:100,note:payload});
++    assert(!document.querySelector('#ingBody img'), 'ingredient input created executable HTML');
++    equal(document.querySelector('#ingBody input').value,payload,'ingredient value was not preserved as text');
++  });
++
++  test('stored record rendering escapes user-controlled dashboard fields', function(){
++    reset();
++    SB_URL=''; SB_KEY='';
++    const payload='<img src=x onerror="window.__xss=3">';
++    renderDashboard({
++      id:'A00001',createdBy:payload,date:payload,metaDate:payload,
++      brand:payload,customer:payload,form:payload,size:'1',sizeUnit:payload,uw:'1',uwUnit:payload,
++      conceptStr:payload,allConcepts:[payload],allBenefits:[payload],allSP:[payload],
++      finalTarget:payload,gender:payload,price:payload,notes:payload,cons:[payload],
++      rows:[{num:1,name:payload,w:1,o:payload,p:100,actual:1,note:payload,hero:true,
++        fda:{cls:'fda-unknown',icon:'⚪',tip:payload,status:'unknown'}}]
++    });
++    assert(!document.querySelector('#dashContent img'), 'stored record created executable dashboard HTML');
++    assert(document.getElementById('d_title').textContent.includes('<img'), 'stored text was not preserved');
++  });
++
++  async function run(){
++    const results = [];
++    for(const item of tests){
++      try{
++        await item.fn();
++        results.push({name:item.name, status:'PASS'});
++      }catch(error){
++        results.push({name:item.name, status:'FAIL', error:String(error && error.message || error)});
++      }
++    }
++    const failed = results.filter(result=>result.status === 'FAIL');
++    document.documentElement.dataset.testStatus = failed.length ? 'failed' : 'passed';
++    const pre = document.createElement('pre');
++    pre.id = 'fs-test-results';
++    pre.textContent = JSON.stringify({passed:results.length-failed.length,failed:failed.length,results}, null, 2);
++    document.body.appendChild(pre);
++  }
++
++  setTimeout(run, 50);
++})();
+-- 
+2.39.5 (Apple Git-154)
+

@@ -1,0 +1,17 @@
+# ความลับ — ไฟล์เดียวที่ห้ามเข้า git
+runtime/formula.env
+
+node_modules/
+.DS_Store
+
+# ตัว index.html ที่ผนึกไว้ไม่ต้องเข้า git (ดึงกลับมาได้ด้วย scripts/seal-release.sh)
+# แต่ "เราเสิร์ฟรุ่นไหนอยู่" ต้องเข้า git เสมอ ไม่งั้นไม่มีใครรู้ว่าผู้ใช้เห็นโค้ดของ commit ไหน
+releases/*/index.html
+
+runtime/data.env
+
+# สำรองจริงบน iMac — แยกจากซอร์สและห้ามเข้า Git
+.formula-backups/
+
+# ของชั่วคราวที่ wrangler สร้างตอนดึง/ปล่อย Worker
+docs/handoff/cloudflare-portal-worker/.wrangler/

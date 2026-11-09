@@ -1,0 +1,161 @@
+From e30a3094ace1c586f51dbc38d0efce5989a94ecd Mon Sep 17 00:00:00 2001
+From: piyawatv-cloud <295929244+piyawatv-cloud@users.noreply.github.com>
+Date: Wed, 12 Aug 2026 18:04:56 +0700
+Subject: [PATCH 07/24] docs: add runtime readiness audit
+
+---
+ .../2026-08-12-runtime-readiness-audit.md     | 142 ++++++++++++++++++
+ 1 file changed, 142 insertions(+)
+ create mode 100644 docs/reports/2026-08-12-runtime-readiness-audit.md
+
+diff --git a/docs/reports/2026-08-12-runtime-readiness-audit.md b/docs/reports/2026-08-12-runtime-readiness-audit.md
+new file mode 100644
+index 0000000..11197b0
+--- /dev/null
++++ b/docs/reports/2026-08-12-runtime-readiness-audit.md
+@@ -0,0 +1,142 @@
++# Beyond Formula — Runtime Readiness Audit
++
++วันที่ตรวจ: 2026-08-12
++ผู้ตรวจ: Codex
++ขอบเขต: repository checkout ปัจจุบัน, production web flow, UX/UI, authentication, sync, permission และ runtime governance
++
++## สรุป
++
++สถานะ: **ยังไม่พร้อม release เป็น production runtime แบบ governed release**
++
++ระบบเหมาะสำหรับ staging/pilot ที่จำกัดผู้ใช้ได้ประมาณ 80/100 แต่ยังต้องปิด release blockers ก่อนประกาศ production:
++
++1. Production artifact ยัง trace กลับมายัง approved commit/PR/review/deployment record เดียวกับ repository checkout นี้ไม่ได้
++2. Mobile navigation แสดงรายการ Chat จำนวนมากจนดัน Dashboard ลงยาวและเพิ่ม friction ในการใช้งาน
++3. Accessibility ของ form controls และ keyboard focus ยังต้องปรับ
++4. Protected data ถูก render อยู่ใน DOM หลัง login overlay ก่อน authentication เสร็จ แม้ยังไม่พบ protected Data API call ก่อน login
++
++## หลักฐานที่ตรวจ
++
++### Repository และ automated checks
++
++- `node harness.js` — ผ่าน 14/14 browser/auth/security checks
++- `./tests/run-sql-tests.sh` — ผ่าน authorization/RLS และ rollback contract tests
++- `./runtime/healthcheck.sh` — ผ่าน static runtime health check
++- `git diff --check` — ไม่พบ whitespace error
++- ไม่พบ console error/warning ใน live flow ที่ทดสอบ
++
++### Live web flow
++
++- เปิด production URL และเข้าสู่ระบบด้วยบัญชีที่ได้รับอนุญาตจากผู้ร้องขอ
++- ตรวจ Dashboard, Customer Data, validation, Activities log, User Management และ logout
++- ตรวจ responsive layout ที่ viewport 390px
++- ตรวจ sync status และ Admin membership
++
++## Findings
++
++### P0 — ต้องปิดก่อน production
++
++#### Production version/deployment traceability ไม่ตรงกัน
++
++สิ่งที่พบ:
++
++- เว็บจริงแสดง build `2026-08-12.1`
++- `HEAD` ใน checkout นี้แสดง build `2026-08-10.6`
++- `origin/main` ใน checkout นี้แสดง build `2026-08-10.5`
++- ยังไม่มีหลักฐานใน checkout นี้ที่ผูก production build กับ approved PR, CODEOWNER review, immutable release/artifact, deploy record และ rollback target เดียวกัน
++
++สาเหตุ/ความเสี่ยง:
++
++ไม่สามารถยืนยันได้ว่า version ที่ผู้ใช้กำลังใช้อยู่เป็น version เดียวกับ source และ checks ที่ reviewer เห็น ทำให้ไม่ควรถือว่า production complete ตาม governance
++
++ข้อเสนอ:
++
++- ระบุ commit SHA ของ production build
++- ผูกกับ PR และ independent CODEOWNER approval
++- ให้ Runtime Operator deploy จาก immutable approved commit เท่านั้น
++- แนบ deployment time, deployer, health check และ rollback target
++
++### P1 — ควรแก้ก่อนเปิดใช้วงกว้าง
++
++#### Mobile navigation มีความยาวและลำดับการใช้งานสูงเกินไป
++
++ที่ viewport 390px sidebar ถูกเปลี่ยนเป็นแนวนอน แต่ Chat job list ยังเปิดแสดงหลายรายการ ทำให้ navigation สูงประมาณ 791px และ Dashboard เริ่มหลัง navigation ยาวมาก
++
++แนวทางแก้:
++
++- ให้ Chat list เป็น collapsible/scroll container ที่มี max-height บน mobile
++- แสดงเฉพาะงานที่มี unread หรือรายการล่าสุดก่อน
++- เพิ่มปุ่ม “ดูทั้งหมด” แทนการ render ทุกห้องใน navigation หลัก
++
++#### Form controls บางส่วนยังไม่มี accessible name ที่ชัดเจน
++
++พบ role selectors และ password control บางรายการที่ไม่มี `label for`, `aria-label` หรือ `aria-labelledby` ที่เชื่อมโยงชัดเจน และ focus outline ของปุ่มบางกลุ่มถูกปิดหรือไม่เด่นพอ
++
++แนวทางแก้:
++
++- เพิ่ม label association ให้ทุก input/select/textarea
++- ใช้ `:focus-visible` ที่เห็นชัดและสม่ำเสมอ
++- ตรวจ keyboard order, modal focus trap และ Escape close
++- เพิ่ม automated accessibility smoke check ใน CI
++
++### P2 — ควร harden เพิ่ม
++
++#### Protected UI/data ถูก render ก่อน authentication เสร็จ
++
++หน้า Dashboard, Chat และข้อมูลจาก local cache ปรากฏใน DOM หลัง login overlay ก่อน auth state เสร็จ แม้การตรวจครั้งนี้ไม่พบการเรียก protected Supabase Data API ก่อน login
++
++ความเสี่ยง:
++
++- defense-in-depth ต่ำกว่าที่ควร
++- browser extensions, accessibility tree หรือ accidental UI exposure อาจเห็นข้อมูล cache ได้
++
++แนวทางแก้:
++
++- เริ่มจาก unauthenticated shell ที่ไม่มี protected content
++- render protected views หลัง session + membership ผ่านแล้ว
++- ใช้ `inert`/`aria-hidden` กับ app shell ระหว่าง auth checking
++- ทดสอบ refresh, expired session, 401/403 และ logout ซ้ำ
++
++## สิ่งที่ทำงานได้ดี
++
++- Supabase Auth login และ membership role ทำงาน
++- Session ถูกเก็บใน `sessionStorage` ตาม design
++- RLS ปฏิเสธ anonymous read/write และ role-negative cases ผ่าน
++- logout ล้าง session และกลับหน้า login
++- core runtime เป็น deterministic code ไม่พึ่ง AI
++- input rendering ที่ตรวจใน harness มี escaping ป้องกัน HTML injection
++- sync chip แสดงสถานะการเชื่อมต่อและ live flow ไม่พบ console error
++
++## ทางเลือกสำหรับทีม dev
++
++### ทางเลือก 1 — Reconcile release chain ก่อน แล้วค่อยแก้ UX
++
++ข้อดี: ความเสี่ยงต่ำสุดและตรง governance; แยก release decision ออกจาก redesign
++ข้อเสีย: ต้องค้นหา production commit/deploy evidence และอาจต้อง deploy ใหม่
++
++### ทางเลือก 2 — แก้ mobile + accessibility + pre-auth rendering ก่อน release
++
++ข้อดี: ลด friction และเพิ่มความมั่นใจด้าน privacy/accessibility อย่างเห็นผล
++ข้อเสีย: แตะ `index.html` และ auth/rendering ซึ่งเป็น Critical Change ต้อง independent review ใหม่
++
++### ทางเลือก 3 — คงเป็น staging/pilot แบบจำกัดผู้ใช้
++
++ข้อดี: เก็บ feedback ต่อได้โดยไม่อ้าง production readiness
++ข้อเสีย: ยังไม่ควรใช้กับข้อมูล/ผู้ใช้วงกว้างจน release evidence ครบ
++
++คำแนะนำ: ใช้ **ทางเลือก 1** เป็น gate บังคับ แล้วทำ P1/P2 ใน **ทางเลือก 2** ก่อน production rollout
++
++## ข้อจำกัดของหลักฐาน
++
++- การ capture screenshot จาก browser timeout จึงรายงานจาก live DOM, layout metrics และ visible flow; ยังไม่ใช่ screenshot audit เต็มรูปแบบ
++- ยังไม่ได้ทำ full WCAG audit, screen-reader audit, cross-browser matrix หรือ role UAT ครบทุก role
++- ไม่ได้ deploy, merge, เปลี่ยน schema หรือแก้ production data
++
++## Definition of Done ที่แนะนำก่อน release
++
++- production build ระบุ approved commit SHA ได้
++- PR ผ่าน required checks และ CODEOWNER/independent review
++- staging UAT ครบ role-negative cases และ logout/401/403/network loss
++- mobile navigation และ accessible labels/focus ผ่าน smoke check
++- Runtime Operator มี deployment record, health check และ rollback target
++- Hermes correlation ครบตาม governance
+-- 
+2.39.5 (Apple Git-154)
+

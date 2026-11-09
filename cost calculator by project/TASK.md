@@ -1,0 +1,117 @@
+# Task handoff
+
+## Current implementation planning
+
+[Implementation plan and 27 task cards](docs/IMPLEMENTATION_PLAN.md) is the current work breakdown. Historical handoff/grill/trial entries below preserve evidence and do not mean application delivery is complete.
+
+- Planning deliverable: local draft prepared for review; Notion search failed USER_NOT_LOGGED_IN, so no Notion plan/task pages exist.
+- Backlog: 1 TO_DO / 24 PLANNED / 2 BLOCKED; 0/27 delivery tasks completed. P01 baseline/scope starts first; PK source P04 and Notion P27 have external blockers. RM work is independent of PK delivery after shared contracts.
+- Current authority: review and prepare plan only. No source implementation, source data writes, real messages, PR merge or production deployment performed this turn.
+- Next: P01 baseline/reviewer/real Issue mapping → P02 version contract and P03 access boundary; obtain PK source evidence separately for P04. User supplies pricing/STD/loss values later without blocking synthetic work.
+- Source of truth: GitHub engineering references; Notion becomes a linked tracking view after connection, not a duplicate business master. All P-labels are local plan IDs, not GitHub Issues.
+
+Task label: cost-calculator-workspace-handoff-2026-09-05 (local label, ไม่ใช่Issue ID). Issue ID: ยังไม่มี. Owner: ผู้ใช้/System Owner; independent reviewerยังไม่แต่งตั้ง. Environment: local documentation. Classification: project docs + confidential local-only evidence. Change: documentation only; ไม่ใช่Critical runtime change.
+
+## ส่งมอบพื้นที่ครั้งนี้
+
+- [x] ตรวจparent AGENTS/CLAUDEและtargetว่างก่อนเขียน
+- [x] เก็บข้อยืนยันworkflowล่าสุด: Formula→RM/PK/Operation DL+OH→Procurement→Cost→Sales revisions→CEO→actual
+- [x] แยกlegacy archiveจากcurrent specificationและignoreจากGit
+- [ ] การimplementation, UAT, release: ยังไม่ได้ทำในงานนี้
+
+## ลำดับงานถัดไป (ยังไม่อนุมัติdeployment)
+
+Grill-with-docs continuation 2026-09-05: ใช้ task label เดิมเพื่อความต่อเนื่อง; Issue ID ยังไม่มี. รอบนี้ local documentation only ใน SPEC.md/REGISTRY.md/CONTEXT.md/TASK.md; ห้ามแก้ parent application, runtime, schema, permissions หรือส่งข้อความ/อีเมลจริง. Owner ผู้ใช้; CODEOWNER หลัก @phossatron แต่ independent reviewer สำหรับ implementation ยังไม่แต่งตั้ง. เอกสารรอบนี้ไม่ใช่ Critical runtime change; การเชื่อม chat/identity/permission/sync ในอนาคตต้องประเมิน Critical Change ตาม parent.
+
+- [x] บันทึกคำตอบ grill รอบ 1 พร้อมแยกข้อเสนอที่ยังไม่ยืนยัน
+- [x] บันทึกคำตอบรอบ 2: Data Center only, internal cost chat, Sales/OPC restrictions, reuse scope, STD fields
+- [x] รอบ 3: บันทึก Q10–Q13 เรื่องวัสดุใหม่/RD spec, ชื่อแสดงกลางและหน้าสูตร, restricted view, partial estimate, STD states
+- [x] รอบ 4: Q14–Q16 ชื่อกลาง/เฉพาะ revision, missing-name placeholder, แยก cost readiness จาก selling-price policy
+- [x] รอบ 5: Q17–Q20 หน่วยขาย, loss ownership, WMS ภายหลัง, ค่าใช้จ่ายรอข้อมูล, RM/PK price segregation
+- [x] รอบ 6: Q21–Q23 แยกก่อนบวก/หลังบวก/final, RD-PK segregation, Sales adjusted totals, finance/CEO scoped visibility, other-cost gate
+- [x] รอบ 7: Q24–Q26 Procurement split/Operation access, pre-WMS purchase basis, confirmed Tier selection
+- [x] รอบ 8: Q27–Q29 PK ownership, ตัด delivery LT ออกจาก scope, ใช้ PU-PK แหล่งเดิม
+- [x] Source prerequisite: ผู้ใช้ให้ PU-PK source; ตรวจ metadata และหัวคอลัมน์ 7 tabs แบบ read-only
+- [x] Q30 PK authority: PU-PK engine/snapshot; PK delay must not block Formula/RM
+- [ ] PK validation: requester price/history/status semantics; ไม่รับ policy/rates เดิมอัตโนมัติ
+- [ ] ก่อนปิด G2: integration/revision contract, acceptance checks, independent reviewer และ shared-understanding confirmation; pricing/STD/loss ตัวเลขรอกำหนด ไม่สมมติค่า
+
+1. อ่านlocal-only auditและตรวจcurrent code/Sheetsใหม่; ตั้งtask/issue/reviewerตามparent governance.
+2. ยืนยันFormula integration, PU-PK source, operation steps/rates/owner และตัวอย่างprojectที่ได้รับอนุญาต.
+3. แก้A01–A06 parser/exclusion/version/history/approvalพร้อมtestsและsource reconciliation.
+4. แก้A07–A10 single costing route/sync safety/permission evidence/docs consistency; manual runก่อน30-minute schedule.
+5. ออกแบบและทดสอบRM+PK+DL+OH cost calculator, unit conversion, yield, setupและbatch allocationตามSPEC.
+6. Sales scenarios/revision/customer view; pricing configurationเว้นค่าไว้จนownerกำหนด.
+7. CEO approval/immutable quote snapshotและre-approvaltests; role/permissionchangesเป็นCritical Changeตามparent.
+8. UATร่วมRD/Procurement RM/PU-PK/Sales/CEO ตาม scope ราคาพร้อมเสนอและ Formula chat; WMS/actual cost mapping แยกไว้หลัง go-live ไม่เป็นเกณฑ์บังคับรอบนี้.
+
+## Verification / impact / rollback
+
+Handoff checks: archiveเทียบเนื้อหาsource, Code.gs SHA256ตรง, Gitignore local-onlyทำงาน, ไม่มีparent application changes. Application testsไม่รันเพราะไม่มีapplication edit; ไม่ถือว่าระบบผ่านtests.
+Security: เพิ่มlocal-only ignore; ไม่มีupload. Database/permission/dependency impact: none. Rollback: ลบเฉพาะเอกสาร/สำเนาใหม่ในโฟลเดอร์นี้เมื่อownerร้องขอ; source workspaceเดิมยังอยู่. PR/commit/release: none. Open risk: local archiveมีข้อมูลธุรกิจอ่อนไหว ไม่ได้รับการเข้ารหัสเพิ่มเติมและห้ามforce-add.
+
+
+Grill round 2 documentation verification: SPEC/REGISTRY/CONTEXT/TASK updated only; checks cover required decisions, pending-proposal labels and whitespace. No application tests or live verification; no security/database/permission/dependency changes applied. Rollback: reverse only this round's document edits. No PR/release. Historical audit FAIL remains unresolved.
+
+
+Round 3 checks: verified Q10–Q13 recorded and conflicting pending statements updated; four documentation files only. Security/database/permission/dependency runtime impact none; application tests not run. Rollback limited to these edits; no PR or release. Audit FAIL remains open.
+
+
+Round 4 checks: SPEC/REGISTRY/TASK updated for Q14–Q16; stale pending-name/pricing-separation text removed. Required decision and whitespace checks passed. Documentation only; application tests not run; security/database/permission/dependency impact none. Rollback: reverse only this round's document changes. Task label unchanged; no Issue/PR/release; historical audit FAIL unresolved.
+
+
+Round 5 verification: SPEC/REGISTRY/CONTEXT/TASK updated only; Q17–Q20 and new undecided price/access requirements checked, whitespace checked. No runtime security/database/permission/dependency changes; application tests not run. Future access-control implementation is Critical Change requiring independent review. Rollback only this round's document edits. Task/Issue/PR status unchanged; audit FAIL unresolved.
+
+
+Round 6 checks: SPEC/REGISTRY/CONTEXT/TASK updated; Q21–Q23 override older Sales-cost wording explicitly. Four-file whitespace and decision-presence checks passed. Application tests not run; runtime security/database/permission/dependency impact none. Rollback only this round's edits. Existing task label; no Issue/PR/release; audit FAIL still open.
+
+
+Round 7 checks: SPEC/REGISTRY/TASK only; Q24–Q26 and remaining PK Tier permission boundary recorded. Whitespace/decision checks passed; no application tests. Runtime security/database/permission/dependency unchanged; rollback only these document edits. Task label unchanged, no Issue/PR/release, audit FAIL open.
+
+
+Read-only Formula source evidence (round 7, not live verification): index.html nextRecordId() around line 3900 persists project id; chat jobId links to record.id (createChat/openChatRoom around 4664/4700). Existing edits overwrite rows (around 2498, chatSaveFormula around 5085); no persisted formula revision identifier found in this inspection. Existing jobDetailHTML/chat/exportChatExcel/buildBriefText paths expose full ingredient names; ROLES around 2741 has one purchasing role, not the proposed RM/PK/Operation scopes. G2 must design backward-compatible revision references and all relevant disclosure paths; hiding the calculator alone is insufficient. These are implementation gaps, not authorization to change parent code. No production records read.
+
+
+Round 8 checks: SPEC/REGISTRY/TASK updated for Q27–Q29; removed delivery-LT decision and current-release actual integration requirement. Source-location absence remains explicit. Decision/scope/whitespace checks passed. No application tests; security/database/permission/dependency runtime changes none; rollback this round document edits only. Task label unchanged; Issue/PR none; audit FAIL unresolved. Static Formula inspection additionally found rows.p is concentration %, not supplier price; never map it to material price by name. Current RD capability and one purchasing role differ from designed ownership; G2 must cover capability migration through Critical Change review.
+
+
+PU-PK inspection checks: metadata success; 7 bounded header reads success; no business rows/formulas read; schema evidence is not a functional test. Updated SPEC/REGISTRY/TASK and local-only/PU_PK_SOURCE_REFERENCE.md. Verify local-only ignore before handoff. Security/database/permission/dependency changes none; no source edits/sends/import/deploy. Rollback only these local doc edits; original source unchanged. No Issue/PR; audit FAIL unresolved. User-provided source location dependency resolved; semantic/runtime validation still open.
+
+
+Q30 plan boundary: prepare formula/RM/scenario/role-safe chat work independently of PU-PK verification/adapter work; test the interface using synthetic fixtures while PK validation remains pending. This is workstream separation, not approval to implement/deploy or spawn ongoing tasks. Add independent-progress acceptance cases from SPEC. Q31 confirms unchanged-spec/quantity/pack/terms/validity reuse; confirmation-status branch resolved: unconfirmed draft allowed, confirmed applicable version required for ready quote. Record rationale in docs/adr/0001-reuse-pk-calculation-with-independent-rm-progress.md.
+
+Q30 verification: SPEC/REGISTRY/TASK + one accepted architectural decision record; required decision/whitespace checks passed. No application tests run or runtime security/database/permission/dependency changes. Rollback only these local docs. Existing task label; Issue/PR none; audit FAIL and PK formula/runtime validation remain open.
+
+
+Q31 documentation check: SPEC/REGISTRY/TASK updated; unchanged PK applicability recorded, ambiguous confirmation phrase explicitly unresolved. Required-text/whitespace checks passed. No application tests or runtime security/database/permission/dependency changes; rollback this round docs only. Existing task label; Issue/PR none; audit FAIL unchanged.
+
+
+Q31 clarification recorded. New requested design topic: repeated PK sourcing/negotiation/version changes. SPEC now proposes single-source PU-PK confirmation plus calculator adoption; no runtime implementation or actual source-state assumptions. Next evidence required: sanitized PU-PK formulas/code/state transitions and stable project/request mapping before final adapter design. Checks: clarified gate and proposal labels present; three doc whitespace checks passed. No application tests; runtime security/database/permission/dependency unchanged. Rollback these doc edits only; task label unchanged, Issue/PR none, audit FAIL unresolved.
+
+
+## User-authorized trial — current turn
+
+Scope now includes a bounded local synthetic workflow prototype under local-only/pk-workflow-trial and evidence report docs/PK_WORKFLOW_TRIAL.md, authorized by user request to try the accepted flow. Parent source/runtime/schema/permissions, Sheets writes, real messages/emails and production deployment remain forbidden in this trial. Environment local; synthetic data only; no production secrets. Existing task label/Issue status unchanged; owner user; no independent final approval claimed.
+
+- [x] Implement local version-negotiation/adoption model consuming synthetic PK totals (no PK pricing engine).
+- [x] Run 14 contract tests; retain red/green logs and 5-step walkthrough.
+- [x] Check parent source hashes unchanged and trial ignored by Git.
+- [x] Record limitations: no live integration, source-formula, real permission or UAT validation.
+- [ ] Next integration evidence: approved/sanitized PU-PK code/formulas and status semantics, then non-production adapter verification under parent governance.
+
+Outcome PASS_LOCAL_PROTOTYPE_ONLY. No application regression suite run because parent application unchanged. No security/database/permission/dependency runtime impact. Rollback new trial/report and this turn's doc edits only. No PR/release; historical audit FAIL remains unresolved.
+
+
+## Implementation planning verification — 2026-09-05
+
+Requested skill notion-spec-to-implementation applied using local SPEC/REGISTRY and recorded trial/static evidence. Notion search for Cost Calculator and Beyond Formula both returned USER_NOT_LOGGED_IN; no further Notion mutations attempted. Local plan prepared while Notion workflow awaits connection.
+
+Checks: 27 unique task labels; every dependency resolves; graph acyclic; RM tasks P05–P13 have no transitive dependency on PK source/adapter tasks P04/P17–P19; R01–R12 covered; local document links resolve; whitespace valid; no exact confidential source IDs/URLs copied into plan. No application tests rerun for unchanged code. Planning test_result PASS_DOCUMENT_CHECKS, NOTION_NOT_CREATED. Files changed: docs/IMPLEMENTATION_PLAN.md, SPEC.md, REGISTRY.md, TASK.md. Runtime security/database/permission/dependency impact none. Rollback only new plan and this turn's documentation edits. Existing task label/Issue/PR unchanged; audit FAIL and live PK integration remain unresolved.
+
+## Implementation continuation — 2026-09-05
+
+User cancelled Notion and requested P01–P27 implementation. Actual implementation and current evidence are in isolated worktree `/Users/user/.codex/worktrees/cost-calculator-implementation`, branch `codex/cost-calculator-implementation`. This original folder retains the confidential local-only source archive and earlier planning history; it is not the implementation checkout.
+
+Current report: [implementation evidence](</Users/user/.codex/worktrees/cost-calculator-implementation/cost calculator by project/docs/IMPLEMENTATION_EXECUTION.md>); [27-task status](</Users/user/.codex/worktrees/cost-calculator-implementation/cost calculator by project/docs/IMPLEMENTATION_PLAN.md>).
+
+Local verification: 97 module tests, 8 calculator browser cases, 37 required parent browser cases all passed; required SQL suite passed. Integration/business acceptance/release/deployment remain incomplete. No Notion, public push/PR, production writes or actual messages sent. PU-PK Apps Script source was supplied and read-only inspected; exact reference remains local-only, sanitized semantics in worktree docs/PK_SOURCE_MAPPING.md.

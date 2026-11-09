@@ -1,0 +1,34 @@
+// Synthetic preview only: a delayed local save simulates waiting for a response.
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {createServer} from 'node:http';
+import {readFile} from 'node:fs/promises';
+const {actualBrowser,browserValue,waitForDocument}=await import(process.env.FORMULA_TEST_BROWSER_HELPER_URL||new URL('../../_IT-handoff/formula-studio/tests/helpers/chat-journal-browser.mjs',import.meta.url).href);
+const pause=ms=>new Promise(r=>setTimeout(r,ms));
+test('draft changed while save is pending remains visible',async t=>{
+ const html=await readFile(new URL('../index.html',import.meta.url));const server=createServer((_req,res)=>{res.writeHead(200,{'content-type':'text/html; charset=utf-8'});res.end(html)});
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));t.after(()=>{server.closeAllConnections();return new Promise(resolve=>server.close(resolve))});
+ const origin='http://127.0.0.1:'+server.address().port+'/';const browser=await actualBrowser(t,origin);assert.ok(browser);await waitForDocument(browser,origin);
+ const run=expression=>browserValue(browser,`(()=>{${expression}})()`);
+ await run(`document.querySelector('[data-action="create"]').click();let f=document.querySelector('#f-customer');f.value='ก่อนส่ง';f.dispatchEvent(new Event('input',{bubbles:true}));window.originalCreate=FormulaSaveSimulation.simulateCreate;FormulaSaveSimulation.simulateCreate=(...args)=>new Promise(resolve=>window.finishSave=async()=>resolve(await window.originalCreate(...args)));document.querySelector('#job-form button[type=submit]').click()`);
+ assert.equal(await browserValue(browser,'typeof window.finishSave'),'function');
+ await run(`let f=document.querySelector('#f-customer');f.value='แก้ระหว่างรอ';f.dispatchEvent(new Event('input',{bubbles:true}));window.finishSave()`);
+ for(let i=0;i<100&&await browserValue(browser,"document.querySelector('#job-form button[type=submit]')?.disabled===true");i++)await pause(20);
+ assert.equal(await browserValue(browser,"document.querySelector('#f-customer')?.value"),'แก้ระหว่างรอ');
+ assert.match(await browserValue(browser,"document.querySelector('#save-status')?.textContent"),/เปลี่ยน/);
+ await run(`window.confirm=()=>true;let r=document.querySelector('#role');r.value='pd';r.dispatchEvent(new Event('change',{bubbles:true}));document.querySelector('[data-open="A00001"]').click();document.querySelector('[data-action="formula"]').click();window.originalSave=FormulaSaveSimulation.simulateSave;FormulaSaveSimulation.simulateSave=(...args)=>new Promise(resolve=>window.finishFormula=async()=>resolve(await window.originalSave(...args)));let f=document.querySelector('[name="w-0"]');f.value='110';f.dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('#formula-form button[type=submit]').click()`);
+ assert.equal(await browserValue(browser,'typeof window.finishFormula'),'function');
+ await run(`let f=document.querySelector('[name="w-0"]');f.value='120';f.dispatchEvent(new Event('input',{bubbles:true}));window.finishFormula()`);
+ for(let i=0;i<100&&await browserValue(browser,"document.querySelector('#formula-form button[type=submit]')?.disabled===true");i++)await pause(20);
+ assert.equal(await browserValue(browser,"document.querySelector('[name=\"w-0\"]')?.value"),'120');
+ assert.match(await browserValue(browser,"document.querySelector('#save-status')?.textContent"),/เปลี่ยน/);
+ await run(`document.querySelector('#formula-form button[type=submit]').click();let r=document.querySelector('#role');r.value='admin';r.dispatchEvent(new Event('change',{bubbles:true}));window.finishFormula()`);
+ await pause(100);
+ assert.equal(await browserValue(browser,"document.querySelector('main h1')?.textContent"),'งานของฉัน','late result must not navigate away from the new screen');
+ assert.equal(await browserValue(browser,"state.jobs.find(j=>j.id==='A00001').rows[0].w"),'100','late simulation result must not alter the job after leaving');
+ await run(`document.querySelector('[data-action="create"]').click();let f=document.querySelector('#f-customer');f.value='งานก่อนนำเข้า';f.dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('#job-form button[type=submit]').click();let input=document.querySelector('#csv-file'),dt=new DataTransfer();dt.items.add(new File([makeMultiTemplate()],'synthetic.xlsx'));input.files=dt.files;input.dispatchEvent(new Event('change',{bubbles:true}))`);
+ for(let i=0;i<100&&!(await browserValue(browser,"!!document.querySelector('#bulk-create')"));i++)await pause(20);
+ assert.equal(await browserValue(browser,"!!document.querySelector('#bulk-create')"),true,'bulk preview appears while save waits');
+ await run('window.finishSave()');await pause(100);
+ assert.equal(await browserValue(browser,"document.querySelector('#job-form button[type=submit]')?.disabled"),true,'late result must not enable the individual save while bulk preview is active');
+});

@@ -1,0 +1,95 @@
+-- Operator-reviewed one-job data repair, not a migration or browser bypass.
+-- Contains confidential payload when generated: never commit or upload that file.
+\set ON_ERROR_STOP on
+\if :{?operator_confirmed}
+\else
+  do $confirmation$ begin raise exception 'OPERATOR_CONFIRMATION_REQUIRED'; end $confirmation$;
+\endif
+select :'operator_confirmed' = 'yes' as operator_ok \gset
+\if :operator_ok
+\else
+  do $confirmation$ begin raise exception 'OPERATOR_CONFIRMATION_REQUIRED'; end $confirmation$;
+\endif
+begin;
+set local lock_timeout = '5s';
+set local statement_timeout = '30s';
+set local search_path = public, pg_temp;
+do $job_restore$
+declare
+  payload jsonb := __PAYLOAD__;
+  rec jsonb := payload->'record';
+  chat jsonb := payload->'chat';
+  job text := rec->>'id';
+  reply jsonb;
+  stored jsonb;
+  message jsonb;
+  approval record;
+begin
+  if current_user in ('anon', 'authenticated') then
+    raise exception 'OPERATOR_DATABASE_ROLE_REQUIRED';
+  end if;
+  if to_regprocedure('public.fs_save_record(text,jsonb,jsonb)') is null then
+    raise exception 'APPROVED_JOB_SYNC_INSTALLATION_REQUIRED';
+  end if;
+  if payload->>'version' <> '1' or chat->>'jobId' is distinct from job
+     or chat->>'createdBy' is distinct from rec->>'createdBy'
+     or jsonb_typeof(chat->'messages') is distinct from 'array'
+     or jsonb_typeof(chat->'approvals') is distinct from 'object' then
+    raise exception 'INVALID_RECOVERY_PAYLOAD';
+  end if;
+  -- Null expectation is CREATE ONLY. The approved function locks and checks
+  -- collisions; an identical committed record permits an idempotent retry.
+  reply := public.fs_save_record(job, rec, null);
+  if reply->>'status' is distinct from 'saved' or reply->'data' is distinct from rec then
+    raise exception 'PARENT_SAVE_NOT_ACKNOWLEDGED';
+  end if;
+  insert into public.fs_chats(job_id, data) values (job, chat)
+    on conflict (job_id) do nothing;
+  select data into stored from public.fs_chats where job_id = job for update;
+  if not found or stored->>'jobId' is distinct from job
+     or stored->>'createdBy' is distinct from chat->>'createdBy'
+     or stored->'createdAt' is distinct from chat->'createdAt' then
+    raise exception 'CHAT_IDENTITY_CONFLICT';
+  end if;
+  -- Existing normalized extra messages remain untouched. An extra legacy
+  -- embedded message must be reviewed first, since normalizing only this
+  -- source could otherwise hide it in the legacy renderer.
+  if exists (select 1 from jsonb_array_elements(coalesce(stored->'messages', '[]'::jsonb)) old
+             where not exists (select 1 from jsonb_array_elements(chat->'messages') src where src.value = old.value)) then
+    raise exception 'EXISTING_LEGACY_MESSAGES_REQUIRE_RECONCILIATION';
+  end if;
+  -- Normalized approvals take precedence in the legacy renderer. Creating a
+  -- different (or partial) normalized set must not hide older embedded states.
+  if jsonb_typeof(coalesce(stored->'approvals', '{}'::jsonb)) is distinct from 'object'
+     or exists (select 1 from jsonb_each(coalesce(stored->'approvals', '{}'::jsonb)) old
+                where not (chat->'approvals' ? old.key)
+                   or chat->'approvals'->old.key is distinct from old.value) then
+    raise exception 'EXISTING_LEGACY_APPROVALS_REQUIRE_RECONCILIATION';
+  end if;
+  for message in select value from jsonb_array_elements(payload->'messages') order by value->>'uid' loop
+    insert into public.fs_messages(uid, job_id, ts, data)
+      values (message->>'uid', job, (message->>'ts')::bigint, message)
+      on conflict (uid) do nothing;
+    if not exists (select 1 from public.fs_messages
+                   where uid = message->>'uid' and job_id = job
+                     and ts = (message->>'ts')::bigint and data = message) then
+      raise exception 'MESSAGE_CONFLICT_OR_UNACKNOWLEDGED_WRITE';
+    end if;
+  end loop;
+  for approval in select key, value from jsonb_each(chat->'approvals') order by key loop
+    insert into public.fs_approvals(job_id, part, data) values (job, approval.key, approval.value)
+      on conflict (job_id, part) do nothing;
+    if not exists (select 1 from public.fs_approvals where job_id = job
+                   and part = approval.key and data = approval.value) then
+      raise exception 'APPROVAL_CONFLICT_OR_UNACKNOWLEDGED_WRITE';
+    end if;
+  end loop;
+  if not exists (select 1 from public.fs_records where id = job and data = rec) then
+    raise exception 'FINAL_PARENT_VERIFICATION_FAILED';
+  end if;
+  raise notice 'JOB_RECOVERY_VERIFIED id=% source_messages=% source_approvals=%',
+    job, jsonb_array_length(payload->'messages'), (select count(*) from jsonb_each(chat->'approvals'));
+end
+$job_restore$;
+commit;
+\echo JOB_RECOVERY_COMMITTED

@@ -1,0 +1,24 @@
+a3f4859 feat(diagnostics): prepare masked missing-job recovery inspection
+0724d93 feat: warn idle jobs and gate Chat on confirmed saves
+43b5cfb feat(chat): ช่องค้นหารหัสงาน + ไม่ล้างสิ่งที่พิมพ์ค้างเมื่อวาดหน้าใหม่เบื้องหลัง
+1d675ef fix(tests): ตั้ง LC_ALL ให้ run-sql-tests.sh เพื่อให้ Postgres เริ่มได้บน macOS
+dd77bdc docs(auth): document approved OPC user population
+572813e feat(auth): connect Formula identity to OPC directory
+249f23d feat(auth): add opt-in OPC user reference adapter
+0443e88 fix(runtime): fail the document-root check when it cannot read the plist
+2f3e0cc chore(runtime): flag confidential data sitting under the served root
+72c37ba fix(workspace): pin the CSP host and prove the policy is enforced
+cd92591 feat(workspace): constrain the imported bundle with a page CSP
+d970e16 feat(workspace): add session-bound request transport (opc-workflow#7)
+35d9769 fix(workspace): fence session changes and denied roles (opc-workflow#5)
+3a9c32d fix(workspace): ต่อสายการถอนสิทธิ์ และใส่ mode ลงในกุญแจ reuse
+fab6d69 feat(workspace): ตัวโหลดพื้นที่ทำงานส่วนตัวแบบเสริมล้วน ไม่แตะหน้าจอเดิม
+2a66a3d fix(auth): 403 คือ "ไม่มีสิทธิ์" ไม่ใช่ "ไม่รู้จักตัวตน" — เลิกเด้งผู้ใช้ออกวนไม่จบ
+06ba555 feat: add concurrent-safe chat event store
+e30a309 docs: add runtime readiness audit
+c867371 docs: document secure Auth operations
+b311407 feat: gate Formula Studio with Supabase Auth
+8e6ef30 feat: enforce Supabase membership authorization
+ca5d3ed chore: enforce repository governance controls
+047e358 docs: plan Supabase auth hardening
+9692c6a docs: define Supabase auth governance design

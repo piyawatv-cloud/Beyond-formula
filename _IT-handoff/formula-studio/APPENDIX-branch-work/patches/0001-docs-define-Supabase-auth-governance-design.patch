@@ -1,0 +1,180 @@
+From 9692c6ab758a03cf8b953028d697abd94970d8b6 Mon Sep 17 00:00:00 2001
+From: piyawatv-cloud <295929244+piyawatv-cloud@users.noreply.github.com>
+Date: Mon, 10 Aug 2026 07:06:49 +0700
+Subject: [PATCH 01/24] docs: define Supabase auth governance design
+
+---
+ ...6-08-10-supabase-auth-governance-design.md | 161 ++++++++++++++++++
+ 1 file changed, 161 insertions(+)
+ create mode 100644 docs/superpowers/specs/2026-08-10-supabase-auth-governance-design.md
+
+diff --git a/docs/superpowers/specs/2026-08-10-supabase-auth-governance-design.md b/docs/superpowers/specs/2026-08-10-supabase-auth-governance-design.md
+new file mode 100644
+index 0000000..4904eba
+--- /dev/null
++++ b/docs/superpowers/specs/2026-08-10-supabase-auth-governance-design.md
+@@ -0,0 +1,161 @@
++# Supabase Auth and Governance Hardening Design
++
++**Status:** Approved by System Owner on 2026-08-10
++
++**Task ID:** `governance-auth-hardening-20260810`
++
++**Reviewer / CODEOWNER:** `@phossatron`
++
++## Goal
++
++เปลี่ยน Formula Studio จาก client-only login และ anonymous database access เป็น Supabase Auth + database-enforced membership/role controls โดยรักษา locked JSON data contract, single-file application, local-first behavior และ deterministic runtime ที่ไม่พึ่ง AI
++
++## Scope
++
++### Included
++
++- Root GitHub governance and `@phossatron` CODEOWNER enforcement
++- Supabase email/password authentication through direct REST `fetch()` calls
++- Auth session lifecycle in `sessionStorage`
++- Membership table and least-privilege RLS policies
++- JSON mutation guards for role-sensitive application tables
++- Removal of browser password hashes from server synchronization while retaining the locked `pass` field as `null`
++- Deterministic test harness, migration tests, application tests, documentation, rollback and owner runbook
++
++### Excluded
++
++- Changing repository visibility or GitHub organization settings
++- Applying a migration to production
++- Reading production secrets or unmasked production data
++- Inviting production users
++- Final approval, merge or production deployment by Codex
++- Adding an AI runtime or a new JavaScript dependency
++
++## Constraints
++
++- `index.html` remains the single application source file with no build step
++- Existing localStorage keys and existing object fields/types remain backward compatible
++- New fields and storage keys are optional
++- Existing Excel columns are not reordered
++- Runtime remains usable without AI; an already-authenticated open session continues using local data during network loss
++- When server sync is configured, a new browser session must authenticate before cached production data is displayed
++- Supabase publishable key is client configuration, not authorization; no secret/service-role key enters the browser or repository
++
++## Architecture
++
++### GitHub control plane
++
++- `.github/CODEOWNERS` assigns all files to `@phossatron`
++- Critical paths receive explicit ownership entries for `.github/`, `runtime/`, `supabase/` and `index.html`
++- Pull request template records traceability, impact, tests, rollback and deployment evidence
++- Branch protection, repository privacy and final approval remain System Owner actions
++
++### Browser authentication
++
++- The existing login form uses email and password against Supabase Auth REST
++- The client calls `/auth/v1/token?grant_type=password` and accepts any successful 2xx response
++- The returned `access_token`, `refresh_token`, `expires_at` and Auth user are stored in `sessionStorage` under new optional key `fs_auth_session`
++- On page load, the client restores an unexpired session or refreshes it through `/auth/v1/token?grant_type=refresh_token`
++- Logout calls `/auth/v1/logout`, clears `fs_auth_session`, `fs_user` and `fs_imp`, then returns to the login gate
++- Data REST requests send the publishable key in `apikey` and the access token in `Authorization: Bearer`
++- Auth responses and tokens are never logged or placed in activity records
++
++### Membership and roles
++
++Add `public.fs_memberships` as an authorization table separate from the locked application JSON:
++
++```text
++user_id uuid primary key -> auth.users(id)
++name text not null
++role text not null
++active boolean not null default true
++created_at timestamptz
++updated_at timestamptz
++```
++
++- `role` is constrained to the existing Formula Studio roles
++- `user_id` is indexed by its primary key; `role, active` receives a supporting index for policy checks
++- `private.fs_is_active_member()`, `private.fs_current_role()` and `private.fs_current_name()` use `auth.uid()` and a fixed empty search path
++- Helpers are callable only where required by RLS/guards and are not exposed through the Data API
++- Existing Auth users are mapped to current `fs_users.data.email` by an owner-run migration statement
++- Unmatched Auth users receive no membership and therefore no application access
++
++### Database grants and RLS
++
++- Revoke all application-table privileges from `anon`
++- Grant only required CRUD privileges to `authenticated`
++- Enable and force RLS on application tables and membership table
++- Active membership is required for every application operation
++- `fs_activities` is append-only; Admin alone can read it
++- `fs_users` mutations require Admin
++- `fs_meta` mutations require Admin or record-creation roles
++- Record/chat policies apply coarse table-level role checks; `BEFORE UPDATE` JSON guards compare old/new payloads for sensitive role-specific changes
++- Existing `anon_all` policies are removed transactionally in the migration
++
++### JSON mutation guards
++
++- Admin may perform all application-authorized changes
++- Sales may create records attributed to their membership name and update only their own records
++- OPC and MKT retain their current record capabilities
++- PD may update formula/modification fields but not customer ownership or identity fields
++- Chat participants may append messages, participation and seen state
++- Approval changes are limited to Admin or the matching PD/RA/RD/Sales role
++- Closed/reopened state follows the existing Admin/Sales/OPC rule
++- Direct attempts that exceed these rules fail at the database even if UI checks are bypassed
++
++## User lifecycle
++
++- System Owner disables public signup and anonymous sign-in
++- System Owner invites users through Supabase Dashboard; privileged invite secrets never enter the browser
++- Initial migration joins Auth users to existing `fs_users` by normalized email and creates memberships
++- New users are invited first, then assigned a membership by the Owner/Admin operating procedure
++- In-app user creation and Admin password reset are disabled when secure server mode is active; the UI explains the Dashboard-controlled process
++- Users change or recover passwords through Supabase Auth flows rather than `pwHash()`
++
++## Offline behavior
++
++- AI availability never affects runtime
++- After a successful login, local editing continues while the network is unavailable and queues synchronization
++- Reconnection refreshes authentication before pushing queued changes
++- Browser restart or expired session requires a new login before cached server-derived data is shown
++- Local-only mode remains available only when Supabase configuration is intentionally absent
++
++## Error handling
++
++- Authentication errors use a generic invalid-credentials message and never reveal account existence
++- Refresh failure clears the session and returns to login without deleting local application data
++- 401/403 Data API responses pause sync and require authentication instead of retry-looping
++- Network errors preserve local data and schedule bounded retry through the existing polling cycle
++- Migration statements are transactional and idempotent; policy/trigger creation explicitly drops the prior named object before recreation
++
++## Testing
++
++- `harness.js` extracts and executes the real application script in an isolated browser context
++- `test.html` reports deterministic browser tests without production credentials or data
++- Unit/behavior tests cover auth request construction, session restore/refresh/logout, authenticated Data REST headers, local-only behavior and locked data compatibility
++- SQL contract tests verify grants, policies, membership constraints, helper safety, JSON guard cases and rollback coverage using an isolated local/test database when available
++- Every production behavior change follows RED → GREEN → REFACTOR
++- Final verification includes JavaScript syntax, headless Chrome, SQL parser/local database where available, secret scan, diff review and governance checklist
++
++## Rollout
++
++1. Review and merge governance/CODEOWNERS/test foundation through PR
++2. Owner changes repository to Private and enables branch protection
++3. Create Auth users in staging and run the reviewed migration
++4. Run RLS negative/positive tests and UAT in staging
++5. Merge the application Auth change after independent review
++6. Runtime Operator deploys the approved immutable commit and records health/rollback evidence
++7. Repeat the reviewed migration and release process for production
++
++## Rollback
++
++- Application rollback: deploy the previously approved commit
++- Database rollback: restore the named prior policies/grants from `supabase/rollback_auth_rls.sql`; do not drop application data
++- Membership table remains harmless if the old client is restored
++- If authentication fails after release, Runtime Operator rolls back the application first and Owner applies the reviewed policy rollback only when required
++
++## Known limitations
++
++- Codex cannot make the public repository private, configure branch protection, invite users, apply production SQL, approve or deploy
++- The current GitHub development identity has read-only access until the Owner grants write permission
++- Existing weak password hashes may remain in users' browser localStorage until the secure login path overwrites them; the server copy is retained as `pass: null` for shape compatibility
+-- 
+2.39.5 (Apple Git-154)
+

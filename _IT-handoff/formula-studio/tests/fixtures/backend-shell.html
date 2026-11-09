@@ -1,0 +1,26 @@
+<!doctype html><html><head></head><body><script>
+// Synthetic shell only: tests backend/auth behavior, never application readiness.
+let SB_URL = 'https://synthetic.invalid';
+let SB_KEY = 'synthetic-embedded-key';
+function canDeleteJob(r){
+  if(!r || !currentUser) return false;
+  return !!can('manageUsers');          // ลบงานได้เฉพาะ Role: Admin
+}
+function jobDelBtnHTML(r, tag){
+  if(!canDeleteJob(r)) return '';
+  const t = tag || 'button';
+  return `<${t} class="job-del" title="ลบงาน ${esc(r.id)}" onclick="event.stopPropagation();deleteJob('${r.id}')">🗑</${t}>`;
+}
+function doDeleteJob(r, c, msgN){
+  const id = r.id;
+  logAct('job','ลบ Job งาน', 'synthetic');
+}
+function canSeeRecord(r){
+  return !!r && (!can('ownOnly') || r.createdBy===currentUser);
+}
+function can(cap){
+  const r = ROLES[currentRole()];
+  return !!(r && r.can[cap]);
+}
+const RECBAK_MAX_CHARS = 1500000;
+</script></body></html>

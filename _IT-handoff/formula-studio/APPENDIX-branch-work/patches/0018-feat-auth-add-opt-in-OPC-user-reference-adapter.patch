@@ -1,0 +1,534 @@
+From 249f23d7523cc891a14369cd345ef69a69cd878b Mon Sep 17 00:00:00 2001
+From: piyawatv-cloud <295929244+piyawatv-cloud@users.noreply.github.com>
+Date: Fri, 18 Sep 2026 21:52:28 +0700
+Subject: [PATCH 18/24] feat(auth): add opt-in OPC user reference adapter
+
+---
+ docs/architecture/INTEGRATION_CONTRACTS.md | 228 +++++++++++++++++++++
+ docs/architecture/REGISTRY.md              |  58 ++++++
+ index.html                                 |  81 +++++++-
+ tests/formula-studio.test.js               |  63 ++++++
+ 4 files changed, 428 insertions(+), 2 deletions(-)
+ create mode 100644 docs/architecture/INTEGRATION_CONTRACTS.md
+ create mode 100644 docs/architecture/REGISTRY.md
+
+diff --git a/docs/architecture/INTEGRATION_CONTRACTS.md b/docs/architecture/INTEGRATION_CONTRACTS.md
+new file mode 100644
+index 0000000..a01e266
+--- /dev/null
++++ b/docs/architecture/INTEGRATION_CONTRACTS.md
+@@ -0,0 +1,228 @@
++# Formula Studio — Integration Contracts
++
++สถานะ: contract proposal / boundary definition only
++ห้ามตีความว่า endpoint, event bus หรือ field ใดที่ยังไม่พบใน source เป็นระบบที่มีอยู่แล้ว
++
++## 1. Contract rules
++
++- Formula Studio owns Formula/R&D domain logic only.
++- Central IAM owns identity and permission authority.
++- Central Job Core owns `central_job_id` and cross-system job reference.
++- OPC owns OPC workflow state.
++- Reporting consumes events and does not change Formula business logic.
++- No system may read or write another system's database directly.
++- All new contracts are versioned, authenticated, authorization-checked, idempotent and observable.
++- Payloads use synthetic examples in development; never place production/confidential data in fixtures or logs.
++
++## 2. Identity mapping contract
++
++### Purpose
++
++Resolve legacy Formula values to shared identifiers without destroying backward compatibility.
++
++### Proposed request/response
++
++```json
++{
++  "schema_version": "identity-mapping.v1",
++  "source_system": "formula",
++  "source_record_id": "A00001",
++  "legacy_user_ref": "legacy-name-or-auth-uuid",
++  "requested_by": "central_user_id",
++  "correlation_id": "request-correlation-id"
++}
++```
++
++```json
++{
++  "status": "MATCHED|PENDING_MAPPING|REJECTED",
++  "central_job_id": "central-job-id-or-null",
++  "central_user_id": "central-user-id-or-null",
++  "matched_source_system": "formula",
++  "matched_source_record_id": "A00001",
++  "mapping_version": 1,
++  "resolved_at": "timestamp"
++}
++```
++
++No match may be inferred from a display name alone. `PENDING_MAPPING` is a valid operational state.
++
++## 2.1 Formula pilot — OPC user reference
++
++For the Formula pilot, OPC Workflow is the reference source for user mapping. The
++initial read-only dataset is the `OPC System Users` tab supplied by the project
++owner. The repository stores only the contract shape, never real user rows.
++
++Minimum adapter fields:
++
++```text
++opc_user_id
++name
++department
++role_reference
++opc_login_email and/or cloudflare_access_email
++status
++```
++
++Formula resolves the authenticated user's email against an active OPC reference
++row and retains the result in memory only. Display names and Formula legacy
++records remain unchanged. The reference does not grant permissions; Formula's
++current Auth/RLS boundary remains authoritative until a separately approved
++identity transition changes it. Disabled flag, missing provider, inactive row,
++duplicate ID or ambiguous email must fail closed.
++
++## 3. Formula event contract
++
++### Envelope
++
++```json
++{
++  "schema_version": "formula-event.v1",
++  "event_id": "globally-unique-id",
++  "event_type": "BRIEF_CREATED",
++  "source_system": "formula",
++  "source_record_id": "A00001",
++  "central_job_id": "central-job-id-or-null",
++  "actor_user_id": "central-user-id",
++  "owner_user_id": "central-user-id-or-null",
++  "assignee_user_id": "central-user-id-or-null",
++  "stage": "BRIEF",
++  "status": "DRAFT",
++  "event_at": "timestamp",
++  "delay_reason_code": null,
++  "delay_remark": null,
++  "correlation_id": "trace-id",
++  "payload": {}
++}
++```
++
++### Minimum event types
++
++| Event | Producer | Required meaning |
++|---|---|---|
++| `BRIEF_CREATED` | Formula | A new brief was accepted by Formula |
++| `REVIEW_STARTED` | Formula | A review stage began |
++| `REQUIREMENT_COMPLETED` | Formula | Required Formula inputs were completed |
++| `FORMULA_READY` | Formula | A specific Formula revision passed Formula-owned readiness rules |
++| `OWNER_CHANGED` | Formula/IAM | Owner reference changed |
++| `ASSIGNEE_CHANGED` | Formula/IAM | Assignee reference changed |
++| `DELAY_REASON_ADDED` | Formula | A structured delay reason was recorded |
++| `OPC_HANDOFF_REQUESTED` | Formula adapter | A specific revision was sent to OPC |
++| `OPC_HANDOFF_ACCEPTED` | OPC | OPC accepted the handoff |
++| `OPC_HANDOFF_REJECTED` | OPC/adapter | OPC rejected it with reason |
++
++Existing `fs_activities` and `fs_chat_events` remain raw/legacy evidence until a reviewed projection is implemented. Their `cat/action` and `type/action` values must not silently be treated as the canonical vocabulary without an adapter.
++
++## 4. Formula → OPC handoff contract
++
++### Request
++
++```json
++{
++  "schema_version": "formula-opc-handoff.v1",
++  "idempotency_key": "formula:A00001:revision:3",
++  "central_job_id": "central-job-id",
++  "formula_id": "formula-id",
++  "formula_revision": 3,
++  "customer_ref": "customer-reference",
++  "requirement_summary": "approved summary",
++  "selected_formula_ref": "formula-revision-reference",
++  "owner_user_id": "central-user-id",
++  "assignee_user_id": "central-user-id",
++  "requested_at": "timestamp",
++  "attachment_refs": [
++    {"attachment_id":"id","version":1,"checksum":"sha256","purpose":"brief|formula|evidence"}
++  ],
++  "handoff_status": "REQUESTED",
++  "correlation_id": "trace-id"
++}
++```
++
++### Response
++
++```json
++{
++  "schema_version": "opc-formula-handoff.v1",
++  "idempotency_key": "formula:A00001:revision:3",
++  "central_job_id": "central-job-id",
++  "opc_record_id": "opc-local-id",
++  "handoff_status": "ACCEPTED|PENDING|REJECTED",
++  "accepted_revision": 3,
++  "reason_code": null,
++  "reason_remark": null,
++  "acknowledged_at": "timestamp",
++  "correlation_id": "trace-id"
++}
++```
++
++Rules:
++
++- The same idempotency key returns the same outcome.
++- Formula must not set `OPC_HANDOFF_ACCEPTED` based only on HTTP request success.
++- Rejection is retained with a reason; it is not deleted or converted to success.
++- Payload is role-filtered and must not expose restricted supplier/cost fields.
++- OPC database is not a data source for Formula queries.
++
++## 5. Reporting event adapter
++
++Reporting receives the canonical envelope plus only approved payload fields. The adapter must provide:
++
++- stable event ID and source/correlation IDs;
++- actor/owner/assignee central IDs;
++- stage/status and event timestamp;
++- enough timestamps to calculate duration;
++- delay code/remark when present;
++- source revision/version;
++- redacted error/dead-letter state.
++
++Reporting must calculate cross-system KPI centrally. Formula must not create a second KPI definition or rewrite another system's events.
++
++## 6. Attachment reference contract
++
++Formula stores metadata/reference only:
++
++```json
++{
++  "attachment_id": "stable-id",
++  "source_system": "formula",
++  "source_record_id": "A00001",
++  "object_key": "opaque-approved-storage-key",
++  "version": 1,
++  "checksum": "sha256",
++  "content_type": "approved-type",
++  "classification": "internal|restricted",
++  "owner_user_id": "central-user-id",
++  "created_at": "timestamp",
++  "retention_until": "timestamp-or-null"
++}
++```
++
++Binary content must be stored in approved object storage with authorization and retention policy. Do not place binary content, credentials or unrestricted URLs in Formula JSON/chat events.
++
++## 7. Adapter interface (implementation-neutral)
++
++```text
++resolveIdentity(legacyRef, correlationId) -> MappingResult
++resolveJob(localId, correlationId) -> JobMappingResult
++emitFormulaEvent(envelope) -> DeliveryResult
++requestOpcHandoff(handoff, idempotencyKey) -> HandoffResult
++recordAttachmentReference(metadata) -> AttachmentRef
++```
++
++The interface may be implemented with REST, an approved event bus or an internal service adapter. The choice requires an architecture decision; no live endpoint is assumed by this document.
++
++## 8. Error and retry contract
++
++| Condition | Formula behavior |
++|---|---|
++| 2xx accepted | Persist acknowledgement and correlation ID |
++| 4xx validation/permission | Mark rejected/action-required; do not retry blindly |
++| 401/403 | Stop and surface authorization issue; do not downgrade credentials |
++| 408/429/5xx | Retry with bounded backoff and idempotency key |
++| timeout/unknown outcome | Mark `PENDING_RECONCILIATION`; reconcile by idempotency key |
++| duplicate delivery | Return original event/outcome; no duplicate business transition |
++| unmapped identity/job | Keep `PENDING_MAPPING`; do not guess |
++
++## 9. Current implementation boundary
++
++The current repository proves Supabase Auth/REST/RPC and an optional private workspace manifest/bundle boundary, but it does not prove the contracts above exist. Any implementation of these contracts requires G1/G2 owner approval, synthetic fixtures, Critical Change review where source/schema/sync/auth paths are touched, and independent UAT before release.
+diff --git a/docs/architecture/REGISTRY.md b/docs/architecture/REGISTRY.md
+new file mode 100644
+index 0000000..af4279b
+--- /dev/null
++++ b/docs/architecture/REGISTRY.md
+@@ -0,0 +1,58 @@
++# Formula Studio — Architecture Registry
++
++สถานะ: working registry; ใช้บันทึก decision ที่ผู้มีอำนาจยืนยันแล้ว
++
++## Decision 1 — Owner ของ `central_job_id`
++
++สถานะ: **CONFIRMED**
++วันที่ยืนยัน: 2026-09-18
++ผู้ยืนยัน: Project Owner ผ่านบทสนทนานี้
++
++### ข้อตกลง
++
++- `central_job_id` เป็น shared job reference ที่ **Central Job & Activity Core** เป็น Owner
++- Formula Studio เป็นเจ้าของเฉพาะ local Formula record และ Formula domain logic
++- Formula ต้องเก็บ local ID เดิม เช่น `A00001` ต่อไป
++- Mapping ที่ต้องรองรับ:
++
++```text
++central_job_id   ↔ local_job_id (เช่น A00001) ↔ source_system=formula
++```
++
++- Formula ห้ามสร้าง master `central_job_id` เองเมื่อ Central Job Core มี authority แล้ว
++- Formula ห้ามอ่านหรือเขียน Central Job database โดยตรง
++- ระหว่างที่ mapping ยังไม่พร้อม ให้ใช้สถานะ `PENDING_MAPPING`
++- การผูก owner/assignee กับผู้ใช้กลางจริงต้องรอ Central User Management ออก `central_user_id` และ permission contract
++
++### ผลกระทบที่ยอมรับ
++
++- ระยะนี้แก้เฉพาะเอกสารและ contract; ไม่เปลี่ยน application source, localStorage, Supabase schema หรือ runtime
++- Implementation ในอนาคตต้องเป็น additive, backward-compatible และ idempotent
++- การเปิด integration จริงต้องผ่าน User Management readiness, contract tests, UAT และ Critical Change governance
++
++## Decision 2 — แหล่งอ้างอิงตัวตนผู้ใช้สำหรับ Formula pilot
++
++สถานะ: **CONFIRMED FOR PILOT**
++วันที่ยืนยัน: 2026-09-18
++ผู้ยืนยัน: Project Owner ผ่านคำสั่งงานต่อยอด
++
++### ข้อตกลง
++
++- Formula pilot ใช้ **OPC Workflow** เป็นแหล่งอ้างอิงตัวตนผู้ใช้สำหรับ mapping
++- ชุดตั้งต้นอ้างอิงจากแท็บ `OPC System Users` ใน Google Sheet ที่ผู้ใช้ระบุ และต้องอ่านแบบ read-only
++- ห้ามคัดลอกชื่อ, email, OPC user ID หรือข้อมูลบุคคลจริงจาก Sheet ลง source, test fixture, log หรือ repository
++- Supabase ไม่ใช่ mapping source ใน pilot นี้
++- Supabase Auth/RLS ยังคงเป็น security boundary ของ Formula ในช่วงที่ feature flag ถูกปิดและระหว่าง transition; OPC reference ห้ามใช้เป็น authorization bypass
++- Feature flag ต้องปิดเป็นค่าเริ่มต้น และการเปิดใช้จริงต้องผ่าน approved OPC adapter, synthetic tests, UAT และ owner/security review
++
++### ขอบเขต
++
++ข้อตกลงนี้เป็น pilot integration decision สำหรับ Formula เท่านั้น ไม่ได้เปลี่ยน owner ระยะยาวของ Central IAM โดยอัตโนมัติ และยังไม่อนุญาตให้ deploy production
++
++## Pending decisions
++
++- Owner ของ `central_user_id`
++- Owner ของ Formula ID/revision
++- Owner และ contract ของ OPC handoff
++- Canonical Formula stage/status
++- Contract versioning, acknowledgement, retry และ idempotency authority
+diff --git a/index.html b/index.html
+index 55226e5..d73c3c0 100755
+--- a/index.html
++++ b/index.html
+@@ -659,7 +659,7 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
+   <div class="logo"><svg viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-1.73-3L9 11.35V4H8a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2h-1v7.35L19.73 19A2 2 0 0 1 18 22H6Zm5-10.11L8.31 16.5h7.38L13 11.89V4h-2v7.89Z"/></svg></div>
+   <div>
+     <div class="hdr-title">Formula Studio</div>
+-    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-05.5</div>
++    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-18.1</div>
+   </div>
+   <div class="sync-chip" id="syncChip" onclick="sbManualSync()" title="สถานะการซิงก์ข้อมูลกับเซิร์ฟเวอร์กลาง"></div>
+ </div>
+@@ -1163,6 +1163,15 @@ const SB_POLL_MS = 5000;   // ดึงข้อมูลใหม่จาก
+ // ===================================================================
+ let SCIENCE_WORKSPACE_API_ORIGIN = '';
+ 
++// OPC Workflow user reference — opt-in only, disabled in the current release.
++// The reference shape follows the read-only "OPC System Users" sheet, but no
++// real names/emails/IDs are embedded here. An approved OPC adapter may provide
++// rows through window.__FS_OPC_USER_REFERENCE_PROVIDER__ when this flag is on.
++// Supabase Auth/RLS remains the security boundary; this reference is not an
++// authorization bypass and is never persisted to localStorage or Supabase.
++let OPC_USER_REFERENCE_ENABLED = false;
++const OPC_USER_REFERENCE_SOURCE = 'opc-workflow';
++
+ // ========== THAI FDA DATABASE ==========
+ // อ้างอิง: ประกาศกระทรวงสาธารณสุข ฉบับที่ 448 พ.ศ. 2566 (มีผล 4 ม.ค. 2567)
+ //          ประกาศ อย. รายการพืชอนุญาต 444 ชนิด (8 ก.ค. 2567)
+@@ -6059,6 +6068,7 @@ function sbBase(){ return String(SB_URL||'').replace(/\/+$/,'').replace(/\/rest\
+ const AUTH_SESSION_KEY = 'fs_auth_session';
+ let authSession = null;
+ let authMembership = null;
++let authOpcUserReference = null;
+ let authChecking = false;
+ 
+ function authFriendlyError(err){
+@@ -6069,6 +6079,8 @@ function authFriendlyError(err){
+   // ขึ้นข้อความเดียวกับตอนเน็ตล่ม จนหาสาเหตุไม่เจอ
+   if(/no membership|NO_MEMBERSHIP/i.test(msg))
+     return 'เข้าสู่ระบบได้แล้ว แต่ยังไม่มีสิทธิ์ใช้งานในระบบนี้ — ผู้ดูแลต้องเพิ่มบัญชีนี้ใน fs_memberships ก่อน';
++  if(/OPC_USER_REFERENCE_MISSING/i.test(msg)) return 'บัญชีนี้ไม่พบใน OPC Workflow user reference หรือยังไม่ Active';
++  if(/OPC_USER_REFERENCE_PROVIDER_UNCONFIGURED/i.test(msg)) return 'ระบบยังไม่ได้เชื่อมต่อ OPC Workflow user reference';
+   if(/inactive/i.test(msg)) return 'บัญชีนี้ถูกปิดการใช้งาน กรุณาติดต่อผู้ดูแลระบบ';
+   if(/membership|403/i.test(msg)) return 'บัญชีนี้ยังไม่ได้รับสิทธิ์ใช้งาน กรุณาติดต่อผู้ดูแลระบบ';
+   if(/storage|quota/i.test(msg)) return 'เบราว์เซอร์บล็อกการเก็บข้อมูลของเว็บไซต์ — ปิดโหมดส่วนตัวหรืออนุญาต site data แล้วลองใหม่';
+@@ -6108,6 +6120,7 @@ function authClearSession(){
+   try{ teardownPrivateWorkspace(); }catch(err){}
+   authSession = null;
+   authMembership = null;
++  authOpcUserReference = null;
+   currentUser = '';
+   impersonator = '';
+   try{ sessionStorage.removeItem(AUTH_SESSION_KEY); }catch(err){}
+@@ -6177,6 +6190,61 @@ function authDataHeaders(){
+   if(!authSession || !authSession.access_token) throw new Error('Authentication required');
+   return {apikey:SB_KEY,Authorization:'Bearer '+authSession.access_token,'Content-Type':'application/json'};
+ }
++function opcUserReferenceOn(){ return OPC_USER_REFERENCE_ENABLED === true; }
++function opcUserReferenceProvider(){
++  return typeof window !== 'undefined' && typeof window.__FS_OPC_USER_REFERENCE_PROVIDER__ === 'function'
++    ? window.__FS_OPC_USER_REFERENCE_PROVIDER__ : null;
++}
++function opcReferenceValue(row, keys){
++  for(const key of keys){
++    if(row && row[key] != null && String(row[key]).trim() !== '') return row[key];
++  }
++  return '';
++}
++function normalizeOpcUserReferenceRows(rows){
++  if(!Array.isArray(rows)) throw new Error('OPC_USER_REFERENCE_INVALID: rows must be an array');
++  const seen = new Set();
++  return rows.map((row, index)=>{
++    if(!row || typeof row !== 'object') throw new Error('OPC_USER_REFERENCE_INVALID: row '+(index+1));
++    const values = Object.values(row).map(v=>String(v == null ? '' : v).trim());
++    if(!values.some(Boolean)) return null; // allow a trailing blank sheet row
++    const opcUserId = String(opcReferenceValue(row,['opc_user_id','opc_username','OPC Username'])).trim();
++    const name = String(opcReferenceValue(row,['name','user_name','User Name'])).trim();
++    const department = String(opcReferenceValue(row,['department','position_department','Position / Department'])).trim();
++    const role = String(opcReferenceValue(row,['role','current_role','Current Role'])).trim().toLowerCase();
++    const opcLoginEmail = String(opcReferenceValue(row,['opc_login_email','login_email','OPC Login Email'])).trim().toLowerCase();
++    const cloudflareAccessEmail = String(opcReferenceValue(row,['cloudflare_access_email','access_email','Cloudflare Access Email'])).trim().toLowerCase();
++    const status = String(opcReferenceValue(row,['status','user_status','User Status']) || 'active').trim().toLowerCase();
++    if(!opcUserId || !name || (!opcLoginEmail && !cloudflareAccessEmail)){
++      throw new Error('OPC_USER_REFERENCE_INVALID: required identity fields missing at row '+(index+1));
++    }
++    if(seen.has(opcUserId)) throw new Error('OPC_USER_REFERENCE_INVALID: duplicate OPC user id');
++    seen.add(opcUserId);
++    if(status !== 'active') return null;
++    return {opc_user_id:opcUserId,name,department,role,opc_login_email:opcLoginEmail,
++      cloudflare_access_email:cloudflareAccessEmail,status};
++  }).filter(Boolean);
++}
++function matchOpcUserReference(rows, authUser){
++  const email = String(authUser && authUser.email || '').trim().toLowerCase();
++  if(!email) return null;
++  const matches = rows.filter(row => row.opc_login_email === email || row.cloudflare_access_email === email);
++  if(matches.length > 1) throw new Error('OPC_USER_REFERENCE_INVALID: email maps to multiple active users');
++  return matches[0] || null;
++}
++async function resolveOpcUserReference(authUser, membership){
++  if(!opcUserReferenceOn()) return null;
++  const provider = opcUserReferenceProvider();
++  if(!provider) throw new Error('OPC_USER_REFERENCE_PROVIDER_UNCONFIGURED');
++  const rows = await provider({
++    source: OPC_USER_REFERENCE_SOURCE,
++    auth_user: {id:authUser && authUser.id || '', email:authUser && authUser.email || ''},
++    membership: {name:membership && membership.name || '', role:membership && membership.role || ''}
++  });
++  const reference = matchOpcUserReference(normalizeOpcUserReferenceRows(rows), authUser);
++  if(!reference) throw new Error('OPC_USER_REFERENCE_MISSING');
++  return reference;
++}
+ async function authFetchMembership(){
+   if(!authSession || !authSession.user || !authSession.user.id) throw new Error('Missing authenticated user');
+   const rows = await sbReq('fs_memberships?select=user_id,name,role,active&user_id=eq.' + encodeURIComponent(authSession.user.id));
+@@ -6193,9 +6261,18 @@ async function authFetchMembership(){
+     authClearSession();
+     throw new Error('Unknown membership role');
+   }
++  let opcReference = null;
++  try{
++    opcReference = await resolveOpcUserReference(authSession.user, membership);
++  }catch(err){
++    authClearSession();
++    throw err;
++  }
+   if(authMembership && (authMembership.role !== membership.role ||
+-      authMembership.user_id !== membership.user_id || authMembership.active !== membership.active)) teardownPrivateWorkspace();
++      authMembership.user_id !== membership.user_id || authMembership.active !== membership.active ||
++      (authOpcUserReference && opcReference && authOpcUserReference.opc_user_id !== opcReference.opc_user_id))) teardownPrivateWorkspace();
+   authMembership = membership;
++  authOpcUserReference = opcReference;
+   currentUser = membership.name;
+   impersonator = '';
+   const local = findUser(membership.name);
+diff --git a/tests/formula-studio.test.js b/tests/formula-studio.test.js
+index 5e8a6da..f084149 100644
+--- a/tests/formula-studio.test.js
++++ b/tests/formula-studio.test.js
+@@ -15,8 +15,11 @@
+     window.__fetchQueue.length = 0;
+     SB_URL = 'https://test-project.supabase.co';
+     SB_KEY = 'sb_publishable_test_only';
++    OPC_USER_REFERENCE_ENABLED = false;
++    delete window.__FS_OPC_USER_REFERENCE_PROVIDER__;
+     if(typeof authSession !== 'undefined') authSession = null;
+     if(typeof authMembership !== 'undefined') authMembership = null;
++    if(typeof authOpcUserReference !== 'undefined') authOpcUserReference = null;
+     if(typeof authChecking !== 'undefined') authChecking = false;
+     currentUser = '';
+     impersonator = '';
+@@ -196,6 +199,66 @@
+     assert(!friendly.includes('อินเทอร์เน็ต'), 'ยังโทษอินเทอร์เน็ตอยู่');
+   });
+ 
++  test('OPC user reference is disabled by default and preserves the current Admin auth flow', async function(){
++    reset();
++    authSession = {access_token:'admin-token',refresh_token:'refresh-test',expires_at:Date.now()/1000+3600,
++      user:{id:'55555555-5555-5555-5555-555555555555',email:'admin@example.test'}};
++    let providerCalled = false;
++    window.__FS_OPC_USER_REFERENCE_PROVIDER__ = async function(){ providerCalled = true; return []; };
++    window.__fetchQueue.push(window.__mockResponse(200, [
++      {user_id:'55555555-5555-5555-5555-555555555555',name:'Admin Test',role:'admin',active:true}
++    ]));
++    await authFetchMembership();
++    equal(providerCalled, false, 'disabled OPC reference provider was called');
++    equal(authMembership.role, 'admin', 'legacy Admin membership flow changed');
++    equal(authOpcUserReference, null, 'disabled OPC reference was retained');
++  });
++
++  test('enabled OPC reference maps the authenticated user without using Supabase as the mapping source', async function(){
++    reset();
++    OPC_USER_REFERENCE_ENABLED = true;
++    authSession = {access_token:'admin-token',refresh_token:'refresh-test',expires_at:Date.now()/1000+3600,
++      user:{id:'66666666-6666-6666-6666-666666666666',email:'admin@example.test'}};
++    let providerRequest = null;
++    window.__FS_OPC_USER_REFERENCE_PROVIDER__ = async function(request){
++      providerRequest = request;
++      return [{
++        'OPC Username':'opc-admin-1', 'User Name':'Admin From OPC',
++        'Position / Department':'Management', 'Current Role':'admin',
++        'OPC Login Email':'admin@example.test', 'Cloudflare Access Email':'', 'User Status':'Active'
++      }];
++    };
++    window.__fetchQueue.push(window.__mockResponse(200, [
++      {user_id:'66666666-6666-6666-6666-666666666666',name:'Legacy Admin',role:'admin',active:true}
++    ]));
++    await authFetchMembership();
++    equal(providerRequest.source, 'opc-workflow', 'wrong identity reference source');
++    equal(providerRequest.auth_user.email, 'admin@example.test', 'provider did not receive Auth identity for lookup');
++    equal(authOpcUserReference.opc_user_id, 'opc-admin-1', 'OPC user reference was not retained');
++    equal(authOpcUserReference.name, 'Admin From OPC', 'OPC display name was not normalized');
++    equal(currentUser, 'Legacy Admin', 'legacy Formula display identity was changed');
++    equal(currentRole(), 'admin', 'Supabase/Auth role boundary was bypassed');
++  });
++
++  test('enabled OPC reference fails closed when the authenticated user is not active in the reference', async function(){
++    reset();
++    OPC_USER_REFERENCE_ENABLED = true;
++    authSession = {access_token:'admin-token',refresh_token:'refresh-test',expires_at:Date.now()/1000+3600,
++      user:{id:'77777777-7777-7777-7777-777777777777',email:'inactive@example.test'}};
++    window.__FS_OPC_USER_REFERENCE_PROVIDER__ = async function(){
++      return [{'OPC Username':'opc-inactive-1','User Name':'Inactive Admin',
++        'OPC Login Email':'inactive@example.test','Current Role':'admin','User Status':'Inactive'}];
++    };
++    window.__fetchQueue.push(window.__mockResponse(200, [
++      {user_id:'77777777-7777-7777-7777-777777777777',name:'Legacy Admin',role:'admin',active:true}
++    ]));
++    let caught = null;
++    try{ await authFetchMembership(); }catch(err){ caught = err; }
++    assert(caught && /OPC_USER_REFERENCE_MISSING/.test(caught.message), 'inactive OPC user was accepted');
++    equal(authSession, null, 'session remained after OPC identity denial');
++    equal(authOpcUserReference, null, 'denied OPC identity remained in memory');
++  });
++
+   test('chat event ที่ถูกปฏิเสธถาวร ต้องไม่ทำให้ทั้ง sbPush ค้าง', async function(){
+     reset();
+     activeSession('sales');
+-- 
+2.39.5 (Apple Git-154)
+

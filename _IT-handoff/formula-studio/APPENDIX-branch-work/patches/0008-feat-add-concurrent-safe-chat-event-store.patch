@@ -1,0 +1,1004 @@
+From 06ba555db0638c09d799307df432a0ea1cc84ed2 Mon Sep 17 00:00:00 2001
+From: piyawatv-cloud <295929244+piyawatv-cloud@users.noreply.github.com>
+Date: Tue, 25 Aug 2026 08:04:23 +0700
+Subject: [PATCH 08/24] feat: add concurrent-safe chat event store
+
+---
+ CLAUDE.md                                     |   1 +
+ .../plans/2026-08-25-chat-event-store.md      |  90 ++++++
+ .../2026-08-25-chat-event-store-design.md     |  59 ++++
+ index.html                                    | 135 ++++++--
+ supabase/AUTH_RLS_RUNBOOK.md                  |  15 +
+ supabase/schema.sql                           | 287 +++++++++++++++++-
+ tests/formula-studio.test.js                  |  47 +++
+ tests/sql/auth_rls_test.sql                   |  82 ++++-
+ 8 files changed, 694 insertions(+), 22 deletions(-)
+ create mode 100644 docs/superpowers/plans/2026-08-25-chat-event-store.md
+ create mode 100644 docs/superpowers/specs/2026-08-25-chat-event-store-design.md
+
+diff --git a/CLAUDE.md b/CLAUDE.md
+index 13f6814..2785920 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -65,6 +65,7 @@
+ | `fs_imp` | ชื่อผู้ที่กำลัง impersonate (string) |
+ 
+ Optional state ที่เพิ่มแบบ backward compatible: `sessionStorage.fs_auth_session` เก็บ Auth session เฉพาะ tab/session และ `localStorage.fs_sync_snapshot` เก็บ server snapshot ที่ไม่มี token เพื่อ merge offline delta
++และ `localStorage.fs_chat_event_outbox`, `fs_chat_read_outbox`, `fs_chat_delete_outbox` เก็บรายการ Chat ที่รอ RPC แบบ local-first; รายการเหล่านี้ต้องล้างได้เฉพาะเมื่อ server ตอบสำเร็จ
+ 
+ ### record (`fs_records[]`)
+ ```
+diff --git a/docs/superpowers/plans/2026-08-25-chat-event-store.md b/docs/superpowers/plans/2026-08-25-chat-event-store.md
+new file mode 100644
+index 0000000..f24e0bb
+--- /dev/null
++++ b/docs/superpowers/plans/2026-08-25-chat-event-store.md
+@@ -0,0 +1,90 @@
++# Chat Event Store Implementation Plan
++
++> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task with verification checkpoints.
++
++**Goal:** Add a server-side append-only Chat event path that is concurrency-safe, auditable, idempotent, and backward-compatible with the locked `fs_chats` projection.
++
++**Architecture:** Supabase stores immutable Chat events and per-user read markers. A security-definer RPC validates membership/role, stamps actor/time, inserts an event once, and updates the existing `fs_chats` JSON projection under a row lock. Secure-mode browser mutations use a local outbox and RPC; local-only mode remains unchanged.
++
++**Tech Stack:** Vanilla JavaScript in `index.html`, Supabase PostgreSQL/RLS/RPC, existing Node browser harness, local PostgreSQL SQL tests.
++
++**Spec:** `docs/superpowers/specs/2026-08-25-chat-event-store-design.md`
++
++## Global Constraints
++
++- Keep the locked `fs_chats` key and JSON shape backward-compatible.
++- Keep local-first mode working without Auth, Supabase, AI, or new dependencies.
++- Do not add a build step or split application code out of `index.html`.
++- Use membership/RLS as the secure-mode authority and validate permissions server-side.
++- Do not deploy, merge, or final-approve this Critical Change from Codex.
++- Run `node harness.js`, `./tests/run-sql-tests.sh`, `./runtime/healthcheck.sh`, and `git diff --check` before handoff.
++
++### Task 1: Add failing database tests for event append and approval identity
++
++**Files:**
++- Modify: `tests/sql/auth_rls_test.sql`
++
++**Interfaces:**
++- Test `public.fs_append_chat_event(text,text,jsonb)`.
++- Test `public.fs_mark_chat_seen(text,bigint)`.
++
++- [ ] **Step 1: Add tests for two-message append, idempotency, approval actor validation, and read-marker isolation.**
++- [ ] **Step 2: Run `./tests/run-sql-tests.sh` and verify the new tests fail because the RPC/tables do not exist.**
++
++### Task 2: Add additive event/read schema, RPCs, guards, grants, and backfill
++
++**Files:**
++- Modify: `supabase/schema.sql`
++
++**Interfaces:**
++- `public.fs_append_chat_event(p_event_id text, p_job_id text, p_payload jsonb) returns jsonb`
++- `public.fs_mark_chat_seen(p_job_id text, p_seen_ts bigint) returns boolean`
++- `public.fs_delete_chat(p_job_id text) returns boolean`
++
++- [ ] **Step 1: Create the append-only `fs_chat_events` and `fs_chat_reads` tables and indexes idempotently.**
++- [ ] **Step 2: Add RLS so active members can read, but only RPCs can write.**
++- [ ] **Step 3: Add the RPC validation/canonicalization and locked projection update.**
++- [ ] **Step 4: Tighten approval validation so `approvals.<role>.by` must equal the authenticated membership name.**
++- [ ] **Step 5: Add deterministic, rerunnable legacy backfill from `fs_chats`.**
++- [ ] **Step 6: Run the focused SQL tests and verify they pass.**
++
++### Task 3: Add failing browser tests for the secure Chat outbox boundary
++
++**Files:**
++- Modify: `tests/formula-studio.test.js`
++
++**Interfaces:**
++- `sbChatEventsOn()` returns boolean.
++- `queueChatEvent(jobId, payload)` queues a canonical client request.
++- `sbPushChatEvents()` flushes the queue through the RPC.
++
++- [ ] **Step 1: Add tests proving secure Chat flushes through `/rest/v1/rpc/fs_append_chat_event`, preserves payload text, and removes only successful events.**
++- [ ] **Step 2: Run `node harness.js` and verify the new tests fail because the outbox boundary does not exist.**
++
++### Task 4: Implement secure-mode Chat outbox and RPC integration
++
++**Files:**
++- Modify: `index.html` at Chat state/mutation and Supabase sync functions.
++
++**Interfaces:**
++- Secure mode keeps local Chat rendering immediate while persisting event requests in `fs_chat_event_outbox`.
++- `sbPush()` skips direct `fs_chats` upserts/deletes in secure mode and flushes event/delete/read RPCs first.
++- Existing Chat functions queue message, approval, system, and read events without changing local-only behavior.
++
++- [ ] **Step 1: Implement the outbox persistence and RPC flush.**
++- [ ] **Step 2: Route message, approval, formula-change, close/reopen, and create system events through the outbox.**
++- [ ] **Step 3: Route secure reads and Admin Chat deletion through RPCs.**
++- [ ] **Step 4: Reconcile successful secure Chat state from the server projection while retaining pending local events.**
++- [ ] **Step 5: Update the build stamp and keep all user-controlled Chat text escaped.**
++- [ ] **Step 6: Run browser tests and confirm they pass.**
++
++### Task 5: Full verification and handoff
++
++**Files:**
++- No additional source files.
++
++- [ ] **Step 1: Run `node harness.js`.**
++- [ ] **Step 2: Run `./tests/run-sql-tests.sh` twice to verify idempotence.**
++- [ ] **Step 3: Run `./runtime/healthcheck.sh` and `git diff --check`.**
++- [ ] **Step 4: Review `git diff` for secrets, forbidden direct production changes, and accidental contract changes.**
++- [ ] **Step 5: Commit the implementation on the feature branch and report the commit/PR limitation.**
+diff --git a/docs/superpowers/specs/2026-08-25-chat-event-store-design.md b/docs/superpowers/specs/2026-08-25-chat-event-store-design.md
+new file mode 100644
+index 0000000..e9b49f3
+--- /dev/null
++++ b/docs/superpowers/specs/2026-08-25-chat-event-store-design.md
+@@ -0,0 +1,59 @@
++# Chat Event Store Design
++
++## Goal
++
++Make secure-mode Chat concurrent-safe and auditable without breaking the locked
++`fs_chats` JSON contract or local-first mode.
++
++## Design
++
++Additive Supabase objects will store append-only Chat events and per-user read
++markers. The existing `fs_chats` row remains as a backward-compatible read
++projection for current and older clients. A security-definer RPC will validate
++the authenticated membership, canonicalize the actor and timestamp, append the
++event idempotently, and update the projection under a row lock in one database
++transaction.
++
++Secure-mode browsers will stop writing `fs_chats` directly. Chat mutations will
++be queued locally and flushed through the RPC. Local-only mode keeps the current
++`localStorage` behavior. Failed event calls remain queued and visible as a sync
++error; successful events are reconciled from the projection on the next pull.
++
++## Data contract
++
++- `fs_chat_events(event_id, job_id, seq, data, created_at)` is append-only.
++- Event `data` contains `version`, `type`, `actor`, `ts`, and event-specific
++  payload. The server, not the browser, owns `actor` and `ts`.
++- `fs_chat_reads(user_id, job_id, seen_ts, updated_at)` stores read markers via
++  an RPC only.
++- Existing `fs_chats(job_id, data)` remains unchanged and is updated only by
++  the event RPC in secure mode.
++- A rerunnable backfill creates deterministic legacy event IDs from existing
++  message indexes and approval keys.
++
++## Allowed events
++
++- `message`: authenticated Chat member; text is trimmed and capped at 10,000
++  characters.
++- `approval_set` / `approval_revoke`: only the role matching `pd`, `ra`, `rd`,
++  or `sales`; the server writes the approval actor and timestamp.
++- `system`: only approved actions (`chat_created`, `formula_change`,
++  `close_job`, `reopen_job`) with the existing role permissions.
++
++## Compatibility and rollback
++
++The migration is idempotent and does not alter or delete the locked tables.
++Older clients can continue reading `fs_chats`; rollback consists of disabling
++the new client path and leaving the projection intact. Event/read tables and
++RPCs can be removed only through an approved rollback migration after verifying
++that no newer client depends on them.
++
++## Acceptance criteria
++
++1. Concurrent event writes serialize and neither message is lost.
++2. Duplicate event IDs return the original canonical event without duplicating
++   the projection.
++3. Approval actor spoofing is rejected and server stamps the real actor.
++4. Legacy Chat rows backfill idempotently.
++5. Secure-mode client uses the RPC path and does not directly update Chat rows.
++6. Local-only mode and all existing tests remain green.
+diff --git a/index.html b/index.html
+index 23c2779..5774d6a 100755
+--- a/index.html
++++ b/index.html
+@@ -649,7 +649,7 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
+   <div class="logo"><svg viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-1.73-3L9 11.35V4H8a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2h-1v7.35L19.73 19A2 2 0 0 1 18 22H6Zm5-10.11L8.31 16.5h7.38L13 11.89V4h-2v7.89Z"/></svg></div>
+   <div>
+     <div class="hdr-title">Formula Studio</div>
+-    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-08-10.6</div>
++    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-08-25.1</div>
+   </div>
+   <div class="sync-chip" id="syncChip" onclick="sbManualSync()" title="สถานะการซิงก์ข้อมูลกับเซิร์ฟเวอร์กลาง"></div>
+ </div>
+@@ -4292,7 +4292,8 @@ function saveJobSection(jobId, key){
+   logAct('job','แก้ไขชุดข้อมูล ('+s.title+')', changes.join(' | '), r.id);
+   const c = getChat(r.id);
+   if(c){
+-    changes.forEach(t=>pushSys(c, (currentUser||'ผู้ใช้')+' แก้ '+s.title+' — '+t));
++    invalidateChatApprovals(c);
++    changes.forEach(t=>pushSys(c, (currentUser||'ผู้ใช้')+' แก้ '+s.title+' — '+t, {action:'job_edit'}));
+     touchChatPart(c, currentUser, false); saveChats();
+   }
+   closeGModal();
+@@ -4461,6 +4462,9 @@ function openRecordPopup(id){
+ let chats = [];          // [{jobId, createdAt, createdBy, messages:[], parts:[], approvals:{}}]
+ let chatOpenId = null;   // รหัสงานที่เปิดอยู่ (null = แสดงรายการห้องแชท)
+ let chatJobOpen = true;  // เปิด/ปิดกล่องรายละเอียด Job ในห้องแชท
++let chatEventOutbox = [];
++let chatReadOutbox = [];
++let chatDeleteOutbox = [];
+ 
+ const CHAT_PARTS = [
+   {key:'pd', label:'PD Pass', desc:'ฝ่ายพัฒนาผลิตภัณฑ์'},
+@@ -4475,10 +4479,50 @@ function loadChats(){
+   try{ chats = JSON.parse(localStorage.getItem('fs_chats') || '[]'); }
+   catch(e){ chats = []; }
+   chats.forEach(c=>{ c.messages=c.messages||[]; c.parts=c.parts||[]; c.approvals=c.approvals||{}; });
++  try{ chatEventOutbox = JSON.parse(localStorage.getItem('fs_chat_event_outbox') || '[]'); }
++  catch(e){ chatEventOutbox = []; }
++  try{ chatReadOutbox = JSON.parse(localStorage.getItem('fs_chat_read_outbox') || '[]'); }
++  catch(e){ chatReadOutbox = []; }
++  try{ chatDeleteOutbox = JSON.parse(localStorage.getItem('fs_chat_delete_outbox') || '[]'); }
++  catch(e){ chatDeleteOutbox = []; }
+ }
+ function saveChats(){ try{ localStorage.setItem('fs_chats', JSON.stringify(chats)); }catch(e){}
+   sbQueue();
+ }
++function sbChatEventsOn(){ return !!(sbOn() && authSession); }
++function chatEventId(){
++  if(window.crypto && typeof window.crypto.randomUUID==='function') return window.crypto.randomUUID();
++  return 'evt-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,10);
++}
++function saveChatOutboxes(){
++  try{
++    localStorage.setItem('fs_chat_event_outbox', JSON.stringify(chatEventOutbox));
++    localStorage.setItem('fs_chat_read_outbox', JSON.stringify(chatReadOutbox));
++    localStorage.setItem('fs_chat_delete_outbox', JSON.stringify(chatDeleteOutbox));
++  }catch(e){}
++}
++function queueChatEvent(jobId, payload, eventId){
++  if(!sbChatEventsOn() || !jobId || !payload) return null;
++  const id = eventId || chatEventId();
++  if(!chatEventOutbox.some(x=>x.eventId===id))
++    chatEventOutbox.push({eventId:id, jobId, payload:Object.assign({},payload)});
++  saveChatOutboxes();
++  sbQueue();
++  return id;
++}
++function queueChatSeen(jobId, seenTs){
++  if(!sbChatEventsOn() || !jobId) return;
++  chatReadOutbox = chatReadOutbox.filter(x=>x.jobId!==jobId);
++  chatReadOutbox.push({jobId, seenTs:Number(seenTs)||0});
++  saveChatOutboxes();
++  sbQueue();
++}
++function queueChatDelete(jobId){
++  if(!sbChatEventsOn() || !jobId) return;
++  if(!chatDeleteOutbox.includes(jobId)) chatDeleteOutbox.push(jobId);
++  saveChatOutboxes();
++  sbQueue();
++}
+ function getChat(jobId){ return chats.find(c=>c.jobId===jobId) || null; }
+ // ---------- เมนูย่อยรหัสงานใต้ Chat Message ----------
+ function visibleChats(){ return chats.filter(c=>canSeeRecord(records.find(x=>x.id===c.jobId))); }
+@@ -4502,6 +4546,7 @@ function markChatSeen(c){
+   if(!c.seen) c.seen = {};
+   if((c.seen[currentUser]||0) >= chatLastTs(c)) return false;
+   c.seen[currentUser] = Date.now();
++  queueChatSeen(c.jobId, c.seen[currentUser]);
+   return true;
+ }
+ function renderChatMenu(){
+@@ -4556,8 +4601,17 @@ function touchChatPart(c, name, isMsg){
+   if(isMsg) p.msgs++;
+   return p;
+ }
+-function pushSys(c, text){
++function invalidateChatApprovals(c){
++  if(!c) return false;
++  const changed = CHAT_PARTS.some(p=>c.approvals[p.key]);
++  if(changed) CHAT_PARTS.forEach(p=>{ c.approvals[p.key] = null; });
++  return changed;
++}
++function pushSys(c, text, opt){
++  const o = opt || {};
+   c.messages.push({type:'sys', user:currentUser||'', text, ts:Date.now()});
++  if(!o.skipQueue && !sbApplying && sbChatEventsOn())
++    queueChatEvent(c.jobId, {type:'system', action:o.action||'chat_created', text});
+ }
+ 
+ // สร้างห้องแชทตามรหัสงาน
+@@ -4570,7 +4624,7 @@ function createChat(jobId){
+     jobId, createdAt: Date.now(), createdBy: currentUser||'',
+     messages: [], parts: [], approvals: {pd:null, ra:null, rd:null}
+   };
+-  pushSys(c, `สร้างห้องแชทงาน ${jobId} — ${r.brand||r.customer||'Formula'}${currentUser?` โดย ${currentUser}`:''}`);
++  pushSys(c, `สร้างห้องแชทงาน ${jobId} — ${r.brand||r.customer||'Formula'}${currentUser?` โดย ${currentUser}`:''}`, {action:'chat_created'});
+   chats.unshift(c);
+   logAct('chat','สร้างห้องแชท', (r.brand||r.customer||''), jobId);
+   touchChatPart(c, currentUser, false);
+@@ -4591,6 +4645,7 @@ function deleteChat(jobId){
+   if(!confirm(`ลบห้องแชทของงาน ${jobId}? ประวัติการสนทนาทั้งหมดจะหายไป`)) return;
+   logAct('chat','ลบห้องแชท', 'ลบประวัติการสนทนาทั้งหมด', jobId);
+   chats = chats.filter(c=>c.jobId!==jobId);
++  queueChatDelete(jobId);
+   saveChats(); updateChatBadge();
+   chatOpenId = null;
+   renderChat(); renderRecordsList();
+@@ -4990,7 +5045,8 @@ function chatSaveFormula(r, logText){
+   renderDashboard(r);
+   const c = getChat(r.id);
+   if(c){
+-    pushSys(c, logText);
++    invalidateChatApprovals(c);
++    pushSys(c, logText, {action:'formula_change'});
+     touchChatPart(c, currentUser, false);
+     saveChats();
+   }
+@@ -5075,7 +5131,7 @@ function doCloseJob(r){
+   const idx = records.findIndex(x=>x.id===r.id);
+   if(idx>=0){ records[idx]=r; saveRecordsStore(); }
+   const c = getChat(r.id);
+-  if(c){ pushSys(c, `${currentUser} ปิดงาน (Close job)`); touchChatPart(c, currentUser, false); saveChats(); }
++  if(c){ pushSys(c, `${currentUser} ปิดงาน (Close job)`, {action:'close_job'}); touchChatPart(c, currentUser, false); saveChats(); }
+   updateChatBadge();          // เอารหัสงานออกจากเมนูซ้ายทันที
+   renderChat(); renderRecordsList();
+ }
+@@ -5094,7 +5150,7 @@ function doReopenJob(r){
+   const idx = records.findIndex(x=>x.id===r.id);
+   if(idx>=0){ records[idx]=r; saveRecordsStore(); }
+   const c = getChat(r.id);
+-  if(c){ pushSys(c, `${currentUser} เปิดงานอีกครั้ง`); touchChatPart(c, currentUser, false); saveChats(); }
++  if(c){ pushSys(c, `${currentUser} เปิดงานอีกครั้ง`, {action:'reopen_job'}); touchChatPart(c, currentUser, false); saveChats(); }
+   updateChatBadge();          // รหัสงานกลับเข้าเมนูซ้ายทันที
+   renderChat(); renderRecordsList();
+ }
+@@ -5112,6 +5168,7 @@ function sendChatMsg(){
+   c.messages.push({type:'msg', user:currentUser, text, ts:Date.now()});
+   logAct('chat','ส่งข้อความ', text.length>160 ? text.slice(0,160)+'…' : text, c.jobId);
+   touchChatPart(c, currentUser, true);
++  queueChatEvent(c.jobId, {type:'message', text});
+   saveChats();
+   renderChat();
+   const nta = document.getElementById('chatInput');
+@@ -5133,13 +5190,15 @@ function toggleChatApprove(jobId, key){
+     if(!confirm(`ยกเลิกการอนุมัติ ${part.label}?\n(อนุมัติโดย ${a.by||'-'} · ${a.at})`)) return;
+     c.approvals[key] = null;
+     logAct('approve','ยกเลิกการอนุมัติ '+part.label, 'อนุมัติเดิมโดย '+(a.by||'-')+' · '+a.at, jobId);
+-    pushSys(c, `${currentUser} ยกเลิกการอนุมัติ ${part.label}`);
++    pushSys(c, `${currentUser} ยกเลิกการอนุมัติ ${part.label}`, {skipQueue:true});
++    queueChatEvent(c.jobId, {type:'approval_revoke', key});
+   } else {
+     c.approvals[key] = {by: currentUser, at: new Date().toLocaleString('th-TH'), ts: Date.now()};
+     logAct('approve','อนุมัติ '+part.label, 'ครบ '+CHAT_PARTS.filter(p=>c.approvals[p.key]).length+'/'+NPARTS+' ฝ่าย', jobId);
+-    pushSys(c, `${currentUser} อนุมัติ ${part.label} ✓`);
++    pushSys(c, `${currentUser} อนุมัติ ${part.label} ✓`, {skipQueue:true});
++    queueChatEvent(c.jobId, {type:'approval_set', key});
+     if(CHAT_PARTS.every(p=>c.approvals[p.key]))
+-      pushSys(c, 'อนุมัติครบทุกฝ่ายแล้ว — สามารถ Export Excel ได้');
++      pushSys(c, 'อนุมัติครบทุกฝ่ายแล้ว — สามารถ Export Excel ได้', {skipQueue:true});
+   }
+   touchChatPart(c, currentUser, false);
+   saveChats();
+@@ -5205,7 +5264,7 @@ async function exportChatExcel(jobId){
+   c.exports = (c.exports || 0) + 1;
+   c.lastExportBy = currentUser || '';
+   c.lastExportAt = new Date().toLocaleString('th-TH');
+-  pushSys(c, `${currentUser || 'ผู้ใช้'} ส่งออกไฟล์ Excel (${r.id})`);
++  pushSys(c, `${currentUser || 'ผู้ใช้'} ส่งออกไฟล์ Excel (${r.id})`, {action:'export'});
+   touchChatPart(c, currentUser, false);
+   saveChats();
+   renderChat();
+@@ -6156,7 +6215,9 @@ function sbApply(d){
+   sbApplying = true;
+   try{
+     records = sbMergeObjects(records,d.records,'id',prior.records).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+-    chats   = sbMergeObjects(chats,d.chats,'jobId',prior.chats).sort((a,b)=>chatLastTs(b)-chatLastTs(a));
++    const secureChatAuthoritative = sbChatEventsOn() && !chatEventOutbox.length && !chatDeleteOutbox.length;
++    chats   = (secureChatAuthoritative ? (d.chats||[]) : sbMergeObjects(chats,d.chats,'jobId',prior.chats))
++      .sort((a,b)=>chatLastTs(b)-chatLastTs(a));
+     chats.forEach(c=>{ c.messages=c.messages||[]; c.parts=c.parts||[]; c.approvals=c.approvals||{}; });
+     if(currentRole()==='admin'){
+       const actMap={};
+@@ -6207,35 +6268,75 @@ function sbSnapshot(){
+   sbPersistSnapshot();
+ }
+ 
++async function sbPushChatEvents(){
++  if(!sbChatEventsOn() || !chatEventOutbox.length) return false;
++  let changed = false;
++  for(const item of chatEventOutbox.slice()){
++    await sbReq('rpc/fs_append_chat_event', {
++      method:'POST',
++      body:{p_event_id:item.eventId,p_job_id:item.jobId,p_payload:item.payload}
++    });
++    chatEventOutbox = chatEventOutbox.filter(x=>x.eventId!==item.eventId);
++    saveChatOutboxes();
++    changed = true;
++  }
++  return changed;
++}
++async function sbPushChatReads(){
++  if(!sbChatEventsOn() || !chatReadOutbox.length) return false;
++  for(const item of chatReadOutbox.slice()){
++    await sbReq('rpc/fs_mark_chat_seen', {
++      method:'POST', body:{p_job_id:item.jobId,p_seen_ts:item.seenTs}
++    });
++    chatReadOutbox = chatReadOutbox.filter(x=>x.jobId!==item.jobId);
++    saveChatOutboxes();
++  }
++  return true;
++}
++async function sbPushChatDeletes(){
++  if(!sbChatEventsOn() || !chatDeleteOutbox.length) return false;
++  for(const jobId of chatDeleteOutbox.slice()){
++    await sbReq('rpc/fs_delete_chat', {method:'POST',body:{p_job_id:jobId}});
++    chatDeleteOutbox = chatDeleteOutbox.filter(x=>x!==jobId);
++    saveChatOutboxes();
++  }
++  return true;
++}
++
+ // ---------- ส่งเฉพาะสิ่งที่เปลี่ยนขึ้นเซิร์ฟเวอร์ ----------
+ async function sbPush(){
+   const recUp = [], chtUp = [], usrUp = [], actUp = [];
+   const seenR = {}, seenC = {}, seenU = {};
++  const secureChatEvents = sbChatEventsOn();
++  const chatEventsPushed = secureChatEvents ? await sbPushChatEvents() : false;
++  const chatReadsPushed = secureChatEvents ? await sbPushChatReads() : false;
++  const chatDeletesPushed = secureChatEvents ? await sbPushChatDeletes() : false;
+   records.forEach(r=>{ const j = JSON.stringify(r); seenR[r.id]=1;
+     if(sbSnap.records[r.id] !== j) recUp.push({id:r.id, data:r}); });
+   chats.forEach(c=>{ const j = JSON.stringify(c); seenC[c.jobId]=1;
+-    if(sbSnap.chats[c.jobId] !== j) chtUp.push({job_id:c.jobId, data:c}); });
++    if(!secureChatEvents && sbSnap.chats[c.jobId] !== j) chtUp.push({job_id:c.jobId, data:c}); });
+   // Secure-mode user lifecycle is Dashboard/membership-owned; browser is read-only.
+   userList.forEach(u=>{ seenU[u.name]=1; });
+   // ลบเฉพาะรายการที่เคยอยู่บนเซิร์ฟเวอร์แล้วถูกลบในเครื่องนี้จริง
+   const recDel = Object.keys(sbSnap.records).filter(k=>!seenR[k]);
+-  const chtDel = Object.keys(sbSnap.chats).filter(k=>!seenC[k]);
++  const chtDel = secureChatEvents ? [] : Object.keys(sbSnap.chats).filter(k=>!seenC[k]);
+   const usrDel = [];
+   activities.filter(e=>currentRole()==='admin' || (e.user===currentUser && !e.via))
+     .forEach(e=>{ const u = actUid(e); if(!sbSnap.acts[u]) actUp.push({uid:u, ts:e.ts||0, data:e}); });
+   const counterUp = sbSnap.counter !== recCounter;
+   if(!recUp.length && !chtUp.length && !usrUp.length && !actUp.length
+-     && !recDel.length && !chtDel.length && !usrDel.length && !counterUp) return false;
++     && !recDel.length && !chtDel.length && !usrDel.length && !counterUp
++     && !chatEventsPushed && !chatReadsPushed && !chatDeletesPushed) return false;
+ 
+   await sbUpsert('fs_records', recUp);
+-  await sbUpsert('fs_chats', chtUp);
++  if(!secureChatEvents) await sbUpsert('fs_chats', chtUp);
+   await sbUpsert('fs_users', usrUp);
+   if(actUp.length){
+     await sbUpsert('fs_activities', actUp, 'resolution=ignore-duplicates');
+     actUp.forEach(a=>{ sbSnap.acts[a.uid] = 1; });
+   }
+   await sbDelete('fs_records', 'id', recDel);
+-  await sbDelete('fs_chats', 'job_id', chtDel);
++  if(!secureChatEvents) await sbDelete('fs_chats', 'job_id', chtDel);
+   await sbDelete('fs_users', 'name', usrDel);
+   if(counterUp) await sbUpsert('fs_meta', [{key:'reccounter', value:recCounter}]);
+   sbSnapshot();
+diff --git a/supabase/AUTH_RLS_RUNBOOK.md b/supabase/AUTH_RLS_RUNBOOK.md
+index 3cae455..8de81ec 100644
+--- a/supabase/AUTH_RLS_RUNBOOK.md
++++ b/supabase/AUTH_RLS_RUNBOOK.md
+@@ -62,6 +62,9 @@ node harness.js
+ - Non-Admin: append activity ของตนได้ แต่อ่าน/แก้ log ไม่ได้
+ - Logout/401/403: session ถูกล้างและต้อง login ใหม่
+ - Network loss หลัง login: แก้ local ได้ และ reconnect แล้ว merge โดยไม่เขียนทับ offline delta
++- Chat: ส่งสองข้อความจากสอง session พร้อมกันแล้วต้องเห็นครบทั้งสองข้อความ; ส่ง event เดิมซ้ำต้องไม่สร้างข้อความซ้ำ
++- Chat: เปลี่ยน approval ผ่าน RPC เท่านั้น, ชื่อผู้อนุมัติต้องเป็น membership จริง, และแก้สูตรแล้ว approval เดิมต้องถูกล้าง
++- Chat: อ่านห้องแล้ว read marker ต้องเป็นของ user นั้นเท่านั้น; direct write ของ `fs_chats` จาก browser ต้องถูกปฏิเสธ
+ 
+ Reviewer ต้องตรวจว่า `fs_users.data.pass` ยังมี key แต่เป็น JSON `null`, anon ไม่มี table grants และไม่มี privileged credential ใน diff/log
+ 
+@@ -84,4 +87,16 @@ Reviewer ต้องตรวจว่า `fs_users.data.pass` ยังมี
+ 3. Rollback SQL ไม่ลบ table/data แต่ **เปิด anonymous CRUD แบบ legacy อีกครั้ง** จึงต้องจำกัดเวลา, เฝ้าระวัง และรีบกลับสู่ secure desired state
+ 4. ตรวจ health/data count จาก sanitized evidence, revoke break-glass access และทำ post-incident review
+ 
++## 6. Chat event store rollout
++
++`supabase/schema.sql` เพิ่ม `fs_chat_events` และ `fs_chat_reads` แบบ additive และทำ legacy backfill แบบ rerunnable โดยคง `fs_chats` เป็น projection เดิมไว้
++
++1. ทำ backup/restore point ก่อนรัน migration
++2. รัน `supabase/schema.sql` ใน staging และตรวจจำนวน event ต่อห้องเทียบกับข้อความ/approval ใน `fs_chats`
++3. ตรวจว่า browser role `authenticated` มีสิทธิ์อ่าน `fs_chats` แต่ไม่มี direct insert/update/delete และมีสิทธิ์ execute เฉพาะ RPC ที่กำหนด
++4. ทำ concurrent Chat UAT อย่างน้อย 2 session และทดสอบ network loss/retry ของ outbox
++5. เมื่อตรวจผ่านแล้ว Runtime Operator จึง deploy application commit เดียวกับ schema ที่อนุมัติ
++
++Rollback ของ application สามารถย้อนกลับไปอ่าน projection `fs_chats` ได้ แต่การลบ event/read tables ต้องใช้ migration rollback ที่ผ่าน approval แยกต่างหากเท่านั้น
++
+ Codex ไม่มีอำนาจเปลี่ยน repository visibility/settings, รัน production SQL, final approve, merge หรือ deploy
+diff --git a/supabase/schema.sql b/supabase/schema.sql
+index 210d5b2..6b03cad 100644
+--- a/supabase/schema.sql
++++ b/supabase/schema.sql
+@@ -14,6 +14,25 @@ create table if not exists public.fs_chats (
+   data jsonb not null,
+   updated_at timestamptz not null default now()
+ );
++-- Additive Chat event store. fs_chats remains the backward-compatible projection.
++create table if not exists public.fs_chat_events (
++  event_id text primary key,
++  job_id text not null,
++  seq bigint generated always as identity unique,
++  data jsonb not null,
++  created_at timestamptz not null default now()
++);
++create index if not exists fs_chat_events_job_seq_idx
++  on public.fs_chat_events (job_id, seq);
++create table if not exists public.fs_chat_reads (
++  user_id uuid not null references auth.users(id) on delete cascade,
++  job_id text not null,
++  seen_ts bigint not null default 0,
++  updated_at timestamptz not null default now(),
++  primary key (user_id, job_id)
++);
++create index if not exists fs_chat_reads_job_idx
++  on public.fs_chat_reads (job_id, updated_at desc);
+ create table if not exists public.fs_users (
+   name text primary key,
+   data jsonb not null,
+@@ -269,6 +288,22 @@ begin
+   if (new_approvals->'sales') is distinct from (old_approvals->'sales') and actor_role<>'sales' then
+     raise exception 'only Sales can change Sales approval' using errcode='42501';
+   end if;
++  if (new_approvals->'pd' is distinct from old_approvals->'pd'
++      and new_approvals->'pd' is not null
++      and new_approvals->'pd'->>'by' is distinct from actor_name)
++  then raise exception 'PD approval actor mismatch' using errcode='42501'; end if;
++  if (new_approvals->'ra' is distinct from old_approvals->'ra'
++      and new_approvals->'ra' is not null
++      and new_approvals->'ra'->>'by' is distinct from actor_name)
++  then raise exception 'RA approval actor mismatch' using errcode='42501'; end if;
++  if (new_approvals->'rd' is distinct from old_approvals->'rd'
++      and new_approvals->'rd' is not null
++      and new_approvals->'rd'->>'by' is distinct from actor_name)
++  then raise exception 'RD approval actor mismatch' using errcode='42501'; end if;
++  if (new_approvals->'sales' is distinct from old_approvals->'sales'
++      and new_approvals->'sales' is not null
++      and new_approvals->'sales'->>'by' is distinct from actor_name)
++  then raise exception 'Sales approval actor mismatch' using errcode='42501'; end if;
+   if (new.data->'exports') is distinct from (old.data->'exports') and actor_role<>'opc' then
+     raise exception 'only OPC can change export state' using errcode='42501';
+   end if;
+@@ -304,11 +339,261 @@ end $$;
+ 
+ revoke all on table public.fs_records,public.fs_chats,public.fs_users,
+   public.fs_activities,public.fs_meta,public.fs_memberships from public,anon,authenticated;
+-grant select,insert,update,delete on public.fs_records,public.fs_chats to authenticated;
++grant select on public.fs_chats to authenticated;
++grant select,insert,update,delete on public.fs_records to authenticated;
+ grant select,insert,update,delete on public.fs_users,public.fs_memberships to authenticated;
+ grant select,insert on public.fs_activities to authenticated;
+ grant select,insert,update,delete on public.fs_meta to authenticated;
+ 
++alter table public.fs_chat_events enable row level security;
++alter table public.fs_chat_events force row level security;
++alter table public.fs_chat_reads enable row level security;
++alter table public.fs_chat_reads force row level security;
++revoke all on table public.fs_chat_events,public.fs_chat_reads from public,anon,authenticated;
++grant select on public.fs_chat_events,public.fs_chat_reads to authenticated;
++
++drop policy if exists chat_events_member_select on public.fs_chat_events;
++create policy chat_events_member_select on public.fs_chat_events for select to authenticated
++using (private.fs_is_active_member());
++drop policy if exists chat_reads_self_select on public.fs_chat_reads;
++create policy chat_reads_self_select on public.fs_chat_reads for select to authenticated
++using (private.fs_is_active_member() and user_id=auth.uid());
++
++create or replace function public.fs_append_chat_event(
++  p_event_id text,
++  p_job_id text,
++  p_payload jsonb
++) returns jsonb
++language plpgsql
++security definer
++set search_path = ''
++as $$
++declare
++  actor_role text := private.fs_current_role();
++  actor_name text := private.fs_current_name();
++  event_type text := coalesce(p_payload->>'type','');
++  action_name text := coalesce(p_payload->>'action','');
++  approval_key text := coalesce(p_payload->>'key','');
++  text_value text := btrim(coalesce(p_payload->>'text',''));
++  approval_value jsonb := 'null'::jsonb;
++  event_data jsonb;
++  existing_data jsonb;
++  existing_job_id text;
++  chat_data jsonb;
++  parts_data jsonb;
++  message_data jsonb;
++  now_ms bigint := floor(extract(epoch from clock_timestamp()) * 1000);
++begin
++  if actor_name is null or actor_role is null then
++    raise exception 'active membership required' using errcode='42501';
++  end if;
++  if p_event_id is null or p_event_id !~ '^[A-Za-z0-9:_-]{1,160}$' then
++    raise exception 'invalid chat event id' using errcode='42501';
++  end if;
++  if p_job_id is null or p_job_id !~ '^[A-Z]+[0-9]{5}$' then
++    raise exception 'invalid chat job id' using errcode='42501';
++  end if;
++  if p_payload is null or jsonb_typeof(p_payload) <> 'object' then
++    raise exception 'chat event payload must be an object' using errcode='42501';
++  end if;
++
++  select e.job_id,e.data into existing_job_id,existing_data
++  from public.fs_chat_events e where e.event_id=p_event_id;
++  if found then
++    if existing_job_id is distinct from p_job_id then
++      raise exception 'chat event id already belongs to another job' using errcode='42501';
++    end if;
++    return existing_data;
++  end if;
++
++  if event_type='message' then
++    if text_value='' or length(text_value)>10000 then
++      raise exception 'chat message must be 1 to 10000 characters' using errcode='22023';
++    end if;
++    event_data := jsonb_build_object(
++      'version',1,'type','message','actor',actor_name,'ts',now_ms,
++      'text',text_value,'event_id',p_event_id
++    );
++  elsif event_type in ('approval_set','approval_revoke') then
++    if approval_key not in ('pd','ra','rd','sales') or
++       (actor_role <> approval_key and actor_role <> 'admin') then
++      raise exception 'approval role mismatch' using errcode='42501';
++    end if;
++    if event_type='approval_set' then
++      approval_value := jsonb_build_object(
++        'by',actor_name,
++        'at',to_char(clock_timestamp(),'YYYY-MM-DD HH24:MI:SS'),
++        'ts',now_ms
++      );
++    end if;
++    event_data := jsonb_build_object(
++      'version',1,'type',event_type,'actor',actor_name,'ts',now_ms,
++      'key',approval_key,'approval',approval_value,'event_id',p_event_id
++    );
++  elsif event_type='system' then
++    if text_value='' or length(text_value)>5000 then
++      raise exception 'system Chat event text is invalid' using errcode='22023';
++    end if;
++    if action_name in ('formula_change','job_edit') and actor_role not in ('admin','pd') then
++      raise exception 'formula system event role mismatch' using errcode='42501';
++    end if;
++    if action_name in ('close_job','reopen_job') and actor_role not in ('admin','sales','opc') then
++      raise exception 'job system event role mismatch' using errcode='42501';
++    end if;
++    if action_name='export' and actor_role not in ('admin','opc') then
++      raise exception 'export system event role mismatch' using errcode='42501';
++    end if;
++    if action_name not in ('chat_created','formula_change','job_edit','close_job','reopen_job','export') then
++      raise exception 'unknown system Chat event' using errcode='42501';
++    end if;
++    event_data := jsonb_build_object(
++      'version',1,'type','system','actor',actor_name,'ts',now_ms,
++      'action',action_name,'text',text_value,'event_id',p_event_id
++    );
++  else
++    raise exception 'unknown Chat event type' using errcode='22023';
++  end if;
++
++  insert into public.fs_chat_events(event_id,job_id,data)
++  values (p_event_id,p_job_id,event_data);
++
++  if not exists (select 1 from public.fs_chats c where c.job_id=p_job_id) then
++    insert into public.fs_chats(job_id,data) values (
++      p_job_id,
++      jsonb_build_object(
++        'jobId',p_job_id,'createdAt',now_ms,'createdBy',actor_name,
++        'messages','[]'::jsonb,'parts','[]'::jsonb,'seen','{}'::jsonb,
++        'approvals',jsonb_build_object('pd',null,'ra',null,'rd',null,'sales',null)
++      )
++    );
++  end if;
++
++  select c.data into chat_data from public.fs_chats c
++  where c.job_id=p_job_id for update;
++  select coalesce(jsonb_agg(
++    case when e.value->>'name'=actor_name then
++      e.value || jsonb_build_object(
++        'lastAt',now_ms,
++        'msgs',coalesce((e.value->>'msgs')::integer,0) + case when event_type='message' then 1 else 0 end
++      )
++    else e.value end order by e.ord
++  ),'[]'::jsonb) into parts_data
++  from jsonb_array_elements(coalesce(chat_data->'parts','[]'::jsonb)) with ordinality e(value,ord);
++  if not exists (
++    select 1 from jsonb_array_elements(coalesce(chat_data->'parts','[]'::jsonb)) e(value)
++    where e.value->>'name'=actor_name
++  ) then
++    parts_data := parts_data || jsonb_build_array(jsonb_build_object(
++      'name',actor_name,'firstAt',now_ms,'lastAt',now_ms,'msgs',case when event_type='message' then 1 else 0 end,'activeMs',0
++    ));
++  end if;
++  chat_data := jsonb_set(chat_data,'{parts}',parts_data,true);
++  if event_type='message' then
++    message_data := jsonb_build_object('type','msg','user',actor_name,'text',text_value,'ts',now_ms,'eventId',p_event_id);
++    chat_data := jsonb_set(chat_data,'{messages}',coalesce(chat_data->'messages','[]'::jsonb) || jsonb_build_array(message_data),true);
++  elsif event_type='system' then
++    message_data := jsonb_build_object('type','sys','user',actor_name,'text',text_value,'ts',now_ms,'eventId',p_event_id);
++    chat_data := jsonb_set(chat_data,'{messages}',coalesce(chat_data->'messages','[]'::jsonb) || jsonb_build_array(message_data),true);
++    if action_name in ('formula_change','job_edit') then
++      chat_data := jsonb_set(chat_data,'{approvals}',jsonb_build_object('pd',null,'ra',null,'rd',null,'sales',null),true);
++    elsif action_name='export' then
++      chat_data := jsonb_set(chat_data,'{exports}',to_jsonb(coalesce((chat_data->>'exports')::integer,0)+1),true);
++      chat_data := jsonb_set(chat_data,'{lastExportBy}',to_jsonb(actor_name),true);
++      chat_data := jsonb_set(chat_data,'{lastExportAt}',to_jsonb(to_char(clock_timestamp(),'YYYY-MM-DD HH24:MI:SS')),true);
++    end if;
++  else
++    message_data := jsonb_build_object(
++      'type','sys','user',actor_name,
++      'text',case when event_type='approval_set' then actor_name || ' อนุมัติ ' || upper(approval_key) || ' ✓'
++                  else actor_name || ' ยกเลิกการอนุมัติ ' || upper(approval_key) end,
++      'ts',now_ms,'eventId',p_event_id
++    );
++    chat_data := jsonb_set(chat_data,'{messages}',coalesce(chat_data->'messages','[]'::jsonb) || jsonb_build_array(message_data),true);
++    chat_data := jsonb_set(chat_data,array['approvals',approval_key],approval_value,true);
++  end if;
++  update public.fs_chats set data=chat_data,updated_at=now() where job_id=p_job_id;
++  return event_data;
++end $$;
++
++create or replace function public.fs_mark_chat_seen(p_job_id text, p_seen_ts bigint)
++returns boolean
++language plpgsql
++security definer
++set search_path = ''
++as $$
++begin
++  if not private.fs_is_active_member() then
++    raise exception 'active membership required' using errcode='42501';
++  end if;
++  if p_job_id is null or p_job_id !~ '^[A-Z]+[0-9]{5}$' then
++    raise exception 'invalid chat job id' using errcode='42501';
++  end if;
++  insert into public.fs_chat_reads(user_id,job_id,seen_ts)
++  values (auth.uid(),p_job_id,greatest(coalesce(p_seen_ts,0),0))
++  on conflict (user_id,job_id) do update
++    set seen_ts=greatest(public.fs_chat_reads.seen_ts,excluded.seen_ts),updated_at=now();
++  update public.fs_chats
++  set data=jsonb_set(
++    coalesce(data,'{}'::jsonb),
++    array['seen',private.fs_current_name()],
++    to_jsonb(greatest(coalesce(p_seen_ts,0),0)),
++    true
++  ), updated_at=now()
++  where job_id=p_job_id;
++  return true;
++end $$;
++
++create or replace function public.fs_delete_chat(p_job_id text)
++returns boolean
++language plpgsql
++security definer
++set search_path = ''
++as $$
++begin
++  if private.fs_current_role() <> 'admin' then
++    raise exception 'only Admin can delete Chat' using errcode='42501';
++  end if;
++  delete from public.fs_chat_reads where job_id=p_job_id;
++  delete from public.fs_chat_events where job_id=p_job_id;
++  delete from public.fs_chats where job_id=p_job_id;
++  return true;
++end $$;
++
++revoke all on function public.fs_append_chat_event(text,text,jsonb) from public,anon,authenticated;
++revoke all on function public.fs_mark_chat_seen(text,bigint) from public,anon,authenticated;
++revoke all on function public.fs_delete_chat(text) from public,anon,authenticated;
++grant execute on function public.fs_append_chat_event(text,text,jsonb) to authenticated;
++grant execute on function public.fs_mark_chat_seen(text,bigint) to authenticated;
++grant execute on function public.fs_delete_chat(text) to authenticated;
++
++-- Rerunnable legacy backfill. It records old messages/approvals without changing fs_chats.
++insert into public.fs_chat_events(event_id,job_id,data)
++select c.job_id || ':legacy:message:' || e.ord::text,
++       c.job_id,
++       jsonb_build_object(
++         'version',1,
++         'type',case when e.value->>'type'='msg' then 'message' else 'system' end,
++         'actor',coalesce(e.value->>'user',''),
++         'ts',coalesce((e.value->>'ts')::bigint,0),
++         'text',coalesce(e.value->>'text',''),
++         'legacy',true
++       )
++from public.fs_chats c
++cross join lateral jsonb_array_elements(coalesce(c.data->'messages','[]'::jsonb)) with ordinality e(value,ord)
++on conflict (event_id) do nothing;
++insert into public.fs_chat_events(event_id,job_id,data)
++select c.job_id || ':legacy:approval:' || k.key,
++       c.job_id,
++       jsonb_build_object(
++         'version',1,'type','approval_set','actor',coalesce(c.data->'approvals'->k.key->>'by',''),
++         'ts',coalesce((c.data->'approvals'->k.key->>'ts')::bigint,0),
++         'key',k.key,'approval',c.data->'approvals'->k.key,'legacy',true
++       )
++from public.fs_chats c
++cross join lateral unnest(array['pd','ra','rd','sales']) k(key)
++where c.data->'approvals'->k.key is not null
++on conflict (event_id) do nothing;
++
+ drop policy if exists memberships_self_or_admin_select on public.fs_memberships;
+ create policy memberships_self_or_admin_select on public.fs_memberships for select to authenticated
+ using (private.fs_is_active_member() and (user_id=auth.uid() or private.fs_current_role()='admin'));
+diff --git a/tests/formula-studio.test.js b/tests/formula-studio.test.js
+index 5876aaa..4aa3513 100644
+--- a/tests/formula-studio.test.js
++++ b/tests/formula-studio.test.js
+@@ -20,6 +20,9 @@
+     currentUser = '';
+     impersonator = '';
+     userList = [];
++    if(typeof chatEventOutbox !== 'undefined') chatEventOutbox = [];
++    if(typeof chatReadOutbox !== 'undefined') chatReadOutbox = [];
++    if(typeof chatDeleteOutbox !== 'undefined') chatDeleteOutbox = [];
+     sbReady = false;
+     sbErr = '';
+   }
+@@ -140,6 +143,50 @@
+     equal(recCounter, 3, 'record counter moved backward');
+   });
+ 
++  test('secure Chat event outbox flushes through the RPC and clears only after success', async function(){
++    reset();
++    authSession = {access_token:'member-token'};
++    authMembership = {name:'Sales One',role:'sales',active:true};
++    currentUser = 'Sales One';
++    window.__fetchQueue.push(window.__mockResponse(200, {
++      version:1,type:'message',actor:'Sales One',ts:1,text:'hello',event_id:'evt-1'
++    }));
++    queueChatEvent('A00001', {type:'message',text:'hello'}, 'evt-1');
++    equal(chatEventOutbox.length, 1, 'Chat event was not queued');
++    await sbPushChatEvents();
++    const call = window.__fetchCalls[0];
++    assert(call.url.endsWith('/rest/v1/rpc/fs_append_chat_event'), 'Chat did not use append RPC');
++    const body = JSON.parse(call.options.body);
++    equal(body.p_event_id, 'evt-1', 'event id was not sent');
++    equal(body.p_job_id, 'A00001', 'job id was not sent');
++    equal(body.p_payload.text, 'hello', 'message text was changed');
++    equal(chatEventOutbox.length, 0, 'successful Chat event remained queued');
++  });
++
++  test('secure Chat sync never direct-upserts the legacy fs_chats row', async function(){
++    reset();
++    authSession = {access_token:'member-token'};
++    authMembership = {name:'Sales One',role:'sales',active:true};
++    currentUser = 'Sales One';
++    records=[]; userList=[]; activities=[]; recCounter=0; chats=[{jobId:'A00001',messages:[{type:'msg',user:'Sales One',text:'local',ts:2}],parts:[],approvals:{}}];
++    sbSnap = {records:{},chats:{A00001:JSON.stringify({jobId:'A00001',messages:[]})},users:{},acts:{},counter:0};
++    const pushed = await sbPush();
++    equal(pushed, false, 'legacy Chat row was treated as a direct sync change');
++    assert(!window.__fetchCalls.some(call=>call.url.includes('/fs_chats')), 'secure mode used direct fs_chats REST write');
++  });
++
++  test('formula edits invalidate all existing Chat approvals locally', function(){
++    reset();
++    SB_URL=''; SB_KEY='';
++    currentUser='PD One';
++    userList=[{name:'PD One',role:'pd'}];
++    const record={id:'A00001',rows:[]};
++    records=[record];
++    chats=[{jobId:'A00001',messages:[],parts:[],approvals:{pd:{by:'PD One'},ra:{by:'RA One'},rd:{by:'RD One'},sales:{by:'Sales One'}}}];
++    invalidateChatApprovals(getChat('A00001'));
++    assert(CHAT_PARTS.every(part=>!getChat('A00001').approvals[part.key]), 'formula edit retained an old approval');
++  });
++
+   test('displayed sync errors redact tokens and credentials', function(){
+     reset();
+     const jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signature-test';
+diff --git a/tests/sql/auth_rls_test.sql b/tests/sql/auth_rls_test.sql
+index 9f1b7ca..4a4955c 100644
+--- a/tests/sql/auth_rls_test.sql
++++ b/tests/sql/auth_rls_test.sql
+@@ -28,9 +28,9 @@ insert into public.fs_records(id,data) values
+   ('A00001','{"id":"A00001","customer":"Alpha","createdBy":"Sales One","salesOwner":"Sales One","rows":[],"closed":false}'::jsonb),
+   ('A00002','{"id":"A00002","customer":"Beta","createdBy":"Sales Two","salesOwner":"Sales Two","rows":[],"closed":false}'::jsonb)
+ on conflict (id) do update set data=excluded.data;
+-insert into public.fs_chats(job_id,data) values
+-  ('A00001','{"jobId":"A00001","createdBy":"Sales One","messages":[],"parts":[],"seen":{},"approvals":{"pd":null,"ra":null,"rd":null,"sales":null}}'::jsonb)
+-on conflict (job_id) do update set data=excluded.data;
++select public.fs_append_chat_event(
++  'seed-chat','A00001','{"type":"system","action":"chat_created","text":"seed"}'::jsonb
++);
+ insert into public.fs_activities(uid,ts,data) values
+   ('seed-event',0,'{"user":"Admin Owner"}'::jsonb)
+ on conflict (uid) do nothing;
+@@ -101,6 +101,15 @@ begin; set local role authenticated; select set_config('request.jwt.claim.sub','
+ \endif
+ rollback;
+ 
++begin; set local role authenticated; select set_config('request.jwt.claim.sub','55555555-5555-5555-5555-555555555555',true); update public.fs_chats set data=jsonb_set(data,'{approvals,ra}','{"by":"Spoofed Name"}') where job_id='A00001';
++\if :ERROR
++  \echo 'PASS approval actor spoof denied'
++\else
++  \echo 'FAIL approval actor spoof unexpectedly allowed'
++  \quit 1
++\endif
++rollback;
++
+ begin; set local role authenticated; select set_config('request.jwt.claim.sub','22222222-2222-2222-2222-222222222222',true); select 1/count(*) from public.fs_activities;
+ \if :ERROR
+   \echo 'PASS non-Admin activity read denied'
+@@ -138,6 +147,71 @@ begin; set local role authenticated; select set_config('request.jwt.claim.sub','
+ rollback;
+ \set ON_ERROR_STOP on
+ 
++-- Chat event store: append-only, idempotent, server-stamped actor, and RPC-only writes.
++begin;
++set local role authenticated;
++select set_config('request.jwt.claim.sub','22222222-2222-2222-2222-222222222222',true);
++do $$
++declare
++  first_event jsonb;
++  duplicate_event jsonb;
++  event_count integer;
++  message_count integer;
++begin
++  first_event := public.fs_append_chat_event(
++    'sales-message-1','A00001','{"type":"message","text":"first"}'::jsonb
++  );
++  duplicate_event := public.fs_append_chat_event(
++    'sales-message-1','A00001','{"type":"message","text":"different payload"}'::jsonb
++  );
++  if first_event is distinct from duplicate_event then
++    raise exception 'duplicate event did not return the original canonical event';
++  end if;
++  select count(*) into event_count from public.fs_chat_events where event_id='sales-message-1';
++  if event_count <> 1 then raise exception 'duplicate event created more than one row'; end if;
++  select jsonb_array_length(data->'messages') into message_count from public.fs_chats where job_id='A00001';
++  if message_count <> 2 then raise exception 'projection duplicated or lost the message'; end if;
++  if first_event->>'actor' <> 'Sales One' then raise exception 'event actor was not server stamped'; end if;
++end $$;
++rollback;
++
++begin;
++set local role authenticated;
++select set_config('request.jwt.claim.sub','55555555-5555-5555-5555-555555555555',true);
++do $$
++declare event_data jsonb;
++begin
++  event_data := public.fs_append_chat_event(
++    'ra-approval-1','A00001',
++    '{"type":"approval_set","key":"ra","approval":{"by":"Spoofed Name"}}'::jsonb
++  );
++  if event_data->>'actor' <> 'RA One' then raise exception 'approval actor was not server stamped'; end if;
++  if event_data->'approval'->>'by' <> 'RA One' then raise exception 'approval payload accepted spoofed actor'; end if;
++end $$;
++rollback;
++
++begin;
++set local role authenticated;
++select set_config('request.jwt.claim.sub','22222222-2222-2222-2222-222222222222',true);
++select public.fs_mark_chat_seen('A00001',123456789);
++do $$ begin
++  if (select seen_ts from public.fs_chat_reads
++      where user_id='22222222-2222-2222-2222-222222222222' and job_id='A00001') <> 123456789
++  then raise exception 'chat read marker was not saved'; end if;
++end $$;
++rollback;
++
++\set ON_ERROR_STOP off
++begin; set local role authenticated; select set_config('request.jwt.claim.sub','22222222-2222-2222-2222-222222222222',true); insert into public.fs_chat_events(event_id,job_id,data) values ('direct-write','A00001','{}'::jsonb);
++\if :ERROR
++  \echo 'PASS direct chat event insert denied'
++\else
++  \echo 'FAIL direct chat event insert unexpectedly allowed'
++  \quit 1
++\endif
++rollback;
++\set ON_ERROR_STOP on
++
+ -- Positive paths.
+ begin;
+ set local role authenticated;
+@@ -156,7 +230,7 @@ rollback;
+ begin;
+ set local role authenticated;
+ select set_config('request.jwt.claim.sub','55555555-5555-5555-5555-555555555555',true);
+-update public.fs_chats set data=jsonb_set(data,'{approvals,ra}','{"by":"RA One"}') where job_id='A00001';
++select public.fs_append_chat_event('positive-ra','A00001','{"type":"approval_set","key":"ra"}'::jsonb);
+ rollback;
+ 
+ begin;
+-- 
+2.39.5 (Apple Git-154)
+

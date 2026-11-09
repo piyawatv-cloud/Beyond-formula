@@ -1,0 +1,372 @@
+From 572813e1d6fe84f34a67f1401e03f04fa11f5f20 Mon Sep 17 00:00:00 2001
+From: piyawatv-cloud <295929244+piyawatv-cloud@users.noreply.github.com>
+Date: Fri, 18 Sep 2026 23:09:32 +0700
+Subject: [PATCH 19/24] feat(auth): connect Formula identity to OPC directory
+
+---
+ api/opc-user-directory.js                 |  66 ++++++++++++
+ docs/OPC_USER_DIRECTORY_ADAPTER.md        |  41 ++++++++
+ index.html                                |  33 ++++--
+ tests/formula-studio.test.js              |  22 +++-
+ tests/opc-user-directory-adapter.test.cjs | 117 ++++++++++++++++++++++
+ 5 files changed, 269 insertions(+), 10 deletions(-)
+ create mode 100644 api/opc-user-directory.js
+ create mode 100644 docs/OPC_USER_DIRECTORY_ADAPTER.md
+ create mode 100644 tests/opc-user-directory-adapter.test.cjs
+
+diff --git a/api/opc-user-directory.js b/api/opc-user-directory.js
+new file mode 100644
+index 0000000..384df29
+--- /dev/null
++++ b/api/opc-user-directory.js
+@@ -0,0 +1,66 @@
++'use strict';
++
++const PRIVATE_HEADERS = {
++  'Cache-Control': 'private, no-store, max-age=0',
++  Pragma: 'no-cache',
++  'X-Content-Type-Options': 'nosniff',
++};
++
++module.exports = async function opcUserDirectoryAdapter(request, response) {
++  for (const [name, value] of Object.entries(PRIVATE_HEADERS)) response.setHeader(name, value);
++  if (request.method !== 'GET') {
++    response.setHeader('Allow', 'GET');
++    return response.status(405).json({ error: 'method not allowed' });
++  }
++
++  const endpoint = String(process.env.OPC_USER_DIRECTORY_URL || '').trim();
++  const token = String(process.env.OPC_USER_DIRECTORY_TOKEN || '').trim();
++  const authUserUrl = String(process.env.FORMULA_AUTH_USER_URL || '').trim();
++  const authApiKey = String(process.env.FORMULA_AUTH_API_KEY || '').trim();
++  const authorization = request.headers?.authorization || request.headers?.Authorization || '';
++  if (!/^Bearer\s+\S+$/i.test(String(authorization))) {
++    return response.status(401).json({ error: 'authentication required' });
++  }
++  if (!endpoint || token.length < 32 || !authUserUrl || authApiKey.length < 32) {
++    return response.status(503).json({ error: 'OPC user directory adapter unavailable' });
++  }
++
++  try {
++    const authResponse = await fetch(authUserUrl, {
++      method: 'GET',
++      headers: { Accept: 'application/json', apikey: authApiKey, Authorization: String(authorization) },
++      cache: 'no-store',
++      redirect: 'error',
++    });
++    if (authResponse.status === 401 || authResponse.status === 403) {
++      return response.status(401).json({ error: 'authentication required' });
++    }
++    if (!authResponse.ok) {
++      return response.status(503).json({ error: 'Formula authentication unavailable' });
++    }
++    const identity = await authResponse.json();
++    if (!identity || !identity.id || !identity.email) {
++      return response.status(401).json({ error: 'authentication required' });
++    }
++
++    const upstream = await fetch(endpoint, {
++      method: 'GET',
++      headers: { Accept: 'application/json', 'x-report-token': token },
++      cache: 'no-store',
++      redirect: 'error',
++    });
++    const payload = await upstream.json();
++    if (!upstream.ok || !payload || !Array.isArray(payload.users)) {
++      return response.status(503).json({ error: 'OPC user directory unavailable' });
++    }
++    return response.status(200).json({
++      contract_version: payload.contract_version,
++      source_system: payload.source_system,
++      generated_at: payload.generated_at,
++      users: payload.users,
++    });
++  } catch (error) {
++    console.error('OPC user directory adapter unavailable', error);
++    return response.status(503).json({ error: 'OPC user directory unavailable' });
++  }
++};
+diff --git a/docs/OPC_USER_DIRECTORY_ADAPTER.md b/docs/OPC_USER_DIRECTORY_ADAPTER.md
+new file mode 100644
+index 0000000..9d49d29
+--- /dev/null
++++ b/docs/OPC_USER_DIRECTORY_ADAPTER.md
+@@ -0,0 +1,41 @@
++# Formula ↔ OPC user directory adapter
++
++Formula resolves the signed-in user's identity against the read-only OPC
++Workflow directory. Formula keeps its existing authentication and role
++boundary; OPC is used only as the identity reference for this rollout.
++
++The browser calls the same-origin `/api/opc-user-directory` function. That
++function verifies the Formula session, then calls OPC with the machine token.
++The OPC token is never sent to or stored in the browser.
++
++## Staging configuration
++
++Configure these variables in the Formula deployment environment. Do not place
++their values in `index.html`, a test fixture, or a repository file.
++
++```text
++FORMULA_AUTH_USER_URL=https://<formula-auth-host>/auth/v1/user
++FORMULA_AUTH_API_KEY=<Formula authentication API key>
++OPC_USER_DIRECTORY_URL=https://<opc-staging-host>/api/integrations/v1/formula/users
++OPC_USER_DIRECTORY_TOKEN=<OPC REPORT_API_TOKEN>
++```
++
++On OPC Staging, enable the existing route with:
++
++```text
++FORMULA_USER_DIRECTORY_ENABLED=true
++REPORT_API_TOKEN=<same value used by OPC_USER_DIRECTORY_TOKEN>
++```
++
++The Formula release has the OPC reference check enabled and fails closed when
++the adapter, authenticated session, or active OPC reference is unavailable.
++
++## Verification order
++
++1. Check OPC Staging returns `200` with the machine token and `401` without it.
++2. Check Formula's same-origin adapter returns `401` without a Formula session.
++3. Sign in with one approved user and confirm the OPC `source_record_id` is
++   retained without changing Formula's existing role.
++4. Sign in with an inactive or unlisted user and confirm access is denied.
++5. Only after those checks pass may the Runtime Operator promote the immutable
++   release to the next environment.
+diff --git a/index.html b/index.html
+index d73c3c0..deaf556 100755
+--- a/index.html
++++ b/index.html
+@@ -1163,13 +1163,13 @@ const SB_POLL_MS = 5000;   // ดึงข้อมูลใหม่จาก
+ // ===================================================================
+ let SCIENCE_WORKSPACE_API_ORIGIN = '';
+ 
+-// OPC Workflow user reference — opt-in only, disabled in the current release.
+-// The reference shape follows the read-only "OPC System Users" sheet, but no
+-// real names/emails/IDs are embedded here. An approved OPC adapter may provide
+-// rows through window.__FS_OPC_USER_REFERENCE_PROVIDER__ when this flag is on.
++// OPC Workflow user reference — enabled for the cross-system identity rollout.
++// The reference shape follows the read-only OPC directory contract, but no real
++// names/emails/IDs are embedded here. An approved adapter provides rows through
++// the same-origin Formula API; tests may inject a provider explicitly.
+ // Supabase Auth/RLS remains the security boundary; this reference is not an
+ // authorization bypass and is never persisted to localStorage or Supabase.
+-let OPC_USER_REFERENCE_ENABLED = false;
++let OPC_USER_REFERENCE_ENABLED = true;
+ const OPC_USER_REFERENCE_SOURCE = 'opc-workflow';
+ 
+ // ========== THAI FDA DATABASE ==========
+@@ -6081,6 +6081,7 @@ function authFriendlyError(err){
+     return 'เข้าสู่ระบบได้แล้ว แต่ยังไม่มีสิทธิ์ใช้งานในระบบนี้ — ผู้ดูแลต้องเพิ่มบัญชีนี้ใน fs_memberships ก่อน';
+   if(/OPC_USER_REFERENCE_MISSING/i.test(msg)) return 'บัญชีนี้ไม่พบใน OPC Workflow user reference หรือยังไม่ Active';
+   if(/OPC_USER_REFERENCE_PROVIDER_UNCONFIGURED/i.test(msg)) return 'ระบบยังไม่ได้เชื่อมต่อ OPC Workflow user reference';
++  if(/OPC_USER_REFERENCE_UNAVAILABLE/i.test(msg)) return 'ระบบกลางของ OPC Workflow ยังไม่พร้อมใช้งาน กรุณาลองใหม่หรือติดต่อผู้ดูแลระบบ';
+   if(/inactive/i.test(msg)) return 'บัญชีนี้ถูกปิดการใช้งาน กรุณาติดต่อผู้ดูแลระบบ';
+   if(/membership|403/i.test(msg)) return 'บัญชีนี้ยังไม่ได้รับสิทธิ์ใช้งาน กรุณาติดต่อผู้ดูแลระบบ';
+   if(/storage|quota/i.test(msg)) return 'เบราว์เซอร์บล็อกการเก็บข้อมูลของเว็บไซต์ — ปิดโหมดส่วนตัวหรืออนุญาต site data แล้วลองใหม่';
+@@ -6193,7 +6194,19 @@ function authDataHeaders(){
+ function opcUserReferenceOn(){ return OPC_USER_REFERENCE_ENABLED === true; }
+ function opcUserReferenceProvider(){
+   return typeof window !== 'undefined' && typeof window.__FS_OPC_USER_REFERENCE_PROVIDER__ === 'function'
+-    ? window.__FS_OPC_USER_REFERENCE_PROVIDER__ : null;
++    ? window.__FS_OPC_USER_REFERENCE_PROVIDER__ : fetchOpcUserReference;
++}
++async function fetchOpcUserReference(){
++  const response = await fetch('/api/opc-user-directory', {
++    method:'GET',
++    headers:{Accept:'application/json', Authorization:'Bearer ' + String(authSession && authSession.access_token || '')},
++    credentials:'same-origin',
++    cache:'no-store'
++  });
++  if(!response.ok) throw new Error('OPC_USER_REFERENCE_UNAVAILABLE: '+response.status);
++  const payload = await response.json();
++  if(!payload || !Array.isArray(payload.users)) throw new Error('OPC_USER_REFERENCE_INVALID: response users must be an array');
++  return payload.users;
+ }
+ function opcReferenceValue(row, keys){
+   for(const key of keys){
+@@ -6208,13 +6221,15 @@ function normalizeOpcUserReferenceRows(rows){
+     if(!row || typeof row !== 'object') throw new Error('OPC_USER_REFERENCE_INVALID: row '+(index+1));
+     const values = Object.values(row).map(v=>String(v == null ? '' : v).trim());
+     if(!values.some(Boolean)) return null; // allow a trailing blank sheet row
+-    const opcUserId = String(opcReferenceValue(row,['opc_user_id','opc_username','OPC Username'])).trim();
+-    const name = String(opcReferenceValue(row,['name','user_name','User Name'])).trim();
++    const opcUserId = String(opcReferenceValue(row,['opc_user_id','source_record_id','opc_username','OPC Username'])).trim();
++    const name = String(opcReferenceValue(row,['name','display_name','user_name','User Name'])).trim();
+     const department = String(opcReferenceValue(row,['department','position_department','Position / Department'])).trim();
+     const role = String(opcReferenceValue(row,['role','current_role','Current Role'])).trim().toLowerCase();
+     const opcLoginEmail = String(opcReferenceValue(row,['opc_login_email','login_email','OPC Login Email'])).trim().toLowerCase();
+     const cloudflareAccessEmail = String(opcReferenceValue(row,['cloudflare_access_email','access_email','Cloudflare Access Email'])).trim().toLowerCase();
+-    const status = String(opcReferenceValue(row,['status','user_status','User Status']) || 'active').trim().toLowerCase();
++    const activeValue = row && (row.is_active ?? row.isActive);
++    const status = String(opcReferenceValue(row,['status','user_status','User Status']) ||
++      (activeValue === false ? 'inactive' : 'active')).trim().toLowerCase();
+     if(!opcUserId || !name || (!opcLoginEmail && !cloudflareAccessEmail)){
+       throw new Error('OPC_USER_REFERENCE_INVALID: required identity fields missing at row '+(index+1));
+     }
+diff --git a/tests/formula-studio.test.js b/tests/formula-studio.test.js
+index f084149..c97e3ed 100644
+--- a/tests/formula-studio.test.js
++++ b/tests/formula-studio.test.js
+@@ -199,7 +199,7 @@
+     assert(!friendly.includes('อินเทอร์เน็ต'), 'ยังโทษอินเทอร์เน็ตอยู่');
+   });
+ 
+-  test('OPC user reference is disabled by default and preserves the current Admin auth flow', async function(){
++  test('an explicitly disabled OPC reference preserves the current Admin auth flow', async function(){
+     reset();
+     authSession = {access_token:'admin-token',refresh_token:'refresh-test',expires_at:Date.now()/1000+3600,
+       user:{id:'55555555-5555-5555-5555-555555555555',email:'admin@example.test'}};
+@@ -240,6 +240,26 @@
+     equal(currentRole(), 'admin', 'Supabase/Auth role boundary was bypassed');
+   });
+ 
++  test('enabled OPC reference uses the same-origin server adapter without exposing a report token', async function(){
++    reset();
++    OPC_USER_REFERENCE_ENABLED = true;
++    authSession = {access_token:'admin-token',refresh_token:'refresh-test',expires_at:Date.now()/1000+3600,
++      user:{id:'88888888-8888-8888-8888-888888888888',email:'admin@example.test'}};
++    window.__fetchQueue.push(window.__mockResponse(200, [
++      {user_id:'88888888-8888-8888-8888-888888888888',name:'Legacy Admin',role:'admin',active:true}
++    ]));
++    window.__fetchQueue.push(window.__mockResponse(200, {
++      users:[{source_record_id:'opc-admin-1',display_name:'Admin From OPC',department:'Management',role:'admin',is_active:true,access_email:'admin@example.test'}]
++    }));
++    await authFetchMembership();
++    equal(authOpcUserReference.opc_user_id, 'opc-admin-1', 'same-origin adapter did not map the OPC record');
++    const adapterCall = window.__fetchCalls.find(call => call.url === '/api/opc-user-directory');
++    assert(adapterCall, 'Formula did not call the same-origin OPC adapter');
++    equal(adapterCall.options.headers.Authorization, 'Bearer admin-token', 'Formula did not authenticate the same-origin adapter');
++    assert(!JSON.stringify(adapterCall.options).toLowerCase().includes('report_api_token'), 'Formula exposed the OPC report token');
++    assert(!JSON.stringify(adapterCall.options).toLowerCase().includes('x-report-token'), 'Formula sent the OPC report token from the browser');
++  });
++
+   test('enabled OPC reference fails closed when the authenticated user is not active in the reference', async function(){
+     reset();
+     OPC_USER_REFERENCE_ENABLED = true;
+diff --git a/tests/opc-user-directory-adapter.test.cjs b/tests/opc-user-directory-adapter.test.cjs
+new file mode 100644
+index 0000000..26b67e2
+--- /dev/null
++++ b/tests/opc-user-directory-adapter.test.cjs
+@@ -0,0 +1,117 @@
++'use strict';
++
++const test = require('node:test');
++const assert = require('node:assert/strict');
++
++const adapterPath = require.resolve('../api/opc-user-directory.js');
++
++function loadAdapter() {
++  delete require.cache[adapterPath];
++  return require(adapterPath);
++}
++
++function responseRecorder() {
++  const state = { status: null, headers: {}, body: null };
++  return {
++    state,
++    status(code) { state.status = code; return this; },
++    setHeader(name, value) { state.headers[name.toLowerCase()] = value; return this; },
++    json(body) { state.body = body; return this; },
++    end(body) { state.body = body == null ? null : body; return this; },
++  };
++}
++
++const request = { method: 'GET', headers: { authorization: 'Bearer formula-user-token' } };
++
++test('Formula adapter keeps the OPC report token server-side and returns the directory', async () => {
++  const previousUrl = process.env.OPC_USER_DIRECTORY_URL;
++  const previousToken = process.env.OPC_USER_DIRECTORY_TOKEN;
++  const previousAuthUrl = process.env.FORMULA_AUTH_USER_URL;
++  const previousAuthKey = process.env.FORMULA_AUTH_API_KEY;
++  const previousFetch = global.fetch;
++  try {
++    process.env.OPC_USER_DIRECTORY_URL = 'https://opc-staging.example.test/api/integrations/v1/formula/users';
++    process.env.OPC_USER_DIRECTORY_TOKEN = 'server-token-that-is-never-browser-visible-123456789';
++    process.env.FORMULA_AUTH_USER_URL = 'https://formula-auth.example.test/auth/v1/user';
++    process.env.FORMULA_AUTH_API_KEY = 'formula-publishable-key-for-server-check-123456789';
++    let upstream = null;
++    global.fetch = async (url, options) => {
++      if (url === process.env.FORMULA_AUTH_USER_URL) {
++        assert.equal(options.headers.Authorization, request.headers.authorization);
++        return new Response(JSON.stringify({ id: 'formula-user-1', email: 'admin@example.test' }), { status: 200 });
++      }
++      upstream = { url, options };
++      return new Response(JSON.stringify({
++          contract_version: 'opc-user-directory-v1',
++          source_system: 'opc-workflow',
++          generated_at: '2026-09-18T00:00:00.000Z',
++          users: [{ source_record_id: 'opc-1' }],
++        }), {
++          status: 200,
++          headers: { 'content-type': 'application/json' },
++        });
++    };
++    const reply = responseRecorder();
++    await loadAdapter()(request, reply);
++    assert.equal(reply.state.status, 200);
++    assert.deepEqual(reply.state.body, {
++      contract_version: 'opc-user-directory-v1',
++      source_system: 'opc-workflow',
++      generated_at: '2026-09-18T00:00:00.000Z',
++      users: [{ source_record_id: 'opc-1' }],
++    });
++    assert.equal(upstream.url, process.env.OPC_USER_DIRECTORY_URL);
++    assert.equal(upstream.options.headers['x-report-token'], process.env.OPC_USER_DIRECTORY_TOKEN);
++    assert.equal(reply.state.headers['cache-control'], 'private, no-store, max-age=0');
++  } finally {
++    if (previousUrl === undefined) delete process.env.OPC_USER_DIRECTORY_URL; else process.env.OPC_USER_DIRECTORY_URL = previousUrl;
++    if (previousToken === undefined) delete process.env.OPC_USER_DIRECTORY_TOKEN; else process.env.OPC_USER_DIRECTORY_TOKEN = previousToken;
++    if (previousAuthUrl === undefined) delete process.env.FORMULA_AUTH_USER_URL; else process.env.FORMULA_AUTH_USER_URL = previousAuthUrl;
++    if (previousAuthKey === undefined) delete process.env.FORMULA_AUTH_API_KEY; else process.env.FORMULA_AUTH_API_KEY = previousAuthKey;
++    global.fetch = previousFetch;
++  }
++});
++
++test('Formula adapter rejects callers without an authenticated Formula session', async () => {
++  const previousUrl = process.env.OPC_USER_DIRECTORY_URL;
++  const previousToken = process.env.OPC_USER_DIRECTORY_TOKEN;
++  const previousAuthUrl = process.env.FORMULA_AUTH_USER_URL;
++  const previousAuthKey = process.env.FORMULA_AUTH_API_KEY;
++  try {
++    process.env.OPC_USER_DIRECTORY_URL = 'https://opc-staging.example.test/api/integrations/v1/formula/users';
++    process.env.OPC_USER_DIRECTORY_TOKEN = 'server-token-that-is-never-browser-visible-123456789';
++    process.env.FORMULA_AUTH_USER_URL = 'https://formula-auth.example.test/auth/v1/user';
++    process.env.FORMULA_AUTH_API_KEY = 'formula-publishable-key-for-server-check-123456789';
++    const reply = responseRecorder();
++    await loadAdapter()({ method: 'GET', headers: {} }, reply);
++    assert.equal(reply.state.status, 401);
++    assert.deepEqual(reply.state.body, { error: 'authentication required' });
++  } finally {
++    if (previousUrl === undefined) delete process.env.OPC_USER_DIRECTORY_URL; else process.env.OPC_USER_DIRECTORY_URL = previousUrl;
++    if (previousToken === undefined) delete process.env.OPC_USER_DIRECTORY_TOKEN; else process.env.OPC_USER_DIRECTORY_TOKEN = previousToken;
++    if (previousAuthUrl === undefined) delete process.env.FORMULA_AUTH_USER_URL; else process.env.FORMULA_AUTH_USER_URL = previousAuthUrl;
++    if (previousAuthKey === undefined) delete process.env.FORMULA_AUTH_API_KEY; else process.env.FORMULA_AUTH_API_KEY = previousAuthKey;
++  }
++});
++
++test('Formula adapter fails closed when the OPC endpoint is not configured', async () => {
++  const previousUrl = process.env.OPC_USER_DIRECTORY_URL;
++  const previousToken = process.env.OPC_USER_DIRECTORY_TOKEN;
++  const previousAuthUrl = process.env.FORMULA_AUTH_USER_URL;
++  const previousAuthKey = process.env.FORMULA_AUTH_API_KEY;
++  try {
++    delete process.env.OPC_USER_DIRECTORY_URL;
++    delete process.env.OPC_USER_DIRECTORY_TOKEN;
++    delete process.env.FORMULA_AUTH_USER_URL;
++    delete process.env.FORMULA_AUTH_API_KEY;
++    const reply = responseRecorder();
++    await loadAdapter()(request, reply);
++    assert.equal(reply.state.status, 503);
++    assert.deepEqual(reply.state.body, { error: 'OPC user directory adapter unavailable' });
++  } finally {
++    if (previousUrl === undefined) delete process.env.OPC_USER_DIRECTORY_URL; else process.env.OPC_USER_DIRECTORY_URL = previousUrl;
++    if (previousToken === undefined) delete process.env.OPC_USER_DIRECTORY_TOKEN; else process.env.OPC_USER_DIRECTORY_TOKEN = previousToken;
++    if (previousAuthUrl === undefined) delete process.env.FORMULA_AUTH_USER_URL; else process.env.FORMULA_AUTH_USER_URL = previousAuthUrl;
++    if (previousAuthKey === undefined) delete process.env.FORMULA_AUTH_API_KEY; else process.env.FORMULA_AUTH_API_KEY = previousAuthKey;
++  }
++});
+-- 
+2.39.5 (Apple Git-154)
+

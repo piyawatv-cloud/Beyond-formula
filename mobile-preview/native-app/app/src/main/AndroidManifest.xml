@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Live READ-ONLY mode (System Owner instruction 2026-11-01, within exception formula-mobile-live-readonly-2026-10-29, expires 2026-11-02 23:59 +07). HTTPS only; allow-list in LiveClient.allowed. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Local notifications only (no network). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <application
+        android:allowBackup="false"
+        android:usesCleartextTraffic="false"
+        android:label="@string/app_name"
+        android:theme="@style/Theme.FormulaStudio">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

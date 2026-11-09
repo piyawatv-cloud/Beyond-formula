@@ -1,0 +1,132 @@
+From 3a9c32d17ef1626b7955ca9b0334ecd7a010b774 Mon Sep 17 00:00:00 2001
+From: piyawatv-cloud <295929244+piyawatv-cloud@users.noreply.github.com>
+Date: Sat, 5 Sep 2026 01:23:57 +0700
+Subject: [PATCH 11/24] =?UTF-8?q?fix(workspace):=20=E0=B8=95=E0=B9=88?=
+ =?UTF-8?q?=E0=B8=AD=E0=B8=AA=E0=B8=B2=E0=B8=A2=E0=B8=81=E0=B8=B2=E0=B8=A3?=
+ =?UTF-8?q?=E0=B8=96=E0=B8=AD=E0=B8=99=E0=B8=AA=E0=B8=B4=E0=B8=97=E0=B8=98?=
+ =?UTF-8?q?=E0=B8=B4=E0=B9=8C=20=E0=B9=81=E0=B8=A5=E0=B8=B0=E0=B9=83?=
+ =?UTF-8?q?=E0=B8=AA=E0=B9=88=20mode=20=E0=B8=A5=E0=B8=87=E0=B9=83?=
+ =?UTF-8?q?=E0=B8=99=E0=B8=81=E0=B8=B8=E0=B8=8D=E0=B9=81=E0=B8=88=20reuse?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+ผู้ตรวจพบสองอย่างที่ทำให้สัญญาในเอกสารไม่เป็นจริง และพิสูจน์ผ่าน browser harness จริง
+
+หนึ่ง mountPrivateWorkspace() ถูกเรียกจากที่เดียวคือ sbBoot() ส่วนการ poll ทุก 5
+วินาทีไม่เคยเรียกมันเลย แปลว่า 403, membership ถูกลบ หรือ role เปลี่ยนระหว่างเปิด
+แท็บทิ้งไว้ ปุ่มกับ panel จะยังอยู่จนกว่าผู้ใช้จะรีเฟรชเอง ขัดกับสัญญาที่เขียนไว้ว่า
+"สิทธิ์หาย = ถอนออกทันที" · เทสต์ที่อ้างว่าครอบเรื่องนี้เรียกฟังก์ชันเองด้วยมือ ไม่มี
+อะไรในแอปเรียกมันเลย คือกฎ 5.1 เป๊ะ ๆ ตรวจฟังก์ชันแต่ไม่ได้ตรวจการต่อสาย
+
+สอง กุญแจ reuse เป็น version อย่างเดียว แต่สองโหมดใช้เลข version เดียวกันได้ตามปกติ
+ผู้ตรวจลดสิทธิ์ identity ลงมาเป็นโหมดที่แคบกว่าโดยคง version:'1' แล้วพบว่า bundle
+ของโหมดกว้างยังอยู่ในเบราว์เซอร์เหมือนเดิม ไม่มีการ fetch ใหม่ด้วยซ้ำ เพราะโค้ด
+คืนค่าออกไปก่อน · เท่ากับช่องที่ปิดไปแล้วฝั่งเซิร์ฟเวอร์ ถูกเปิดใหม่ฝั่ง client
+และถ้า manifest ไม่ส่ง version มาเลย undefined === undefined จะเป็นจริง แล้วมันจะ
+ไม่ mount อะไรเลยตลอดกาล · กุญแจตอนนี้เป็น version + mode
+
+พร้อมกันนั้นเก็บ handle ที่ mount() คืนมา เดิมทิ้งทั้งก้อน destroy() จึงไม่มีวันถูก
+เรียก · วันนี้ยังไม่รั่วเพราะทั้งสอง bundle ผูก listener ไว้ใน panel เท่านั้น แต่
+bundle ที่ตั้ง timer หรือผูก listener ที่ window จะรอดจากการออกจากระบบ
+
+และสลับลำดับให้สร้าง panel ก่อนปุ่ม เดิมถ้า .main ไม่มี ปุ่มจะถูกแทรกไปแล้วขณะที่
+pwsState ยังเป็น null ทำให้ teardown เอาออกไม่ได้ตลอดกาล
+
+หมายเหตุ: เทสต์ที่ห้ามฝังคำเฉพาะของงานลง index.html จับผมได้อีกครั้ง ผมเขียนชื่อ
+โหมดไว้ในคอมเมนต์ ซึ่งก็บอกใบ้ว่าพื้นที่ทำงานนี้ทำอะไร เปลี่ยนเป็นคำกลาง ๆ แล้ว
+
+harness 37/37 ผ่าน · run-sql-tests ผ่าน
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_019ydP6KsDDZ9owE8qtTqFTj
+---
+ index.html | 38 ++++++++++++++++++++++++++++++++------
+ 1 file changed, 32 insertions(+), 6 deletions(-)
+
+diff --git a/index.html b/index.html
+index 8ab2ac4..ae30909 100755
+--- a/index.html
++++ b/index.html
+@@ -6581,6 +6581,13 @@ async function sbCycle(){
+     await sbPush();
+     sbApply(await sbPull());
+     sbErr = '';
++    // ตรวจสิทธิ์ของพื้นที่ทำงานส่วนตัวซ้ำทุกรอบ
++    //
++    // เดิมเรียกแค่ตอน sbBoot แปลว่าถ้าสิทธิ์ถูกถอน role เปลี่ยน หรือได้ 403
++    // ระหว่างเปิดแท็บทิ้งไว้ ปุ่มกับ panel จะยังอยู่จนกว่าผู้ใช้จะรีเฟรชเอง
++    // ซึ่งขัดกับสัญญาที่ว่า "สิทธิ์หาย = ถอนออกทันที"
++    try{ await mountPrivateWorkspace(); }
++    catch(err){ console.warn('[workspace]', safeError(err)); }
+   }catch(err){
+     sbErr = safeError(err);
+     console.warn('[sync]', sbErr);
+@@ -6624,6 +6631,11 @@ function pwsApprovedOrigin(){
+ /** ถอนทุกอย่างที่ loader สร้างไว้ · เรียกซ้ำได้ปลอดภัย */
+ function teardownPrivateWorkspace(){
+   if(!pwsState) return;
++  // ให้ bundle เก็บกวาดของตัวเองก่อน (timer, listener ที่ผูกไว้นอก panel)
++  try{
++    const handle = pwsState.handle;
++    if(handle && typeof handle.destroy === 'function') handle.destroy();
++  }catch(err){}
+   try{ if(pwsState.navEl && pwsState.navEl.parentNode) pwsState.navEl.parentNode.removeChild(pwsState.navEl); }catch(err){}
+   try{ if(pwsState.panelEl && pwsState.panelEl.parentNode) pwsState.panelEl.parentNode.removeChild(pwsState.panelEl); }catch(err){}
+   // ปล่อย Blob URL คืน ไม่งั้นโค้ดของ workspace ยังถูกอ้างถึงได้หลังผู้ใช้ออกจากระบบ
+@@ -6674,8 +6686,14 @@ async function mountPrivateWorkspace(){
+     return;
+   }
+ 
+-  // ของเดิมที่ mount ไว้แล้วรุ่นเดียวกัน ไม่ต้องทำซ้ำ
+-  if(pwsState && pwsState.version === manifest.version) return;
++  // กุญแจต้องมี mode ด้วย ไม่ใช่แค่ version
++  //
++  // สองโหมดใช้เลข version เดียวกันได้ตามปกติ ถ้าเทียบแค่ version คนที่ถูกลดสิทธิ์
++  // ลงมาเป็นโหมดที่แคบกว่า จะยังถือ bundle ของโหมดกว้างไว้ในเบราว์เซอร์ต่อไป
++  // เพราะโค้ดคิดว่า "ของเดิมยังใช้ได้" · และถ้า manifest ไม่ส่ง version มาเลย
++  // undefined === undefined จะเป็นจริง แล้วมันจะไม่ mount อะไรเลยตลอดกาล
++  const pwsKey = String(manifest.version || '') + '\u0000' + String(manifest.mode || '');
++  if(pwsState && pwsState.key === pwsKey) return;
+   teardownPrivateWorkspace();
+ 
+   let source;
+@@ -6689,23 +6707,31 @@ async function mountPrivateWorkspace(){
+     source = await res.text();
+   }catch(err){ return; }
+ 
+-  const nav = pwsCreateNav(manifest.label);
++  // สร้าง panel ก่อน · ถ้าสร้างปุ่มก่อนแล้ว panel ล้ม ปุ่มจะค้างอยู่โดยที่ pwsState
++  // ยังเป็น null ทำให้ teardown เอาออกไม่ได้ตลอดกาล
+   const panel = pwsCreatePanel();
+-  if(!nav || !panel) return;
++  if(!panel) return;
++  const nav = pwsCreateNav(manifest.label);
++  if(!nav){ if(panel.parentNode) panel.parentNode.removeChild(panel); return; }
+ 
+   let blobUrl = '';
+   try{
+     blobUrl = URL.createObjectURL(new Blob([source], {type:'text/javascript'}));
+   }catch(err){ blobUrl = ''; }
+ 
+-  pwsState = {navEl:nav, panelEl:panel, blobUrl:blobUrl, version:manifest.version};
++  pwsState = {navEl:nav, panelEl:panel, blobUrl:blobUrl, key:pwsKey, handle:null};
+ 
+   if(blobUrl){
+     try{
+       const mod = await import(blobUrl);
+       // ชื่อ export ต้องเป็นชื่อกลาง ๆ · ไฟล์นี้ต้องไม่รู้ว่า workspace ที่โหลดมาคืออะไร
+       const mount = (mod && (mod.mount || mod.default)) || window.__pwsMounted;
+-      if(typeof mount === 'function') mount(panel, {mode:manifest.mode});
++      if(typeof mount === 'function'){
++        // เก็บ handle ไว้ · ถ้าทิ้ง destroy() จะไม่มีวันถูกเรียก แล้ว bundle ที่ตั้ง
++        // timer หรือผูก listener ไว้ที่ window จะรอดจากการออกจากระบบ
++        const handle = mount(panel, {mode:manifest.mode});
++        if(pwsState) pwsState.handle = handle;
++      }
+     }catch(err){
+       // bundle รันไม่ได้ ก็ยังคงแท็บไว้พร้อมข้อความ ดีกว่าหายไปเฉย ๆ โดยไม่บอกอะไร
+       panel.textContent = 'เปิดพื้นที่ทำงานส่วนตัวไม่สำเร็จ กรุณาลองใหม่';
+-- 
+2.39.5 (Apple Git-154)
+

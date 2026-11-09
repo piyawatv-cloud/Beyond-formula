@@ -1,0 +1,16 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {adaptLegacyRows}=require('./legacy-row-adapter.cjs');
+const original=[{name:'synthetic',w:'120',p:'50',o:'fixture',note:'fixture',hero:true,extra:{keep:true},fda:{status:'old'},actual:50}];
+const fda={status:'over',cls:'fixture',icon:'?',tip:'fixture only'};
+const derive=rows=>rows.map((r,i)=>({num:i+1,name:r.name,w:Number(r.w),p:Number(r.p),actual:Number(r.w)*Number(r.p)/100,o:r.o,note:r.note,hero:r.hero,fda}));
+const before=JSON.stringify(original),result=adaptLegacyRows(original,derive);
+assert.equal(JSON.stringify(original),before);assert.equal(result[0].w,120);assert.equal(result[0].actual,60);assert.deepEqual(result[0].fda,fda);assert.deepEqual(result[0].extra,{keep:true});
+ assert.deepEqual(adaptLegacyRows(original,rows=>derive(rows).map(r=>({...r,extra:'replace'})))[0].extra,{keep:true},'calculator cannot replace unowned metadata');
+for(const value of ['',null,'0',0,'bad',Infinity])assert.throws(()=>adaptLegacyRows([{name:'synthetic',w:100,p:value}],derive),/ความเข้มข้น/);
+assert.throws(()=>adaptLegacyRows(original,()=>[]),/รายการสาร/);
+assert.throws(()=>adaptLegacyRows(original,rows=>derive(rows).map(r=>({...r,w:5}))),/รายการสาร/);
+assert.throws(()=>adaptLegacyRows(original,rows=>derive(rows).map(r=>({...r,fda:null}))),/ข้อมูลประกอบ/);
+assert.throws(()=>adaptLegacyRows(original,rows=>derive(rows).map(r=>({...r,actual:50}))),/คำนวณ/);
+assert.throws(()=>adaptLegacyRows(original,()=>{throw Error('unavailable')}),/unavailable/);
+console.log('PASS: synthetic legacy adapter rejects incomplete or inconsistent derived rows');

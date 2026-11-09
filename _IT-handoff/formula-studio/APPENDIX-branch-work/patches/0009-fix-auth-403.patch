@@ -1,0 +1,755 @@
+From 2a66a3d965e4e67c94e1b7d1894cea5ba5bd1005 Mon Sep 17 00:00:00 2001
+From: piyawatv-cloud <295929244+piyawatv-cloud@users.noreply.github.com>
+Date: Fri, 4 Sep 2026 22:15:46 +0700
+Subject: [PATCH 09/24] =?UTF-8?q?fix(auth):=20403=20=E0=B8=84=E0=B8=B7?=
+ =?UTF-8?q?=E0=B8=AD=20"=E0=B9=84=E0=B8=A1=E0=B9=88=E0=B8=A1=E0=B8=B5?=
+ =?UTF-8?q?=E0=B8=AA=E0=B8=B4=E0=B8=97=E0=B8=98=E0=B8=B4=E0=B9=8C"=20?=
+ =?UTF-8?q?=E0=B9=84=E0=B8=A1=E0=B9=88=E0=B9=83=E0=B8=8A=E0=B9=88=20"?=
+ =?UTF-8?q?=E0=B9=84=E0=B8=A1=E0=B9=88=E0=B8=A3=E0=B8=B9=E0=B9=89=E0=B8=88?=
+ =?UTF-8?q?=E0=B8=B1=E0=B8=81=E0=B8=95=E0=B8=B1=E0=B8=A7=E0=B8=95=E0=B8=99?=
+ =?UTF-8?q?"=20=E2=80=94=20=E0=B9=80=E0=B8=A5=E0=B8=B4=E0=B8=81=E0=B9=80?=
+ =?UTF-8?q?=E0=B8=94=E0=B9=89=E0=B8=87=E0=B8=9C=E0=B8=B9=E0=B9=89=E0=B9=83?=
+ =?UTF-8?q?=E0=B8=8A=E0=B9=89=E0=B8=AD=E0=B8=AD=E0=B8=81=E0=B8=A7=E0=B8=99?=
+ =?UTF-8?q?=E0=B9=84=E0=B8=A1=E0=B9=88=E0=B8=88=E0=B8=9A?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+อาการที่ผู้ใช้เจอคือล็อกอินแล้วเด้งออกทันที ซ้ำทุกครั้ง จนใช้งานไม่ได้เลย
+
+ต้นตออยู่ที่บรรทัดเดียวใน sbReq: 401 กับ 403 ถูกจับรวมกันแล้วล้าง Auth session
+ทิ้งทั้งคู่ แต่ PostgREST ตอบ 403 ทุกครั้งที่ RLS หรือ guard trigger ปฏิเสธ ซึ่งเป็น
+เรื่องสิทธิ์ ไม่ใช่ตัวตน พอล้าง session ผู้ใช้จะถูกเด้งไปหน้า login ขณะที่ delta ที่ถูก
+ปฏิเสธยังค้างอยู่ในเครื่อง ล็อกอินใหม่ก็ push ซ้ำแล้วเด้งอีก วนไม่จบและไม่มีทางออก
+ตอนนี้ 401 เท่านั้นที่ล้าง session ส่วน 403 กลายเป็น error ที่บอกได้ว่าถาวรหรือไม่
+
+เมื่อกันข้อนี้แล้วจึงเห็นว่าอะไรบ้างที่ยิง 403 ตั้งแต่แรก:
+
+- PD แก้ Job Data ไม่ได้เลย เพราะ canEditSection() เปิดให้ PD แก้ 4 หมวด แต่
+  pd_keys ใน guard trigger มีแค่ rows/rdUpdated/modNote · policy
+  records_role_update อนุญาต 'pd' อยู่แล้ว รายการนี้จึงเป็นการปรับ field-level
+  guard ให้ตามหลังฟีเจอร์แก้ Job Data ที่เพิ่มมาทีหลัง ไม่ใช่เปิดสิทธิ์ระดับตารางใหม่
+  ขอบเขตยังเท่าเดิม: ลูกค้า แบรนด์ เซลล์ผู้รับผิดชอบ และการปิดงาน ยังล็อกอยู่
+- pd/ra/rd/purchasing โดนตั้งแต่ sync แรก เพราะ schema ไม่ได้ seed fs_meta
+  ค่าจากเซิร์ฟเวอร์จึงเป็น null ส่วน recCounter เริ่มที่ 0 · null !== 0 จริงเสมอ
+  ทุก sync จึงพยายามเขียน fs_meta ที่อนุญาตเฉพาะ admin/sales/opc/mkt
+- ra/rd/purchasing ที่มี record เก่าค้างในเครื่องใบเดียวก็โดน · ตอนนี้ข้ามการส่ง
+  และบอกที่ chip ว่าบัญชีนี้ดูอย่างเดียว แทนที่จะเด้งออกเงียบ ๆ
+- แชทข้อความเดียวที่ยาวเกิน 10000 ตัวทำให้ sbPush หยุดตั้งแต่บรรทัดแรก แล้ว
+  records/activities/counter ไม่ถูกส่งอีกเลย และไม่มี UI ให้เคลียร์ · เพิ่ม cap
+  ฝั่ง client ให้ตรงกับเซิร์ฟเวอร์ และย้ายรายการที่ถูกปฏิเสธถาวรไป dead-letter
+- non-admin อัปโหลด activity ทั้งกองซ้ำทุก 5 วินาที เพราะ fs_activities ให้
+  admin อ่านเท่านั้น role อื่นได้ 200 [] กลับมา ร่องรอยว่าส่งแล้วจึงถูกล้างทุกรอบ
+  ตอนนี้จำ uid ที่ push แล้วแยกจาก snapshot ที่ได้จากการ pull
+
+ที่ร้ายที่สุดคือข้อมูลหาย: authFetchMembership ล้าง fs_activities ทิ้งทุกครั้งที่
+non-admin ล็อกอิน activity ที่สร้างตอน offline จึงหายถาวรก่อนได้ push ผิดกฎเหล็ก
+ข้อ 2 และข้อ 4 ตรง ๆ · การมองไม่เห็นหน้า Activity เป็นเรื่องสิทธิ์การแสดงผล ไม่ใช่
+เหตุผลให้ลบข้อมูลของผู้ใช้ · เอาออกแล้ว
+
+รวมถึงต่ออายุ token ล่วงหน้า (เดิมเรียกเฉพาะตอนเปิดแอป เปิดแท็บทิ้งไว้ครบชั่วโมง
+แล้วถูกเตะออกกลางงานทั้งที่ refresh_token ยังใช้ได้), logoutUser วาดหน้า login ให้
+เสร็จก่อนแจ้งเซิร์ฟเวอร์ (เดิมเน็ตช้าแล้วดูเหมือนกดออกจากระบบไม่ติด), sessionStorage
+มี try/catch (โหมดส่วนตัวเคยล็อกอินไม่ได้แล้วยังบอกว่าเน็ตมีปัญหา) และแยกข้อความ
+"ยังไม่ได้เพิ่มใน fs_memberships" ออกจาก "รหัสผ่านผิด" กับ "เน็ตล่ม"
+
+พิสูจน์: harness 25/25 ผ่าน (เดิม 17) · run-sql-tests ผ่านรวม PD 5 เคสใหม่ ·
+เทสต์ใหม่ 8 ข้อรันบนโค้ดเดิมแล้วแดงครบทั้ง 8 และเทสต์ PD รันบน schema เดิมแล้ว
+แดงเช่นกัน จึงยืนยันได้ว่าจับของจริง ไม่ใช่เทสต์ที่ผ่านเพราะไม่ได้ตรวจอะไร
+
+หมายเหตุ: run-sql-tests.sh บนเครื่องนี้ต้องมี LC_ALL=C ไม่งั้น postgres 16 ตาย
+ด้วย postmaster became multithreaded ซึ่งเป็นเรื่อง locale ของเชลล์ ไม่ใช่ repo
+
+Critical Change ตาม AGENTS.md ข้อ 4 (authorization/permission) ต้องผ่าน
+CODEOWNER ก่อน merge · ยังไม่ deploy และยังไม่รัน schema กับ production
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_019ydP6KsDDZ9owE8qtTqFTj
+---
+ index.html                   | 257 ++++++++++++++++++++++++++++++-----
+ supabase/schema.sql          |  21 ++-
+ tests/formula-studio.test.js | 139 ++++++++++++++++++-
+ tests/sql/auth_rls_test.sql  |  58 ++++++++
+ 4 files changed, 432 insertions(+), 43 deletions(-)
+
+diff --git a/index.html b/index.html
+index 5774d6a..b54faf6 100755
+--- a/index.html
++++ b/index.html
+@@ -649,7 +649,7 @@ select.fi.role-select{width:auto;min-width:104px;height:36px;padding:0 8px;font-
+   <div class="logo"><svg viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-1.73-3L9 11.35V4H8a1 1 0 0 1 0-2h8a1 1 0 0 1 0 2h-1v7.35L19.73 19A2 2 0 0 1 18 22H6Zm5-10.11L8.31 16.5h7.38L13 11.89V4h-2v7.89Z"/></svg></div>
+   <div>
+     <div class="hdr-title">Formula Studio</div>
+-    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-08-25.1</div>
++    <div class="hdr-sub">Beyond Laboratory — R&D Briefing Tool · build 2026-09-04.1</div>
+   </div>
+   <div class="sync-chip" id="syncChip" onclick="sbManualSync()" title="สถานะการซิงก์ข้อมูลกับเซิร์ฟเวอร์กลาง"></div>
+ </div>
+@@ -3494,7 +3494,10 @@ function sideLogout(){
+       : 'ข้อมูลทั้งหมดที่บันทึกไว้แล้วยังอยู่ครบ',
+     'ต้องเข้าใช้งานใหม่ก่อน จึงจะสร้างงาน คุยในแชท หรืออนุมัติได้'
+   ];
+-  askConfirm('ออกจากระบบ', lines, 'ออกจากระบบ', function(){ logoutUser(); switchView('dash'); });
++  askConfirm('ออกจากระบบ', lines, 'ออกจากระบบ', function(){
++    switchView('dash');
++    logoutUser().catch(err=>console.warn('[auth]', safeError(err)));
++  });
+ }
+ async function logoutUser(){
+   // ออกจากระบบระหว่างสวมบทบาท ต้องล้างสถานะสวมบทบาทด้วย ไม่งั้นค้างเป็นสถานะกำกวม
+@@ -3504,8 +3507,14 @@ async function logoutUser(){
+   }
+   logAct('auth','ออกจากระบบ', currentUser);
+   currentUser='';
+-  if(sbOn()) await authSignOut(true);
++  // วาดหน้า login ให้เสร็จก่อนแจ้งเซิร์ฟเวอร์ · ถ้ารอ /auth/v1/logout ก่อน แล้วเน็ตช้า
++  // หรือหลุด ผู้ใช้จะเห็นหน้าจอค้างแบบ "กดออกจากระบบแล้วไม่มีอะไรเกิดขึ้น"
+   afterUserChange(); renderUserList();
++  if(sbOn()){
++    try{ await authSignOut(true); }
++    catch(err){ console.warn('[auth] แจ้งเซิร์ฟเวอร์ตอนออกจากระบบไม่สำเร็จ', safeError(err)); }
++    afterUserChange();
++  }
+ }
+ 
+ // ========== MODIFY DATA (รายการรหัส → เข้าไปแก้สูตร/หมายเหตุ) ==========
+@@ -4609,9 +4618,13 @@ function invalidateChatApprovals(c){
+ }
+ function pushSys(c, text, opt){
+   const o = opt || {};
+-  c.messages.push({type:'sys', user:currentUser||'', text, ts:Date.now()});
++  // ข้อความระบบสร้างเองจากค่าก่อน→หลังของฟิลด์ ซึ่งยาวเกิน 5000 ได้ง่ายมาก
++  // เมื่อผู้ใช้วางข้อความยาว ๆ ลงช่องหมายเหตุ — ตัดให้พอดีแทนที่จะปล่อยให้
++  // เซิร์ฟเวอร์ปฏิเสธแล้วทำให้ซิงก์ค้าง
++  const safe = chatClamp(text, CHAT_SYS_MAX);
++  c.messages.push({type:'sys', user:currentUser||'', text:safe, ts:Date.now()});
+   if(!o.skipQueue && !sbApplying && sbChatEventsOn())
+-    queueChatEvent(c.jobId, {type:'system', action:o.action||'chat_created', text});
++    queueChatEvent(c.jobId, {type:'system', action:o.action||'chat_created', text:safe});
+ }
+ 
+ // สร้างห้องแชทตามรหัสงาน
+@@ -5158,6 +5171,16 @@ function doReopenJob(r){
+ function chatKey(e){
+   if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendChatMsg(); }
+ }
++// ขีดจำกัดความยาวฝั่งเซิร์ฟเวอร์ (supabase/schema.sql: fs_append_chat_event)
++// ต้องกันตั้งแต่ฝั่ง client ไม่งั้นข้อความยาวเกินจะถูกเก็บลงเครื่อง เข้า outbox
++// แล้วถูกปฏิเสธซ้ำ ๆ จนซิงก์ค้างถาวร
++const CHAT_MSG_MAX = 10000;
++const CHAT_SYS_MAX = 5000;
++function chatClamp(text, max){
++  const t = String(text==null?'':text);
++  return t.length>max ? t.slice(0, max-1) + '…' : t;
++}
++
+ function sendChatMsg(){
+   const c = getChat(chatOpenId);
+   if(!c) return;
+@@ -5165,6 +5188,11 @@ function sendChatMsg(){
+   const ta = document.getElementById('chatInput');
+   const text = (ta.value||'').trim();
+   if(!text) { ta.focus(); return; }
++  if(text.length > CHAT_MSG_MAX){
++    alert('ข้อความยาวเกินไป (' + text.length.toLocaleString() + ' ตัวอักษร)\nส่งได้สูงสุด ' + CHAT_MSG_MAX.toLocaleString() + ' ตัวอักษร');
++    ta.focus();
++    return;
++  }
+   c.messages.push({type:'msg', user:currentUser, text, ts:Date.now()});
+   logAct('chat','ส่งข้อความ', text.length>160 ? text.slice(0,160)+'…' : text, c.jobId);
+   touchChatPart(c, currentUser, true);
+@@ -5993,7 +6021,14 @@ let authChecking = false;
+ function authFriendlyError(err){
+   const msg = String(err && err.message || err || '');
+   if(/invalid login|invalid credentials|400/i.test(msg)) return 'อีเมลหรือรหัสผ่านไม่ถูกต้อง';
+-  if(/membership|inactive|403/i.test(msg)) return 'บัญชีนี้ยังไม่ได้รับสิทธิ์ใช้งาน กรุณาติดต่อผู้ดูแลระบบ';
++  // แยก "ยังไม่ได้ตั้งค่าสิทธิ์" ออกจาก "รหัสผ่านผิด" และจาก "เน็ตมีปัญหา"
++  // ระบบที่เพิ่ง deploy แต่ยังไม่ seed fs_memberships จะล็อกอินไม่ได้เลย และเดิม
++  // ขึ้นข้อความเดียวกับตอนเน็ตล่ม จนหาสาเหตุไม่เจอ
++  if(/no membership|NO_MEMBERSHIP/i.test(msg))
++    return 'เข้าสู่ระบบได้แล้ว แต่ยังไม่มีสิทธิ์ใช้งานในระบบนี้ — ผู้ดูแลต้องเพิ่มบัญชีนี้ใน fs_memberships ก่อน';
++  if(/inactive/i.test(msg)) return 'บัญชีนี้ถูกปิดการใช้งาน กรุณาติดต่อผู้ดูแลระบบ';
++  if(/membership|403/i.test(msg)) return 'บัญชีนี้ยังไม่ได้รับสิทธิ์ใช้งาน กรุณาติดต่อผู้ดูแลระบบ';
++  if(/storage|quota/i.test(msg)) return 'เบราว์เซอร์บล็อกการเก็บข้อมูลของเว็บไซต์ — ปิดโหมดส่วนตัวหรืออนุญาต site data แล้วลองใหม่';
+   return 'เข้าใช้งานไม่สำเร็จ กรุณาตรวจสอบอินเทอร์เน็ตแล้วลองใหม่';
+ }
+ function safeError(err){
+@@ -6009,21 +6044,30 @@ function authStoreSession(session){
+   const normalized = Object.assign({}, session);
+   if(!normalized.expires_at) normalized.expires_at = Math.floor(Date.now()/1000) + Number(normalized.expires_in || 3600);
+   authSession = normalized;
+-  sessionStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(normalized));
+-  localStorage.removeItem(AUTH_SESSION_KEY);
++  // เบราว์เซอร์ที่บล็อกข้อมูลเว็บไซต์ (หน้าต่างส่วนตัว / นโยบายองค์กร) จะ throw ตรงนี้
++  // ถ้าไม่ดัก error จะทะลุออกไปเป็น "ตรวจสอบอินเทอร์เน็ต" ซึ่งชี้สาเหตุผิดจนแก้ไม่ถูก
++  // session ยังอยู่ในหน่วยความจำ ใช้งานต่อได้จนกว่าจะปิดแท็บ
++  try{ sessionStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(normalized)); }
++  catch(err){ console.warn('[auth] เบราว์เซอร์ไม่ยอมให้เก็บ session — จะต้องเข้าใช้งานใหม่เมื่อรีเฟรช'); }
++  try{ localStorage.removeItem(AUTH_SESSION_KEY); }catch(err){}
++  authScheduleRefresh();
+   localStorage.removeItem('fs_user');
+   localStorage.removeItem('fs_imp');
+   return normalized;
+ }
+ function authClearSession(){
++  clearTimeout(authRefreshTimer);
++  authRefreshTimer = null;
+   authSession = null;
+   authMembership = null;
+   currentUser = '';
+   impersonator = '';
+-  sessionStorage.removeItem(AUTH_SESSION_KEY);
+-  localStorage.removeItem(AUTH_SESSION_KEY);
+-  localStorage.removeItem('fs_user');
+-  localStorage.removeItem('fs_imp');
++  try{ sessionStorage.removeItem(AUTH_SESSION_KEY); }catch(err){}
++  try{
++    localStorage.removeItem(AUTH_SESSION_KEY);
++    localStorage.removeItem('fs_user');
++    localStorage.removeItem('fs_imp');
++  }catch(err){}
+   sbReady = false;
+ }
+ async function authRequest(path, opt){
+@@ -6041,6 +6085,22 @@ async function authSignIn(email, password){
+   const session = await authRequest('token?grant_type=password', {body:{email:String(email||'').trim(),password:String(password||'')}});
+   return authStoreSession(session);
+ }
++// Supabase access token มีอายุ ~1 ชั่วโมง เดิม authRefreshSession ถูกเรียกเฉพาะ
++// ตอนเปิดแอป พอเปิดแท็บทิ้งไว้ครบชั่วโมง sbCycle จะได้ 401 แล้วเด้งผู้ใช้ออกกลางคัน
++// ทั้งที่ refresh_token ยังใช้ได้อยู่ · ตัวจับเวลานี้ต่ออายุล่วงหน้าให้เอง
++let authRefreshTimer = null;
++function authScheduleRefresh(){
++  clearTimeout(authRefreshTimer);
++  if(!authSession || !authSession.expires_at) return;
++  const msLeft = (Number(authSession.expires_at) * 1000) - Date.now();
++  // ต่ออายุก่อนหมด 5 นาที และไม่ถี่กว่า 30 วินาที
++  const delay = Math.max(30000, msLeft - 5*60*1000);
++  authRefreshTimer = setTimeout(function(){
++    if(!authSession) return;
++    authRefreshSession().catch(err=>console.warn('[auth] ต่ออายุ session ไม่สำเร็จ', safeError(err)));
++  }, delay);
++}
++
+ async function authRefreshSession(){
+   if(!authSession || !authSession.refresh_token) throw new Error('No refresh token');
+   try{
+@@ -6073,9 +6133,17 @@ async function authFetchMembership(){
+   if(!authSession || !authSession.user || !authSession.user.id) throw new Error('Missing authenticated user');
+   const rows = await sbReq('fs_memberships?select=user_id,name,role,active&user_id=eq.' + encodeURIComponent(authSession.user.id));
+   const membership = rows && rows[0];
+-  if(!membership || !membership.active || !ROLES[membership.role]){
++  if(!membership){
++    authClearSession();
++    throw new Error('NO_MEMBERSHIP: authenticated but no membership row exists');
++  }
++  if(!membership.active){
++    authClearSession();
++    throw new Error('Inactive membership');
++  }
++  if(!ROLES[membership.role]){
+     authClearSession();
+-    throw new Error('Inactive or missing membership');
++    throw new Error('Unknown membership role');
+   }
+   authMembership = membership;
+   currentUser = membership.name;
+@@ -6083,10 +6151,10 @@ async function authFetchMembership(){
+   const local = findUser(membership.name);
+   if(local){ local.role=membership.role; local.email=(authSession.user.email||local.email||''); local.pass=null; }
+   else userList.push({name:membership.name,role:membership.role,email:authSession.user.email||'',pass:null});
+-  if(membership.role!=='admin'){
+-    activities=[];
+-    localStorage.removeItem('fs_activities');
+-  }
++  // เดิมตรงนี้ล้าง activities ทิ้งทุกครั้งที่ non-admin ล็อกอิน ทำให้ activity ที่
++  // สร้างตอน offline หายถาวรก่อนได้ push ขึ้นเซิร์ฟเวอร์ — ผิดกฎเหล็กข้อ 2
++  // ("ห้ามเขียนทับ/เคลียร์ store ใด ๆ ตอน load") และข้อ 4 โดยตรง
++  // การมองไม่เห็นหน้า Activity เป็นเรื่องสิทธิ์การ "แสดงผล" ไม่ใช่เหตุผลให้ลบข้อมูล
+   saveUsers();
+   return membership;
+ }
+@@ -6109,6 +6177,43 @@ function sbPersistSnapshot(){
+   try{ localStorage.setItem('fs_sync_snapshot',JSON.stringify(sbSnap)); }catch(err){}
+ }
+ let sbSnap = sbLoadSnapshot();
++// ข้อความบอกผู้ใช้ว่าบัญชีนี้ดูได้อย่างเดียว (ตั้งตอน push แล้วโชว์ที่ chip)
++let sbReadOnlyNote = '';
++
++// uid ของ activity ที่ push สำเร็จแล้ว
++//
++// เก็บแยกจาก sbSnap.acts โดยตั้งใจ: fs_activities ให้ SELECT เฉพาะ admin ส่วน
++// role อื่นได้ 200 [] กลับมา (RLS ที่ using ไม่ผ่านคืน "ไม่มีแถว" ไม่ใช่ error)
++// ถ้าอาศัย sbSnap.acts ที่มาจากการ pull ทุกครั้ง ร่องรอยว่า "ส่งไปแล้ว" จะถูกล้าง
++// ทุกรอบ แล้ว client จะ re-upload activity ทั้งกองทุก 5 วินาทีตลอดไป
++let actPushed = (function(){
++  try{ const v=JSON.parse(localStorage.getItem('fs_act_pushed')||'null'); return (v&&typeof v==='object')?v:{}; }
++  catch(err){ return {}; }
++})();
++function saveActPushed(){
++  try{
++    const keys=Object.keys(actPushed);
++    if(keys.length>ACT_MAX){ const keep={}; keys.slice(-ACT_MAX).forEach(k=>keep[k]=1); actPushed=keep; }
++    localStorage.setItem('fs_act_pushed',JSON.stringify(actPushed));
++  }catch(err){}
++}
++
++// ข้อผิดพลาดจากเซิร์ฟเวอร์ที่บอกได้ว่าเป็น "ไม่มีสิทธิ์" หรือ "ส่งซ้ำก็ไม่ผ่าน"
++function sbHttpError(status, text){
++  const err = new Error(status + ' ' + String(text||'').slice(0,180));
++  err.sbStatus = status;
++  // 4xx ที่ไม่ใช่ 401/408/429 คือคำตอบเดิมทุกครั้งที่ลองใหม่ — retry ไปก็เท่านั้น
++  err.sbPermanent = status>=400 && status<500 && status!==401 && status!==408 && status!==429;
++  return err;
++}
++function sbIsPermanent(err){ return !!(err && err.sbPermanent); }
++
++// สิทธิ์เขียนฝั่งเซิร์ฟเวอร์ (สะท้อน policy ใน supabase/schema.sql ตรง ๆ)
++// มีไว้เพื่อ "ไม่ส่งสิ่งที่รู้อยู่แล้วว่าจะถูกปฏิเสธ" ไม่ใช่เพื่อใช้แทนการตรวจฝั่งเซิร์ฟเวอร์
++function sbRoleForServer(){ return (authMembership && authMembership.role) || currentRole(); }
++function sbCanInsertRecords(){ return ['admin','sales','opc','mkt'].includes(sbRoleForServer()); }
++function sbCanUpdateRecords(){ return ['admin','sales','opc','mkt','pd'].includes(sbRoleForServer()); }
++function sbCanWriteMeta(){ return ['admin','sales','opc','mkt'].includes(sbRoleForServer()); }
+ 
+ async function sbReq(path, opt){
+   const o = opt || {};
+@@ -6119,8 +6224,21 @@ async function sbReq(path, opt){
+   });
+   if(!res.ok){
+     const t = await res.text();
+-    if(res.status===401 || res.status===403) authClearSession();
+-    throw new Error(res.status + ' ' + t.slice(0,180));
++    // token หมดอายุระหว่างใช้งาน: ต่ออายุแล้วลองใหม่หนึ่งครั้งก่อนจะยอมแพ้
++    // (ทำครั้งเดียว กัน loop เมื่อ refresh_token เองก็หมดอายุแล้ว)
++    if(res.status===401 && !o._retried && authSession && authSession.refresh_token){
++      try{
++        await authRefreshSession();
++        return await sbReq(path, Object.assign({}, o, {_retried:true}));
++      }catch(err){ /* ต่ออายุไม่ได้จริง ๆ — ตกไปที่ทางล้าง session ด้านล่าง */ }
++    }
++    // 401 = ตัวตนหมดอายุ/ไม่ถูกต้อง → ล็อกอินใหม่เท่านั้นที่แก้ได้
++    // 403 = ตัวตนถูกต้องแต่ไม่มีสิทธิ์ (RLS / guard trigger) → "ห้าม" ล้าง session
++    //       เพราะ PostgREST ตอบ 403 ทุกครั้งที่ policy ปฏิเสธ ถ้าล้าง session ตรงนี้
++    //       ผู้ใช้จะถูกเด้งออกหน้า login แล้ว delta ที่ถูกปฏิเสธยังค้างอยู่ พอล็อกอิน
++    //       ใหม่ก็ push ซ้ำแล้วเด้งอีก วนไม่จบจนใช้งานไม่ได้เลย
++    if(res.status===401) authClearSession();
++    throw sbHttpError(res.status, t);
+   }
+   const txt = await res.text();
+   return txt ? JSON.parse(txt) : null;
+@@ -6144,11 +6262,15 @@ function sbChip(){
+   let cls = 'sync-chip on', txt;
+   if(sbErr){ cls += ' err'; txt = 'ซิงก์ไม่สำเร็จ — กดเพื่อลองใหม่'; }
+   else if(sbBusy){ cls += ' busy'; txt = 'กำลังซิงก์…'; }
++  else if(sbReadOnlyNote){ cls += ' ok'; txt = 'ซิงก์แล้ว (ดูอย่างเดียว)'; }
+   else if(sbReady){ cls += ' ok'; txt = 'ซิงก์แล้ว' + (sbLastPush ? ' · ' + new Date(sbLastPush).toLocaleTimeString('th-TH') : ''); }
+   else { txt = 'กำลังเชื่อมต่อ…'; }
+   el.className = cls;
+   el.textContent = txt;
+-  el.title = sbErr ? ('ข้อผิดพลาด: ' + sbErr + '\nกดเพื่อลองซิงก์ใหม่') : 'ข้อมูลซิงก์กับเซิร์ฟเวอร์กลาง — กดเพื่อซิงก์ทันที';
++  // บอกให้ชัดว่าทำไมงานในเครื่องถึงไม่ขึ้นเซิร์ฟเวอร์ แทนที่จะเงียบแล้วให้เดาเอง
++  el.title = sbErr ? ('ข้อผิดพลาด: ' + sbErr + '\nกดเพื่อลองซิงก์ใหม่')
++    : (sbReadOnlyNote ? (sbReadOnlyNote + '\nกดเพื่อซิงก์ทันที')
++    : 'ข้อมูลซิงก์กับเซิร์ฟเวอร์กลาง — กดเพื่อซิงก์ทันที');
+ }
+ 
+ // ---------- ดึงข้อมูลจากเซิร์ฟเวอร์ลงเครื่อง ----------
+@@ -6223,6 +6345,10 @@ function sbApply(d){
+       const actMap={};
+       activities.concat(d.acts||[]).forEach(e=>{ actMap[actUid(e)]=e; });
+       activities=Object.values(actMap).sort((a,b)=>(b.ts||0)-(a.ts||0));
++      // ตัดให้เท่ากับที่ logAct ทำ ไม่งั้น array โตเกินโควตา localStorage
++      // (saveActivities กลืน error เงียบ ๆ) และรายการที่เกินหน้าต่าง 3000 ของ
++      // เซิร์ฟเวอร์จะถูก push ซ้ำทุกรอบ
++      if(activities.length > ACT_MAX) activities.length = ACT_MAX;
+     }
+     if(d.users.length) userList=d.users.map(u=>Object.assign({},u,{pass:null}));
+     if(authMembership){
+@@ -6268,14 +6394,39 @@ function sbSnapshot(){
+   sbPersistSnapshot();
+ }
+ 
++// รายการที่เซิร์ฟเวอร์ปฏิเสธถาวร — เก็บไว้ให้ตรวจได้ ไม่ทิ้งเงียบ ๆ
++let chatDeadLetter = (function(){
++  try{ const v=JSON.parse(localStorage.getItem('fs_chat_dead_letter')||'null'); return Array.isArray(v)?v:[]; }
++  catch(err){ return []; }
++})();
++function saveChatDeadLetter(){
++  try{
++    if(chatDeadLetter.length>200) chatDeadLetter = chatDeadLetter.slice(-200);
++    localStorage.setItem('fs_chat_dead_letter',JSON.stringify(chatDeadLetter));
++  }catch(err){}
++}
++
+ async function sbPushChatEvents(){
+   if(!sbChatEventsOn() || !chatEventOutbox.length) return false;
+   let changed = false;
+   for(const item of chatEventOutbox.slice()){
+-    await sbReq('rpc/fs_append_chat_event', {
+-      method:'POST',
+-      body:{p_event_id:item.eventId,p_job_id:item.jobId,p_payload:item.payload}
+-    });
++    try{
++      await sbReq('rpc/fs_append_chat_event', {
++        method:'POST',
++        body:{p_event_id:item.eventId,p_job_id:item.jobId,p_payload:item.payload}
++      });
++    }catch(err){
++      // ข้อความที่ยาวเกินหรือผิดกติกาจะถูกปฏิเสธเหมือนเดิมทุกครั้ง ถ้าปล่อยให้ throw
++      // ออกไป sbPush จะหยุดตั้งแต่บรรทัดแรก แล้ว records/activities/counter จะไม่ถูก
++      // ส่งอีกเลย — แชทข้อความเดียวทำให้ทั้งระบบหยุดซิงก์ถาวรและไม่มี UI ให้เคลียร์
++      if(!sbIsPermanent(err)) throw err;
++      chatEventOutbox = chatEventOutbox.filter(x=>x.eventId!==item.eventId);
++      chatDeadLetter.push({kind:'event', jobId:item.jobId, eventId:item.eventId, at:Date.now(), err:safeError(err)});
++      saveChatDeadLetter();
++      saveChatOutboxes();
++      console.warn('[sync] เซิร์ฟเวอร์ปฏิเสธ chat event ถาวร ข้ามไปก่อน', safeError(err));
++      continue;
++    }
+     chatEventOutbox = chatEventOutbox.filter(x=>x.eventId!==item.eventId);
+     saveChatOutboxes();
+     changed = true;
+@@ -6285,9 +6436,17 @@ async function sbPushChatEvents(){
+ async function sbPushChatReads(){
+   if(!sbChatEventsOn() || !chatReadOutbox.length) return false;
+   for(const item of chatReadOutbox.slice()){
+-    await sbReq('rpc/fs_mark_chat_seen', {
+-      method:'POST', body:{p_job_id:item.jobId,p_seen_ts:item.seenTs}
+-    });
++    try{
++      await sbReq('rpc/fs_mark_chat_seen', {
++        method:'POST', body:{p_job_id:item.jobId,p_seen_ts:item.seenTs}
++      });
++    }catch(err){
++      if(!sbIsPermanent(err)) throw err;
++      chatReadOutbox = chatReadOutbox.filter(x=>x.jobId!==item.jobId);
++      chatDeadLetter.push({kind:'read', jobId:item.jobId, at:Date.now(), err:safeError(err)});
++      saveChatDeadLetter(); saveChatOutboxes();
++      continue;
++    }
+     chatReadOutbox = chatReadOutbox.filter(x=>x.jobId!==item.jobId);
+     saveChatOutboxes();
+   }
+@@ -6296,7 +6455,15 @@ async function sbPushChatReads(){
+ async function sbPushChatDeletes(){
+   if(!sbChatEventsOn() || !chatDeleteOutbox.length) return false;
+   for(const jobId of chatDeleteOutbox.slice()){
+-    await sbReq('rpc/fs_delete_chat', {method:'POST',body:{p_job_id:jobId}});
++    try{
++      await sbReq('rpc/fs_delete_chat', {method:'POST',body:{p_job_id:jobId}});
++    }catch(err){
++      if(!sbIsPermanent(err)) throw err;
++      chatDeleteOutbox = chatDeleteOutbox.filter(x=>x!==jobId);
++      chatDeadLetter.push({kind:'delete', jobId:jobId, at:Date.now(), err:safeError(err)});
++      saveChatDeadLetter(); saveChatOutboxes();
++      continue;
++    }
+     chatDeleteOutbox = chatDeleteOutbox.filter(x=>x!==jobId);
+     saveChatOutboxes();
+   }
+@@ -6322,23 +6489,41 @@ async function sbPush(){
+   const chtDel = secureChatEvents ? [] : Object.keys(sbSnap.chats).filter(k=>!seenC[k]);
+   const usrDel = [];
+   activities.filter(e=>currentRole()==='admin' || (e.user===currentUser && !e.via))
+-    .forEach(e=>{ const u = actUid(e); if(!sbSnap.acts[u]) actUp.push({uid:u, ts:e.ts||0, data:e}); });
+-  const counterUp = sbSnap.counter !== recCounter;
++    .forEach(e=>{ const u = actUid(e); if(!sbSnap.acts[u] && !actPushed[u]) actUp.push({uid:u, ts:e.ts||0, data:e}); });
++  // เทียบเป็นตัวเลขเสมอ: schema ไม่ได้ seed fs_meta ไว้ ค่าจากเซิร์ฟเวอร์จึงเป็น null
++  // ส่วน recCounter เริ่มที่ 0 — ถ้าเทียบด้วย !== ตรง ๆ จะได้ "ต่างกัน" ทุกครั้ง แล้ว
++  // ทุก sync จะพยายาม push fs_meta ซึ่ง policy ให้เฉพาะ admin/sales/opc/mkt เขียน
++  // ผลคือ pd/ra/rd/purchasing โดน 403 ตั้งแต่ sync แรกและใช้งานไม่ได้เลย
++  const serverCounter = Number(sbSnap.counter || 0);
++  const localCounter = Number(recCounter || 0);
++  const counterUp = sbCanWriteMeta() && localCounter > serverCounter;
+   if(!recUp.length && !chtUp.length && !usrUp.length && !actUp.length
+      && !recDel.length && !chtDel.length && !usrDel.length && !counterUp
+-     && !chatEventsPushed && !chatReadsPushed && !chatDeletesPushed) return false;
+-
+-  await sbUpsert('fs_records', recUp);
++     && !chatEventsPushed && !chatReadsPushed && !chatDeletesPushed){ sbReadOnlyNote=''; return false; }
++
++  // แยก insert กับ update ออกจากกัน เพราะ policy คนละชุด: insert ให้
++  // admin/sales/opc/mkt ส่วน update ให้ +pd · role ที่เขียนไม่ได้ (ra, rd,
++  // purchasing) เคยติด 403 ตั้งแต่มี local record ค้างอยู่ใบเดียว แล้วโดนเด้งออก
++  // ทุกครั้งที่ล็อกอิน — ตอนนี้ข้ามการส่งไปเงียบ ๆ และยังอ่าน/ทำงาน offline ได้ตามเดิม
++  const recNew = recUp.filter(r=>!sbSnap.records[r.id]);
++  const recEdit = recUp.filter(r=>!!sbSnap.records[r.id]);
++  const recSend = [].concat(sbCanInsertRecords()?recNew:[], sbCanUpdateRecords()?recEdit:[]);
++  const recSkipped = recUp.length - recSend.length;
++  if(recSkipped>0) sbReadOnlyNote = 'บัญชีนี้ไม่มีสิทธิ์บันทึกขึ้นเซิร์ฟเวอร์ ' + recSkipped + ' รายการ (ดูได้อย่างเดียว)';
++  else sbReadOnlyNote = '';
++  await sbUpsert('fs_records', recSend);
+   if(!secureChatEvents) await sbUpsert('fs_chats', chtUp);
+   await sbUpsert('fs_users', usrUp);
+   if(actUp.length){
+     await sbUpsert('fs_activities', actUp, 'resolution=ignore-duplicates');
+-    actUp.forEach(a=>{ sbSnap.acts[a.uid] = 1; });
++    // จำไว้นอก snapshot ที่ได้จากการ pull ไม่งั้นรอบหน้าจะส่งซ้ำทั้งกองอีก
++    actUp.forEach(a=>{ sbSnap.acts[a.uid] = 1; actPushed[a.uid] = 1; });
++    saveActPushed();
+   }
+   await sbDelete('fs_records', 'id', recDel);
+   if(!secureChatEvents) await sbDelete('fs_chats', 'job_id', chtDel);
+   await sbDelete('fs_users', 'name', usrDel);
+-  if(counterUp) await sbUpsert('fs_meta', [{key:'reccounter', value:recCounter}]);
++  if(counterUp) await sbUpsert('fs_meta', [{key:'reccounter', value:Number(recCounter||0)}]);
+   sbSnapshot();
+   sbLastPush = Date.now();
+   return true;
+diff --git a/supabase/schema.sql b/supabase/schema.sql
+index 6b03cad..23fc44f 100644
+--- a/supabase/schema.sql
++++ b/supabase/schema.sql
+@@ -173,7 +173,26 @@ as $$
+ declare
+   actor_role text := private.fs_current_role();
+   actor_name text := private.fs_current_name();
+-  pd_keys text[] := array['rows','rdUpdated','modNote'];
++  -- ฟิลด์ที่ PD แก้ได้ ต้องตรงกับ JD_SECTIONS ที่ canEditSection() เปิดให้ PD แก้
++  -- ใน index.html (หมวด product / spec / target / benefit) มิฉะนั้น UI จะยอมให้กด
++  -- บันทึกแล้วเซิร์ฟเวอร์ปฏิเสธด้วย 42501 → 403 → ผู้ใช้ถูกเด้งออกจากระบบ
++  --
++  -- policy records_role_update อนุญาต 'pd' อยู่แล้ว รายการนี้จึงเป็นการปรับ
++  -- field-level guard ให้ตามหลังฟีเจอร์แก้ Job Data ที่เพิ่มเข้ามาทีหลัง
++  -- ไม่ใช่การเปิดสิทธิ์ระดับตารางใหม่
++  pd_keys text[] := array[
++    'rows','rdUpdated','modNote',
++    -- product
++    'conceptStr','form','size','sizeUnit','uw','uwUnit','cat','subcat',
++    -- spec
++    'color','scent','flavor','packType','widthCm','lengthCm',
++    -- target
++    'finalTarget','gender','price','priority','fdaType',
++    -- benefit
++    'allBenefits','cons','notes',
++    -- allBenefits ถูกมิเรอร์ลง benefits (ฟิลด์เดิม) โดย saveJobSection เสมอ
++    'benefits'
++  ];
+ begin
+   if actor_role is null or actor_name is null then
+     raise exception 'active membership required' using errcode='42501';
+diff --git a/tests/formula-studio.test.js b/tests/formula-studio.test.js
+index 4aa3513..5d407df 100644
+--- a/tests/formula-studio.test.js
++++ b/tests/formula-studio.test.js
+@@ -80,15 +80,142 @@
+     equal(localStorage.getItem('fs_auth_session'), null, 'refreshed session leaked into localStorage');
+   });
+ 
+-  test('401/403 clears authorization instead of falling back to publishable bearer', async function(){
++  test('401 clears authorization instead of falling back to publishable bearer', async function(){
+     reset();
+-    authSession = {access_token:'denied-token',refresh_token:'refresh-test',expires_at:Date.now()/1000+3600};
+-    window.__fetchQueue.push(window.__mockResponse(403, {message:'denied'}));
++    // ไม่มี refresh_token → ต่ออายุไม่ได้ ต้องล้าง session ทันที
++    authSession = {access_token:'expired-token',expires_at:Date.now()/1000+3600};
++    window.__fetchQueue.push(window.__mockResponse(401, {message:'jwt expired'}));
+     let failed = false;
+     try{ await sbReq('fs_records?select=id'); }catch(err){ failed = true; }
+-    assert(failed, 'forbidden request unexpectedly succeeded');
+-    equal(authSession, null, 'forbidden session was retained');
+-    equal(sessionStorage.getItem('fs_auth_session'), null, 'forbidden token remained in storage');
++    assert(failed, 'unauthenticated request unexpectedly succeeded');
++    equal(authSession, null, 'expired session was retained');
++    equal(sessionStorage.getItem('fs_auth_session'), null, 'expired token remained in storage');
++    // และต้องไม่มีทางส่ง publishable key เป็น Bearer แทนตัวตนผู้ใช้
++    let threw = false;
++    try{ authDataHeaders(); }catch(err){ threw = true; }
++    assert(threw, 'header builder fell back to a session-less request');
++  });
++
++  test('403 is an authorization denial and must NOT destroy the session', async function(){
++    // PostgREST ตอบ 403 ทุกครั้งที่ RLS/guard trigger ปฏิเสธ ซึ่งเป็นเรื่อง "สิทธิ์"
++    // ไม่ใช่ "ตัวตน" · ถ้าล้าง session ตรงนี้ ผู้ใช้จะถูกเด้งออกหน้า login แล้ว delta
++    // ที่ถูกปฏิเสธยังค้างอยู่ พอล็อกอินใหม่ก็ push ซ้ำแล้วเด้งอีก วนไม่จบ
++    reset();
++    authSession = {access_token:'valid-token',refresh_token:'refresh-test',expires_at:Date.now()/1000+3600};
++    window.__fetchQueue.push(window.__mockResponse(403, {message:'record mutation exceeds role permission'}));
++    let caught = null;
++    try{ await sbReq('fs_records?select=id'); }catch(err){ caught = err; }
++    assert(caught, 'forbidden request unexpectedly succeeded');
++    assert(authSession && authSession.access_token === 'valid-token', 'authorization denial destroyed the session');
++    equal(caught.sbStatus, 403, 'status was not reported to the caller');
++    assert(caught.sbPermanent === true, 'a role denial was marked retryable');
++    // ยังต้องใช้ token ของผู้ใช้เองเท่านั้น ไม่ถอยไปใช้ publishable key เป็น Bearer
++    equal(authDataHeaders().Authorization, 'Bearer valid-token', 'fell back to a different bearer');
++  });
++
++  // ---- อาการ "ล็อกอินแล้วเด้งออก ใช้งานไม่ได้" ที่พบจาก /code-review ----
++
++  function activeSession(role){
++    authSession = {access_token:'valid-token',refresh_token:'refresh-test',expires_at:Date.now()/1000+3600,
++      user:{id:'22222222-2222-2222-2222-222222222222',email:'user@example.test'}};
++    authMembership = {name:'ผู้ใช้ทดสอบ',role:role,active:true};
++    currentUser = 'ผู้ใช้ทดสอบ';
++    sbReady = true;
++  }
++
++  test('role ที่เขียน fs_meta ไม่ได้ ต้องไม่ push reccounter (เดิมโดน 403 ตั้งแต่ sync แรก)', async function(){
++    // schema ไม่ได้ seed fs_meta ค่าจากเซิร์ฟเวอร์จึงเป็น null ส่วน recCounter เริ่มที่ 0
++    // เดิมเทียบด้วย !== ตรง ๆ จึง "ต่างกัน" เสมอ แล้วทุก sync จะยิง fs_meta
++    for(const role of ['pd','ra','rd','purchasing']){
++      reset();
++      activeSession(role);
++      records = []; chats = []; activities = []; recCounter = 0;
++      sbSnap = {records:{},chats:{},users:{},acts:{},counter:null};
++      const pushed = await sbPush();
++      const metaCalls = window.__fetchCalls.filter(c=>c.url.includes('fs_meta'));
++      equal(metaCalls.length, 0, role + ' ยังพยายามเขียน fs_meta');
++      equal(pushed, false, role + ' คิดว่ามีอะไรต้อง push ทั้งที่ไม่มี');
++    }
++  });
++
++  test('role ที่ไม่มีสิทธิ์เขียน record ต้องไม่ส่ง record ขึ้นเซิร์ฟเวอร์', async function(){
++    for(const role of ['ra','rd','purchasing']){
++      reset();
++      activeSession(role);
++      records = [{id:'A00001', customer:'ลูกค้าเก่าในเครื่อง'}];
++      chats = []; activities = []; recCounter = 1;
++      sbSnap = {records:{},chats:{},users:{},acts:{},counter:1};
++      await sbPush();
++      const recCalls = window.__fetchCalls.filter(c=>c.url.includes('fs_records') && c.options.method==='POST');
++      equal(recCalls.length, 0, role + ' ส่ง record ที่เซิร์ฟเวอร์จะปฏิเสธแน่ ๆ');
++      equal(records.length, 1, role + ' ทำ record ในเครื่องหาย');
++    }
++  });
++
++  test('activity ที่ push แล้วต้องไม่ถูกส่งซ้ำ แม้ pull จะคืนรายการเปล่า', async function(){
++    // fs_activities ให้ SELECT เฉพาะ admin · role อื่นได้ 200 [] กลับมา ถ้าจำว่า
++    // "ส่งแล้ว" ไว้ใน snapshot ที่มาจากการ pull ร่องรอยจะหายทุกรอบแล้วส่งซ้ำตลอดไป
++    reset();
++    activeSession('sales');
++    records = []; chats = []; recCounter = 0;
++    activities = [{ts:1000, at:'x', user:'ผู้ใช้ทดสอบ', role:'sales', cat:'auth', action:'เข้าใช้งาน', detail:'', job:'', via:''}];
++    sbSnap = {records:{},chats:{},users:{},acts:{},counter:0};
++    window.__fetchQueue.push(window.__mockResponse(200, null));
++    equal(await sbPush(), true, 'รอบแรกควรมี activity ให้ส่ง');
++
++    // จำลองการ pull ที่คืน acts เปล่า (RLS ปฏิเสธแบบเงียบ)
++    sbSnap = {records:{},chats:{},users:{},acts:{},counter:0};
++    equal(await sbPush(), false, 'ส่ง activity ซ้ำอีกรอบ (loop ทุก 5 วินาที)');
++  });
++
++  test('การล็อกอินของ non-admin ต้องไม่ล้าง activity ในเครื่อง', async function(){
++    reset();
++    activities = [{ts:1, at:'x', user:'ใครสักคน', role:'sales', cat:'job', action:'สร้างงาน', detail:'', job:'A00001', via:''}];
++    saveActivities();
++    authSession = {access_token:'t', refresh_token:'r', expires_at:Date.now()/1000+3600,
++      user:{id:'33333333-3333-3333-3333-333333333333', email:'sales@example.test'}};
++    window.__fetchQueue.push(window.__mockResponse(200, [
++      {user_id:'33333333-3333-3333-3333-333333333333', name:'เซลส์ทดสอบ', role:'sales', active:true}
++    ]));
++    await authFetchMembership();
++    equal(activities.length, 1, 'activity ในเครื่องถูกล้างทิ้งตอนล็อกอิน');
++    assert(localStorage.getItem('fs_activities'), 'fs_activities ถูกลบออกจาก localStorage');
++  });
++
++  test('บัญชีที่ยังไม่มีสิทธิ์ ต้องบอกสาเหตุให้ต่างจากรหัสผ่านผิดและเน็ตล่ม', async function(){
++    reset();
++    authSession = {access_token:'t', refresh_token:'r', expires_at:Date.now()/1000+3600,
++      user:{id:'44444444-4444-4444-4444-444444444444', email:'new@example.test'}};
++    window.__fetchQueue.push(window.__mockResponse(200, []));
++    let caught = null;
++    try{ await authFetchMembership(); }catch(err){ caught = err; }
++    assert(caught, 'ล็อกอินสำเร็จทั้งที่ไม่มี membership');
++    const friendly = authFriendlyError(caught);
++    assert(friendly.includes('fs_memberships'), 'ข้อความไม่ได้บอกว่าต้องเพิ่ม membership: ' + friendly);
++    assert(!friendly.includes('อินเทอร์เน็ต'), 'ยังโทษอินเทอร์เน็ตอยู่');
++  });
++
++  test('chat event ที่ถูกปฏิเสธถาวร ต้องไม่ทำให้ทั้ง sbPush ค้าง', async function(){
++    reset();
++    activeSession('sales');
++    records = []; chats = []; activities = []; recCounter = 0;
++    sbSnap = {records:{},chats:{},users:{},acts:{},counter:0};
++    chatEventOutbox = [{eventId:'ev-1', jobId:'A00001', payload:{type:'message', text:'ยาวเกิน'}}];
++    // RPC ปฏิเสธถาวร แล้วตามด้วย 200 ของ upsert อื่น ๆ
++    window.__fetchQueue.push(window.__mockResponse(400, {message:'chat message must be 1 to 10000 characters'}));
++    let threw = false;
++    try{ await sbPushChatEvents(); }catch(err){ threw = true; }
++    assert(!threw, 'ข้อความเดียวที่ถูกปฏิเสธทำให้ทั้ง sbPush หยุด');
++    equal(chatEventOutbox.length, 0, 'รายการที่ปฏิเสธถาวรยังค้างใน outbox');
++    assert(chatDeadLetter.length === 1, 'ไม่ได้เก็บรายการที่ถูกปฏิเสธไว้ตรวจ');
++  });
++
++  test('ข้อความระบบที่ยาวเกินถูกตัดก่อนเข้า outbox', function(){
++    reset();
++    activeSession('sales');
++    const c = {jobId:'A00001', messages:[], parts:[], approvals:{}};
++    pushSys(c, 'x'.repeat(9000), {action:'job_edit', skipQueue:true});
++    assert(c.messages[0].text.length <= 5000, 'ข้อความระบบยาวเกินขีดจำกัดของเซิร์ฟเวอร์');
+   });
+ 
+   test('local-only mode works without Auth or network', async function(){
+diff --git a/tests/sql/auth_rls_test.sql b/tests/sql/auth_rls_test.sql
+index 4a4955c..33702c5 100644
+--- a/tests/sql/auth_rls_test.sql
++++ b/tests/sql/auth_rls_test.sql
+@@ -92,6 +92,64 @@ begin; set local role authenticated; select set_config('request.jwt.claim.sub','
+ \endif
+ rollback;
+ 
++-- PD ต้องแก้หมวด Job Data ที่ canEditSection() เปิดให้ได้จริง
++-- ก่อนหน้านี้ pd_keys มีแค่ rows/rdUpdated/modNote ทำให้ UI ยอมให้กดบันทึกแล้ว
++-- เซิร์ฟเวอร์ปฏิเสธ 42501 → PostgREST ตอบ 403 → ผู้ใช้ถูกเด้งออกจากระบบ
++begin; set local role authenticated; select set_config('request.jwt.claim.sub','44444444-4444-4444-4444-444444444444',true);
++update public.fs_records set data=jsonb_set(data,'{conceptStr}','"เซรั่มบำรุงผิวหน้า"') where id='A00001';
++\if :ERROR
++  \echo 'FAIL PD could not edit the product concept'
++  \quit 1
++\else
++  \echo 'PASS PD edits product section'
++\endif
++rollback;
++
++begin; set local role authenticated; select set_config('request.jwt.claim.sub','44444444-4444-4444-4444-444444444444',true);
++update public.fs_records set data = data
++  || jsonb_build_object('color','ใส','scent','ไม่มีกลิ่น','packType','ขวดปั๊ม','widthCm','4','lengthCm','12')
++  || jsonb_build_object('finalTarget','ผู้หญิง 25-35','gender','หญิง','price','390','priority','สูง','fdaType','เครื่องสำอาง')
++  || jsonb_build_object('allBenefits','["ลดเลือนริ้วรอย"]'::jsonb,'benefits','["ลดเลือนริ้วรอย"]'::jsonb,'cons','["แพ้ง่ายควรทดสอบ"]'::jsonb,'notes','ทดสอบ')
++  where id='A00001';
++\if :ERROR
++  \echo 'FAIL PD could not edit spec/target/benefit sections'
++  \quit 1
++\else
++  \echo 'PASS PD edits spec, target and benefit sections'
++\endif
++rollback;
++
++-- แต่สิทธิ์ที่เพิ่มให้ต้องไม่เลยขอบเขต: กล่องลูกค้า & แบรนด์ ยังล็อกอยู่ทุก Role
++begin; set local role authenticated; select set_config('request.jwt.claim.sub','44444444-4444-4444-4444-444444444444',true);
++update public.fs_records set data=jsonb_set(data,'{brand}','"Rebranded by PD"') where id='A00001';
++\if :ERROR
++  \echo 'PASS PD brand mutation still denied'
++\else
++  \echo 'FAIL PD changed brand field'
++  \quit 1
++\endif
++rollback;
++
++begin; set local role authenticated; select set_config('request.jwt.claim.sub','44444444-4444-4444-4444-444444444444',true);
++update public.fs_records set data=jsonb_set(data,'{salesOwner}','"PD One"') where id='A00001';
++\if :ERROR
++  \echo 'PASS PD salesOwner mutation still denied'
++\else
++  \echo 'FAIL PD reassigned the sales owner'
++  \quit 1
++\endif
++rollback;
++
++begin; set local role authenticated; select set_config('request.jwt.claim.sub','44444444-4444-4444-4444-444444444444',true);
++update public.fs_records set data=jsonb_set(data,'{closed}','{"by":"PD One","at":"now","ts":1}'::jsonb) where id='A00001';
++\if :ERROR
++  \echo 'PASS PD still cannot close a job'
++\else
++  \echo 'FAIL PD closed a job'
++  \quit 1
++\endif
++rollback;
++
+ begin; set local role authenticated; select set_config('request.jwt.claim.sub','55555555-5555-5555-5555-555555555555',true); update public.fs_chats set data=jsonb_set(data,'{approvals,pd}','{"by":"RA One"}') where job_id='A00001';
+ \if :ERROR
+   \echo 'PASS RA cannot change PD approval'
+-- 
+2.39.5 (Apple Git-154)
+

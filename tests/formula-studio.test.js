@@ -31,6 +31,8 @@
     sbErr = '';
     if(typeof sbConfirmedRecords !== 'undefined') sbConfirmedRecords = {};
     if(typeof sbConfirmedScope !== 'undefined') sbConfirmedScope = '';
+    if(typeof saveQReset === 'function') saveQReset();
+    if(typeof clearTimeout === 'function' && typeof sbPushTimer !== 'undefined') clearTimeout(sbPushTimer);
   }
 
   function savedJobFixture(){
@@ -175,6 +177,24 @@
     const panel=document.getElementById('recordsPanel');
     assert(panel.querySelector('.job-stale'),'stale warning is missing');
     assert(!panel.textContent.includes('A00092'),'hidden job leaked into warnings');
+  });
+  test('Sales can load an existing job from its detail popup to retrieve price', function(){
+    reset();
+    SB_URL='';
+    currentUser='Sales One';
+    userList=[{name:'Sales One',role:'sales',pass:null}];
+    const r={id:'A00091',customer:'Synthetic job',brand:'Synthetic brand',createdBy:'Sales One',
+      salesOwner:'Sales One',price:'150',rows:[],allConcepts:[],benefits:[],cons:[]};
+    records=[r]; chats=[]; activities=[];
+
+    openRecordPopup(r.id);
+    const box=document.getElementById('gModalBox');
+    const openButton=Array.from(box.querySelectorAll('button'))
+      .find(button=>button.textContent.includes('เปิดใน Customer Data'));
+    assert(openButton,'existing job has no Sales reload action');
+    openButton.click();
+    equal(document.getElementById('f_price').value,'150','existing price was not loaded');
+    equal(window._editingRecordId,r.id,'reload action did not preserve the existing job id');
   });
   test('locked invalid identifiers cannot inject code through recovery buttons', function(){
     const r=savedJobFixture(); r.id="A00091');window.__jobUnsafe=true;//"; jobSession(r);
@@ -1219,6 +1239,627 @@
     equal(window.__fetchCalls.length, 0, 'ยิง request ไป origin ที่ CSP บล็อกอยู่ดี');
     equal(domFingerprint(), before, 'DOM ของเดิมเปลี่ยนไป');
     equal(document.getElementById('pwsNav'), null, 'สร้างปุ่มทั้งที่ mount ไม่ได้');
+  });
+
+
+  // ===== PD Modify save integrity (pd-save-integrity-2026-11-06) · synthetic data only =====
+  function pdJob(){
+    return {id:'A00091',customer:'Synthetic job',brand:'Brand One',createdBy:'Sales One',salesOwner:'Sales One',
+      createdAt:1000,notes:'before',conceptStr:'c',totW:15,totA:15,heroes:[],fda:{notApproved:[],overLimit:[],unknown:[],allOk:true},allConcepts:[],allBenefits:[],allSP:[],benefits:[],cons:[],
+      rows:[{num:1,name:'Aqua',w:10,o:'',p:100,actual:10,note:'',hero:false,fda:checkFDA('Aqua',10)},
+            {num:2,name:'Glycerin',w:5,o:'',p:100,actual:5,note:'',hero:false,fda:checkFDA('Glycerin',5)}]};
+  }
+  function pdSession(r){
+    reset();
+    authSession={access_token:'synthetic-pd-token',user:{id:'synthetic-pd'}};
+    authMembership={name:'PD One',role:'pd',active:true};
+    currentUser='PD One'; userList=[{name:'PD One',role:'pd',pass:null}];
+    records=[r]; chats=[]; activities=[]; recCounter=91; modifyRec=null; window._lastDash=null;
+    sbSnap={records:{[r.id]:JSON.stringify(r)},chats:{},users:{},acts:{},counter:91};
+    sbReady=false; sbBusy=false;
+    if(typeof saveQReset==='function') saveQReset();
+  }
+  function pdDone(){ clearTimeout(sbPushTimer); sbReady=false; if(typeof saveQReset==='function') saveQReset(); modifyRec=null; window._lastDash=null; }
+  function pullBody(list){
+    return [window.__mockResponse(200,list.map(x=>({id:x.id,data:x}))),window.__mockResponse(200,[]),
+      window.__mockResponse(200,[]),window.__mockResponse(200,[{key:'reccounter',value:91}]),window.__mockResponse(200,[])];
+  }
+  function clone(x){ return JSON.parse(JSON.stringify(x)); }
+
+  test('PD Modify: an edit after a background sync is applied onto the fresh server copy, not a stale object', function(){
+    const r=pdJob(); pdSession(r);
+    try{
+      openModifyRecord(r.id);
+      // another user edits a non-formula field; sync replaces the unchanged cache object
+      const remote=clone(r); remote.brand='Brand Changed By Sales'; remote.rows[1].name='Glycerin Remote';
+      sbApply({records:[remote],chats:[],users:[],acts:[],counter:91});
+      assert(records[0]!==r,'fixture: sync did not replace the cached object');
+      modifyIngs[0].name='Aqua PD Edit'; editIng(0,'name','Aqua PD Edit');
+      equal(records.length,1);
+      equal(records[0].rows[0].name,'Aqua PD Edit','PD edit missing');
+      equal(records[0].brand,'Brand Changed By Sales','stale object clobbered the newer server field');
+      equal(records[0].rows[1].name,'Glycerin Remote','stale object clobbered another row from the server');
+      equal(modifyRec,records[0],'modifyRec is still an orphan');
+    }finally{ pdDone(); }
+  });
+  test('PD Modify: note save and add/remove row also act on the fresh copy', function(){
+    const r=pdJob(); pdSession(r);
+    const oldConfirm=window.confirm; window.confirm=function(){ return true; };
+    try{
+      openModifyRecord(r.id);
+      const remote=clone(r); remote.brand='Brand Changed By Sales';
+      sbApply({records:[remote],chats:[],users:[],acts:[],counter:91});
+      document.getElementById('modNote').value='note from PD';
+      saveModNote();
+      equal(records[0].brand,'Brand Changed By Sales','saveModNote clobbered newer field');
+      equal(records[0].modNote.text,'note from PD');
+      const remote2=clone(records[0]); remote2.customer='Customer Changed';
+      sbSnap.records[r.id]=JSON.stringify(records[0]);
+      sbApply({records:[remote2],chats:[],users:[],acts:[],counter:91});
+      addModifyIng();
+      equal(records[0].customer,'Customer Changed','addModifyIng clobbered newer field');
+      equal(records[0].rows.length,3);
+      delModifyIng(2);
+      equal(records[0].customer,'Customer Changed','delModifyIng clobbered newer field');
+      equal(records[0].rows.length,2);
+    }finally{ window.confirm=oldConfirm; pdDone(); }
+  });
+  test('saveRecordsStore reports a localStorage quota failure instead of swallowing it', function(){
+    reset(); records=[pdJob()];
+    const proto=Object.getPrototypeOf(localStorage), real=proto.setItem;
+    proto.setItem=function(k,v){ if(k==='fs_records'){ const e=new Error('quota'); e.name='QuotaExceededError'; throw e; } return real.call(this,k,v); };
+    try{
+      equal(saveRecordsStore(),false,'quota failure was reported as success');
+      assert(lastStoreError,'no error recorded for the UI');
+    }finally{ proto.setItem=real; }
+    equal(saveRecordsStore(),true,'normal write not reported as success');
+    equal(lastStoreError,'','error not cleared after a good write');
+  });
+  test('a cycle requested while another is running is re-run, not dropped', async function(){
+    const r=pdJob(); pdSession(r); sbReady=true;
+    try{
+      let release; const gate=new Promise(res=>{ release=res; });
+      window.__fetchQueue.push(function(){ return gate.then(()=>window.__mockResponse(200,[])); });
+      for(let i=0;i<4;i++) window.__fetchQueue.push(window.__mockResponse(200,[]));
+      const first=sbCycle();
+      await Promise.resolve();
+      const before=window.__fetchCalls.length;
+      const second=sbCycle();          // arrives while the first is still running
+      release();
+      await first; await second;
+      assert(window.__fetchCalls.length>=before+5,'the requested cycle was dropped (only '+(window.__fetchCalls.length-before)+' extra calls)');
+    }finally{ pdDone(); }
+  });
+  test('sbApply flags a record changed by someone else while a local save is pending (no silent overwrite)', function(){
+    const r=pdJob(); pdSession(r);
+    try{
+      openModifyRecord(r.id);
+      modifyIngs[0].name='Local Pending'; editIng(0,'name','Local Pending');   // local edit, not yet on server
+      const remote=clone(JSON.parse(sbSnap.records[r.id])); remote.brand='Changed By Sales';
+      sbApply({records:[remote],chats:[],users:[],acts:[],counter:91});
+      assert(sbConflicts && sbConflicts[r.id],'no warning raised for a concurrent server change');
+      equal(records[0].rows[0].name,'Local Pending','local edit was dropped');
+    }finally{ pdDone(); }
+  });
+  test('characterization: verified/edited stamps live only in modifyIngs and reset when the job is reopened', function(){
+    const r=pdJob(); pdSession(r);
+    try{
+      openModifyRecord(r.id);
+      verifyIng(0);
+      assert(modifyIngs[0].verifiedBy==='PD One','stamp not set');
+      assert(!JSON.stringify(records[0]).includes('verifiedBy'),'stamp unexpectedly persisted in the record');
+      openModifyRecord(r.id);
+      equal(modifyIngs[0].verifiedBy,'','stamp survived reopen (behavior changed)');
+    }finally{ pdDone(); }
+  });
+
+
+  const PD_KEYS=['rows','rdUpdated','modNote','lastActivityAt','conceptStr','form','size','sizeUnit','uw','uwUnit','cat','subcat',
+    'color','scent','flavor','packType','widthCm','lengthCm','finalTarget','gender','price','priority','fdaType','allBenefits','cons','notes','benefits'];
+  const sleep=ms=>new Promise(res=>setTimeout(res,ms));
+  async function untilIdle(){ for(let i=0;i<300 && saveQPending().length;i++) await sleep(10); }
+  function echoPush(call){
+    const body=JSON.parse(call.options.body);
+    return window.__mockResponse(200,body.map(x=>({id:x.id,data:x.data})));
+  }
+  // routes by URL so extra calls (activities push, workspace mount) cannot shift the response order
+  function queueRouter(gate, guardMap){
+    const route=function(call){
+      const u=call.url.split('/rest/v1/')[1]||'', m=call.options.method||'GET';
+      if(m==='POST' && u.startsWith('fs_records')){
+        if(guardMap){   // mirrors supabase/schema.sql fs_guard_record_json for role pd
+          const row=JSON.parse(call.options.body)[0], old=guardMap[row.id];
+          if(old){
+            const bad=Object.keys(Object.assign({},row.data,old)).filter(k=>!PD_KEYS.includes(k) && JSON.stringify(row.data[k])!==JSON.stringify(old[k]));
+            if(bad.length) return window.__mockResponse(403,{code:'42501',message:'record mutation exceeds role permission: '+bad.join(',')});
+          }
+          guardMap[row.id]=clone(row.data);
+        }
+        const go=()=>echoPush(call);
+        return gate?gate.then(go):go();
+      }
+      if(m==='GET' && u.startsWith('fs_records')) return window.__mockResponse(200,records.map(x=>({id:x.id,data:clone(guardMap&&guardMap[x.id]||x)})));
+      if(m==='GET' && u.startsWith('fs_meta')) return window.__mockResponse(200,[{key:'reccounter',value:91}]);
+      return window.__mockResponse(200,[]);
+    };
+    for(let i=0;i<40;i++) window.__fetchQueue.push(route);
+  }
+  function queueGoodCycle(){ queueRouter(null); }
+  function panelText(){ const el=document.getElementById('saveQPanel'); return el&&el.style.display!=='none'?el.textContent:''; }
+
+  test('PD save goes queued -> sending 50% -> server-confirmed 100%, and only PD-writable keys differ from the server copy', async function(){
+    const r=pdJob(); pdSession(r); sbReady=true;
+    try{
+      openModifyRecord(r.id);
+      const serverCopy=clone(r);
+      queueGoodCycle();
+      modifyIngs[0].w='20.00'; editIng(0,'w','20.00');   // changes the weight total shown on the Dashboard
+      const it=saveQMine()[0];
+      equal(it.state,'sending','state right after the local write'); equal(it.pct,50);
+      assert(panelText().includes('กำลังบันทึก'),'progress popup missing');
+      await untilIdle();
+      equal(it.state,'confirmed',it.error); equal(it.pct,100);
+      assert(panelText().includes('บันทึกสำเร็จ'),'final success text missing: '+panelText());
+      const sent=JSON.parse(window.__fetchCalls[0].options.body)[0].data;
+      equal(sent.totW,15,'derived total was written into the PD payload'); equal(sent.rows[0].w,20);
+      Object.keys(Object.assign({},sent,serverCopy)).forEach(k=>{
+        if(JSON.stringify(sent[k])!==JSON.stringify(serverCopy[k])) assert(PD_KEYS.includes(k),'PD payload changes key the server guard rejects: '+k);
+      });
+    }finally{ pdDone(); }
+  });
+  test('server rejection leaves the save failed with a retry button; local copy is kept; retry then confirms', async function(){
+    const r=pdJob(); pdSession(r); sbReady=true;
+    const oldConfirm=window.confirm; let asked=0; window.confirm=function(){ asked++; return false; };
+    try{
+      openModifyRecord(r.id);
+      window.__fetchQueue.push(window.__mockResponse(403,{code:'42501',message:'record mutation exceeds role permission'}));
+      editIng(0,'name','Aqua Rejected');
+      await untilIdle().catch(()=>{});
+      for(let i=0;i<300 && saveQMine()[0].state==='sending';i++) await sleep(10);
+      const it=saveQMine()[0];
+      equal(it.state,'failed'); assert(it.error.length>0,'no reason shown');
+      assert(panelText().includes('บันทึกไม่สำเร็จ - ลองใหม่'),'failure text missing');
+      assert(document.querySelector('#saveQPanel button[onclick^="saveQRetry"]'),'retry button missing');
+      assert(JSON.parse(localStorage.getItem('fs_records'))[0].rows[0].name==='Aqua Rejected','local copy not kept');
+      const viewBefore=((document.querySelector('.view.on')||{}).id||'');
+      // failed saves ask before leaving (never trap) and stay on the page when declined
+      switchView('dash');
+      equal(asked,1,'no confirmation when leaving with a failed save');
+      equal(((document.querySelector('.view.on')||{}).id||''),viewBefore,'left the page although declined');
+      sbErr='';
+      queueGoodCycle();
+      saveQRetry(it.seq);
+      await untilIdle();
+      equal(saveQMine()[0].state,'confirmed','retry did not confirm');
+    }finally{ window.confirm=oldConfirm; pdDone(); }
+  });
+  test('navigation and unload are blocked while a save is unconfirmed, then released', async function(){
+    const r=pdJob(); pdSession(r); sbReady=true;
+    const oldAlert=window.alert; let alerts=0; window.alert=function(){ alerts++; };
+    try{
+      openModifyRecord(r.id);
+      let release; const gate=new Promise(res=>{ release=res; });
+      queueRouter(gate);
+      editIng(0,'name','Aqua Slow');
+      equal(saveQMine()[0].state,'sending');
+      const viewBefore=((document.querySelector('.view.on')||{}).id||'');
+      switchView('dash'); assert(alerts>=1,'no warning while sending');
+      equal(((document.querySelector('.view.on')||{}).id||''),viewBefore,'view switched during an unconfirmed save');
+      backToModifyList(); assert(modifyRec,'back button left the job during an unconfirmed save');
+      const ev=new Event('beforeunload',{cancelable:true}); window.dispatchEvent(ev);
+      assert(ev.defaultPrevented,'beforeunload not blocked');
+      release(); await untilIdle();
+      const ev2=new Event('beforeunload',{cancelable:true}); window.dispatchEvent(ev2);
+      assert(!ev2.defaultPrevented,'beforeunload still blocked after confirmation');
+      backToModifyList(); equal(modifyRec,null,'back button still blocked after confirmation');
+    }finally{ window.alert=oldAlert; pdDone(); }
+  });
+  test('queue shows this user\'s pending jobs with their position', async function(){
+    const a=pdJob(), b=pdJob(); b.id='A00092'; pdSession(a); records=[a,b]; sbReady=true;
+    try{
+      let release; const gate=new Promise(res=>{ release=res; });
+      queueRouter(gate);
+      saveQTrack('A00091','แก้สูตร',true); saveQTrack('A00092','แก้สูตร',true);
+      const t=panelText();
+      assert(t.includes('คิวที่ 1/2') && t.includes('คิวที่ 2/2'),'queue positions missing: '+t);
+      assert(t.includes('A00091') && t.includes('A00092'));
+      release(); await untilIdle();
+    }finally{ pdDone(); }
+  });
+  test('local-only mode confirms as soon as the local write succeeds; a quota failure is a visible failure with retry', async function(){
+    const r=pdJob(); pdSession(r); SB_URL='';
+    const proto=Object.getPrototypeOf(localStorage), real=proto.setItem;
+    try{
+      openModifyRecord(r.id);
+      editIng(0,'name','Aqua Local');
+      await sleep(20);
+      equal(saveQMine()[0].state,'confirmed'); assert(saveQMine()[0].localOnly);
+      proto.setItem=function(k,v){ if(k==='fs_records'){ const e=new Error('quota'); e.name='QuotaExceededError'; throw e; } return real.call(this,k,v); };
+      editIng(1,'name','Glycerin Local');
+      await sleep(20);
+      const it=saveQMine()[0];
+      equal(it.state,'failed','quota failure did not fail the save'); assert(it.error.includes('ไม่สำเร็จ'));
+      equal(records[0].rows[1].name,'Glycerin Local','in-memory edit lost');
+      proto.setItem=real;
+      saveQRetry(it.seq);
+      await sleep(20);
+      equal(saveQMine()[0].state,'confirmed','retry after freeing space did not succeed');
+      equal(JSON.parse(localStorage.getItem('fs_records'))[0].rows[1].name,'Glycerin Local');
+    }finally{ proto.setItem=real; pdDone(); }
+  });
+  test('a pull that changes the server copy during a pending save shows a warning in the popup and the Modify page', function(){
+    const r=pdJob(); pdSession(r); SB_URL='https://test-project.supabase.co';
+    try{
+      openModifyRecord(r.id);
+      saveQTrack(r.id,'แก้สูตร',true); // pending (sync not ready -> waiting)
+      modifyIngs[0].name='Pending Local'; editIng(0,'name','Pending Local');
+      const remote=clone(JSON.parse(sbSnap.records[r.id])); remote.customer='Other User Edit';
+      sbApply({records:[remote],chats:[],users:[],acts:[],counter:91});
+      assert(panelText().includes('ถูกแก้ไขบนเซิร์ฟเวอร์โดยผู้อื่น'),'popup shows no conflict warning');
+      renderModify();
+      assert(document.getElementById('modContent').textContent.includes('ถูกแก้ไขบนเซิร์ฟเวอร์โดยผู้อื่น'),'Modify page shows no conflict warning');
+    }finally{ pdDone(); }
+  });
+  test('a remote-only change refreshes the Modify table and keeps stamps of unchanged rows', function(){
+    const r=pdJob(); pdSession(r);
+    try{
+      openModifyRecord(r.id); verifyIng(0);
+      sbSnap.records[r.id]=JSON.stringify(records[0]);   // cache identical to server: sync swaps in the new object
+      const remote=clone(records[0]); remote.rows[1].name='Glycerin Remote';
+      sbApply({records:[remote],chats:[],users:[],acts:[],counter:91});
+      equal(modifyIngs[1].name,'Glycerin Remote','table not refreshed from the fresh copy');
+      equal(modifyIngs[0].verifiedBy,'PD One','stamp of an unchanged row was lost');
+      assert(modifyNotice.includes('อัปเดตจากเซิร์ฟเวอร์'),'no notice shown');
+    }finally{ pdDone(); }
+  });
+  test('a storage event reload also rebinds the Modify record', function(){
+    const r=pdJob(); pdSession(r);
+    try{
+      openModifyRecord(r.id);
+      const other=clone(r); other.brand='From Other Tab';
+      localStorage.setItem('fs_records',JSON.stringify([other]));
+      window.dispatchEvent(Object.assign(new Event('storage'),{key:'fs_records'}));
+      equal(modifyRec,records[0],'modifyRec orphaned after a storage reload');
+      equal(modifyRec.brand,'From Other Tab');
+    }finally{ pdDone(); }
+  });
+
+
+  test('B1: view/print between two PD edits does not push derived fields the server guard rejects', async function(){
+    const r=pdJob(); pdSession(r); sbReady=true;
+    const server={[r.id]:clone(r)};
+    try{
+      openModifyRecord(r.id);
+      queueRouter(null,server);
+      editIng(0,'w','20.00'); await untilIdle();
+      equal(saveQMine()[0].state,'confirmed','first edit: '+saveQMine()[0].error);
+      renderDashboard(records[0]);                       // view / print rewrites totW etc. on the record
+      assert(records[0].totW!==15,'fixture: render did not diverge derived fields');
+      window.__fetchQueue.length=0; queueRouter(null,server);
+      editIng(0,'w','30.00'); await untilIdle();
+      equal(saveQMine()[0].state,'confirmed','second edit after a view was rejected: '+saveQMine()[0].error);
+      equal(server[r.id].rows[0].w,30);
+      equal(server[r.id].totW,15,'derived field leaked to the server');
+    }finally{ pdDone(); }
+  });
+  test('B1: a record whose derived fields already diverged still saves for PD', async function(){
+    const r=pdJob(); pdSession(r); sbReady=true;
+    const server={[r.id]:clone(r)};
+    try{
+      records[0].totW=99; records[0].heroes=[{name:'x'}]; records[0].fda={allOk:false};
+      sbSnap.records[r.id]=JSON.stringify(server[r.id]);
+      openModifyRecord(r.id);
+      queueRouter(null,server);
+      editIng(0,'name','Aqua Diverged'); await untilIdle();
+      equal(saveQMine()[0].state,'confirmed',saveQMine()[0].error);
+      equal(server[r.id].rows[0].name,'Aqua Diverged'); equal(server[r.id].totW,15);
+    }finally{ pdDone(); }
+  });
+  test('B2: a hung request fails the save after the timeout, keeps local data, and lets the user leave', async function(){
+    const r=pdJob(); pdSession(r); sbReady=true;
+    const oldTimeout=sbReqTimeoutMs, oldConfirm=window.confirm; let asked=0; window.confirm=function(){ asked++; return true; };
+    sbReqTimeoutMs=60;
+    try{
+      openModifyRecord(r.id);
+      for(let i=0;i<10;i++) window.__fetchQueue.push(function(){ return new Promise(function(){}); });
+      editIng(0,'name','Aqua Hung');
+      equal(saveQMine()[0].state,'sending');
+      for(let i=0;i<100 && saveQMine()[0].state==='sending';i++) await sleep(20);
+      const it=saveQMine()[0];
+      equal(it.state,'failed','hung request left the save in sending'); assert(it.error.includes('หมดเวลา'),it.error);
+      equal(JSON.parse(localStorage.getItem('fs_records'))[0].rows[0].name,'Aqua Hung','local copy lost');
+      assert(panelText().includes('บันทึกไม่สำเร็จ'),'failure popup hidden');
+      backToModifyList(); equal(asked,1,'no escape confirmation'); equal(modifyRec,null,'could not leave after the timeout');
+    }finally{ sbReqTimeoutMs=oldTimeout; window.confirm=oldConfirm; pdDone(); }
+  });
+  test('N1/N4/N7: failure un-hides the panel; saveModNote needs editFormula; logout is guarded and clears the queue', async function(){
+    const r=pdJob(); pdSession(r); SB_URL='';
+    try{
+      openModifyRecord(r.id);
+      const it=saveQTrack(r.id,'x',true); await sleep(20); saveQHide(); equal(saveQMine().length,0);
+      const it2=saveQTrack(r.id,'y',false); await sleep(20);        // local write "failed" -> rewrite succeeds actually
+      saveQ.push({seq:99,jobId:r.id,label:'z',user:currentUser,state:'sending',pct:50,error:'',localOk:true});
+      saveQHidden=true; saveQSet(saveQ[saveQ.length-1],'failed',50,'boom');
+      assert(panelText().includes('boom'),'failed item did not un-hide the panel');
+      // N7: logout with an in-flight save is blocked; with a failed one it asks first
+      const oldConfirm=window.confirm, oldAlert=window.alert; let asked=0; window.confirm=function(){ asked++; return false; }; window.alert=function(){};
+      try{ await logoutUser(); equal(currentUser,'PD One','logout ignored the unconfirmed save'); equal(asked,1); }
+      finally{ window.confirm=oldConfirm; window.alert=oldAlert; }
+      window.confirm=function(){ return true; };
+      try{ await logoutUser(); }finally{ window.confirm=oldConfirm; }
+      equal(saveQ.length,0,'queue not cleared on logout'); equal(Object.keys(sbConflicts).length,0);
+      // N4
+      userList=[{name:'Sales One',role:'sales',pass:null}]; currentUser='Sales One'; authMembership={name:'Sales One',role:'sales',active:true};
+      modifyRec=records[0]; const oldAlert2=window.alert; window.alert=function(){};
+      try{ document.getElementById('modNote').value='x'; const before=JSON.stringify(records[0]); saveModNote(); equal(JSON.stringify(records[0]),before,'non-PD role saved a modify note'); }
+      finally{ window.alert=oldAlert2; }
+    }finally{ pdDone(); }
+  });
+
+
+  test('R2-B1: a hung token refresh cannot hang the cycle; the unconfirmed work stays visible (N3)', async function(){
+    const r=pdJob(); pdSession(r); sbReady=true;
+    authSession.refresh_token='synthetic-refresh';
+    const old=sbReqTimeoutMs; sbReqTimeoutMs=60;
+    try{
+      openModifyRecord(r.id);
+      window.__fetchQueue.push(window.__mockResponse(401,'expired'));
+      for(let i=0;i<10;i++) window.__fetchQueue.push(function(){ return new Promise(function(){}); });
+      editIng(0,'name','Aqua Refresh Hang');
+      for(let i=0;i<100 && sbCycleRunning;i++) await sleep(20);
+      assert(!sbCycleRunning,'sbCycle stayed running behind a hung refresh request');
+      equal(JSON.parse(localStorage.getItem('fs_records'))[0].rows[0].name,'Aqua Refresh Hang','local copy lost');
+      const note=document.getElementById('saveQLostNotice');
+      assert(note && note.textContent.includes('ยังไม่ยืนยันการบันทึก'),'no visible message that unconfirmed work remains');
+    }finally{ sbReqTimeoutMs=old; pdDone(); }
+  });
+  test('R2-B1: a hung workspace mount cannot hold the cycle open', async function(){
+    const r=pdJob(); pdSession(r); sbReady=true;
+    const old=sbReqTimeoutMs, realMount=window.mountPrivateWorkspace; sbReqTimeoutMs=60;
+    try{
+      window.mountPrivateWorkspace=function(){ return new Promise(function(){}); };
+      openModifyRecord(r.id);
+      queueRouter(null,{[r.id]:clone(r)});
+      editIng(0,'name','Aqua Mount Hang');
+      for(let i=0;i<100 && saveQPending().length;i++) await sleep(20);
+      assert(!sbCycleRunning,'sbCycle stayed running behind a hung workspace fetch');
+      equal(saveQMine()[0].state,'confirmed',saveQMine()[0].error);
+    }finally{ window.mountPrivateWorkspace=realMount; sbReqTimeoutMs=old; pdDone(); }
+  });
+  test('R2-B1: an overall per-save deadline fails a save even if the cycle never returns; a later cycle can start', async function(){
+    const r=pdJob(); pdSession(r); sbReady=true;
+    const oldReq=sbReqTimeoutMs, oldDl=SAVEQ_DEADLINE_MS, oldMax=sbCycleMaxMs; sbReqTimeoutMs=100000; SAVEQ_DEADLINE_MS=80;
+    try{
+      openModifyRecord(r.id);
+      for(let i=0;i<10;i++) window.__fetchQueue.push(function(){ return new Promise(function(){}); });
+      editIng(0,'name','Aqua Deadline');
+      for(let i=0;i<100 && saveQMine()[0].state==='sending';i++) await sleep(20);
+      const it=saveQMine()[0];
+      equal(it.state,'failed'); assert(it.error.includes('หมดเวลา'),it.error);
+      sbCycleMaxMs=30; await sleep(60); window.__fetchQueue.length=0; queueRouter(null,{[r.id]:clone(r)});
+      sbReqTimeoutMs=oldReq; sbErr='';
+      saveQRetry(it.seq);
+      for(let i=0;i<100 && saveQPending().length;i++) await sleep(20);
+      equal(saveQMine()[0].state,'confirmed','a stuck cycle blocked every later cycle: '+saveQMine()[0].error);
+    }finally{ sbReqTimeoutMs=oldReq; SAVEQ_DEADLINE_MS=oldDl; sbCycleMaxMs=oldMax; pdDone(); }
+  });
+  test('R2-B2: another user changes a non-PD field; the PD save refreshes its base, retries once and is confirmed', async function(){
+    const r=pdJob(); pdSession(r); sbReady=true;
+    const server={[r.id]:clone(r)};
+    try{
+      server[r.id].brand='Brand Changed By Sales'; server[r.id].customer='Customer Changed';   // snapshot still has the old values
+      openModifyRecord(r.id);
+      queueRouter(null,server);
+      editIng(0,'name','Aqua PD Rows Edit');
+      await untilIdle();
+      equal(saveQMine()[0].state,'confirmed',saveQMine()[0].error);
+      equal(server[r.id].rows[0].name,'Aqua PD Rows Edit','PD rows edit lost');
+      equal(server[r.id].brand,'Brand Changed By Sales','other user change overwritten');
+      equal(records[0].brand,'Brand Changed By Sales');
+      const posts=window.__fetchCalls.filter(c=>c.options.method==='POST' && c.url.includes('fs_records'));
+      equal(posts.length,2,'expected exactly one retry');
+    }finally{ pdDone(); }
+  });
+  test('R2-N2: normalised row comparison does not report a false server update', function(){
+    const r=pdJob(); r.rows[0].w=10.5; r.rows[0].actual=10.5; pdSession(r);
+    try{
+      openModifyRecord(r.id);
+      modifyIngs[0].w='10.5'; modifyIngs[0].actual='10.50'; modifyIngs[0].p='100.0';
+      equal(modifyIngsDiffer(records[0]),false,'formatting differences counted as a server change');
+      modifyIngs[0].w='11';
+      equal(modifyIngsDiffer(records[0]),true,'a real difference was missed');
+    }finally{ pdDone(); }
+  });
+  test('R2-N4: retry all with no permission shows one alert, not one per item', async function(){
+    const a=pdJob(), b=pdJob(); b.id='A00092'; pdSession(a); records=[a,b];
+    const oldAlert=window.alert; let alerts=0; window.alert=function(){ alerts++; };
+    try{
+      saveQ.push({seq:1,jobId:'A00091',label:'x',user:currentUser,state:'failed',pct:50,error:'e',localOk:true},
+                 {seq:2,jobId:'A00092',label:'y',user:currentUser,state:'failed',pct:50,error:'e',localOk:true});
+      authMembership={name:'PD One',role:'rd',active:true};           // a role without editFormula
+      saveQRetryAll();
+      equal(alerts,1,'one alert per item');
+    }finally{ window.alert=oldAlert; pdDone(); }
+  });
+
+  // ===== Chat formula edit uses the same save protections as PD Modify =====
+  function chatPdSession(r){
+    pdSession(r);
+    chats=[{jobId:r.id,createdAt:1,createdBy:'Sales One',messages:[],parts:[],approvals:{pd:null,ra:null,rd:null}}];
+    sbConfirmedScope=jobConfirmationScope(); sbConfirmedRecords={[r.id]:jobRecordFingerprint(sbPdComparable(r))};
+  }
+  test('Chat formula edit: edit after a background sync lands on the fresh copy (not a stale object)', function(){
+    const r=pdJob(); chatPdSession(r);
+    const oldConfirm=window.confirm;
+    try{
+      window.confirm=function(){            // sync replaces records[] while the confirm dialog is open
+        const remote=clone(r); remote.brand='Brand Changed By Sales'; remote.rows[1].name='Glycerin Remote';
+        sbApply({records:[remote],chats:[],users:[],acts:[],counter:91});
+        return true;
+      };
+      chatIngDel(r.id,0);
+      equal(records.length,1);
+      equal(records[0].brand,'Brand Changed By Sales','stale object clobbered the newer server field');
+      equal(records[0].rows.length,1,'row not removed');
+      equal(records[0].rows[0].name,'Glycerin Remote','stale object clobbered a server row');
+    }finally{ window.confirm=oldConfirm; pdDone(); }
+  });
+  test('Chat formula edit: PD payload is accepted by the guard mirror, derived fields are not written, queue goes to confirmed', async function(){
+    const r=pdJob(); chatPdSession(r); sbReady=true;
+    const server={[r.id]:clone(r)};
+    try{
+      queueRouter(null,server);
+      chatIngEdit(r.id,0,'w','20');
+      const it=saveQMine()[0];
+      assert(it,'edit was not tracked by the save queue');
+      equal(it.jobId,r.id); equal(it.state,'sending','state right after the local write'); equal(it.pct,50);
+      assert(panelText().includes('กำลังบันทึก'),'progress popup missing');
+      assert(chats[0].messages.some(m=>m.text&&m.text.includes('แก้สูตร')),'chat log message missing');
+      const oa=window.alert; let alerted=0; window.alert=function(){ alerted++; };
+      const navOk=saveQNavOK(); window.alert=oa;
+      equal(navOk,false,'navigation was not guarded while the save is pending'); equal(alerted,1);
+      await untilIdle();
+      equal(it.state,'confirmed',it.error); equal(it.pct,100);
+      equal(server[r.id].rows[0].w,20,'edit did not reach the server');
+      equal(server[r.id].totW,15,'derived field leaked to the server');
+      equal(records[0].totW,15,'derived field written into the record');
+    }finally{ pdDone(); }
+  });
+  test('Chat formula edit: add/delete are tracked; a hung request fails the item with retry and keeps the local copy', async function(){
+    const r=pdJob(); chatPdSession(r); sbReady=true;
+    const oldTimeout=sbReqTimeoutMs, oldConfirm=window.confirm; window.confirm=function(){ return true; };
+    const server={[r.id]:clone(r)};
+    try{
+      queueRouter(null,server);
+      chatIngAdd(r.id); await untilIdle();
+      equal(saveQMine()[0].state,'confirmed',saveQMine()[0].error);
+      equal(server[r.id].rows.length,3);
+      window.__fetchQueue.length=0; queueRouter(null,server);
+      chatIngDel(r.id,2); await untilIdle();
+      equal(saveQMine()[0].state,'confirmed',saveQMine()[0].error);
+      equal(server[r.id].rows.length,2);
+      window.__fetchQueue.length=0;
+      sbReqTimeoutMs=60;
+      for(let i=0;i<10;i++) window.__fetchQueue.push(function(){ return new Promise(function(){}); });
+      chatIngEdit(r.id,0,'name','Aqua Hung');
+      for(let i=0;i<100 && saveQMine()[0].state==='sending';i++) await sleep(20);
+      equal(saveQMine()[0].state,'failed','hung request left the chat save in sending');
+      assert(document.querySelector('#saveQPanel button[onclick^="saveQRetry"]'),'retry button missing');
+      equal(JSON.parse(localStorage.getItem('fs_records'))[0].rows[0].name,'Aqua Hung','local copy lost');
+    }finally{ sbReqTimeoutMs=oldTimeout; window.confirm=oldConfirm; pdDone(); }
+  });
+  test('Chat formula edit: still requires editFormula', function(){
+    const r=pdJob(); chatPdSession(r);
+    const oldAlert=window.alert; window.alert=function(){};
+    try{
+      authMembership={name:'PD One',role:'rd',active:true};
+      chatIngEdit(r.id,0,'name','Nope'); chatIngAdd(r.id);
+      equal(records[0].rows[0].name,'Aqua'); equal(records[0].rows.length,2); equal(saveQMine().length,0);
+    }finally{ window.alert=oldAlert; pdDone(); }
+  });
+
+  // ----- review follow-ups: row identity, derived fields by role, approvals, no-op, local-only -----
+  function mountChatEditor(r){
+    const host=document.createElement('div'); host.id='tmpChatEd'; host.innerHTML='<table>'+chatFormulaEditorHTML(r)+'</table>';
+    document.body.appendChild(host); return host;
+  }
+    test('Chat formula edit: rows shift between render and onchange -> nothing is edited and the user is told', function(){
+    const r=pdJob(); chatPdSession(r);
+    const oldAlert=window.alert; const msgs=[]; window.alert=function(m){ msgs.push(String(m)); };
+    const host=mountChatEditor(r);
+    try{
+      const remote=clone(r); remote.rows.reverse();                  // server now has Glycerin first
+      sbApply({records:[remote],chats:[],users:[],acts:[],counter:91});
+      const inp=host.querySelectorAll('tbody tr')[0].querySelectorAll('input')[0];   // rendered for "Aqua" row 1
+      // inline handlers are not compiled in the harness page, so call what the handler calls: identity captured at render
+      const rk=inp.closest('tr').dataset.rk;
+      chatIngEdit(r.id,0,'name','Aqua Renamed',rk);
+      equal(records[0].rows[0].name,'Glycerin','wrong row was edited');
+      equal(records[0].rows[1].name,'Aqua','row content changed');
+      equal(saveQMine().length,0,'a save was queued for an aborted edit');
+      assert(msgs.length>=1,'no visible notice');
+    }finally{ window.alert=oldAlert; host.remove(); pdDone(); }
+  });
+  test('Chat formula delete: rows shift while the confirm dialog is open -> the wrong row is not deleted', function(){
+    const r=pdJob(); chatPdSession(r);
+    const oldAlert=window.alert, oldConfirm=window.confirm; const msgs=[]; window.alert=function(m){ msgs.push(String(m)); };
+    try{
+      window.confirm=function(){ const remote=clone(r); remote.rows.reverse(); sbApply({records:[remote],chats:[],users:[],acts:[],counter:91}); return true; };
+      chatIngDel(r.id,0);                                             // user confirmed deleting "Aqua"
+      equal(records[0].rows.length,2,'a row was deleted although the confirmed row moved');
+      equal(records[0].rows[0].name,'Glycerin'); equal(saveQMine().length,0);
+      assert(msgs.length>=1,'no visible notice');
+    }finally{ window.alert=oldAlert; window.confirm=oldConfirm; pdDone(); }
+  });
+  test('Chat formula edit as Admin refreshes derived totals; as PD it keeps them', function(){
+    const r=pdJob(); chatPdSession(r);
+    try{
+      authMembership={name:'Admin One',role:'admin',active:true}; currentUser='Admin One'; userList=[{name:'Admin One',role:'admin',pass:null}];
+      sbConfirmedScope=jobConfirmationScope(); sbConfirmedRecords={[r.id]:jobRecordFingerprint(sbPdComparable(records[0]))};
+      chatIngEdit(r.id,0,'w','20');
+      equal(records[0].rows[0].w,20); equal(records[0].totW,25,'admin chat edit did not refresh totW');
+    }finally{ pdDone(); }
+  });
+  test('PD Modify edit as Admin refreshes derived totals', function(){
+    const r=pdJob(); pdSession(r);
+    try{
+      authMembership={name:'Admin One',role:'admin',active:true}; currentUser='Admin One'; userList=[{name:'Admin One',role:'admin',pass:null}];
+      openModifyRecord(r.id); editIng(0,'w','20.00');
+      equal(records[0].totW,25,'admin Modify edit did not refresh totW');
+    }finally{ pdDone(); }
+  });
+  test('Chat formula edit: a real edit clears approvals; without editFormula approvals and chat are untouched', function(){
+    const r=pdJob(); chatPdSession(r);
+    try{
+      chats[0].approvals={pd:{by:'x',at:1},ra:{by:'y',at:2},rd:null};
+      const oldAlert=window.alert; window.alert=function(){};
+      authMembership={name:'PD One',role:'rd',active:true};
+      chatIngEdit(r.id,0,'w','20');
+      equal(records[0].rows[0].w,10,'rd edited the formula');
+      assert(chats[0].approvals.pd && chats[0].approvals.ra,'approvals touched without permission');
+      equal(chats[0].messages.length,0,'chat message pushed without permission');
+      window.alert=oldAlert;
+      authMembership={name:'PD One',role:'pd',active:true};
+      chatIngEdit(r.id,0,'w','20');
+      equal(records[0].rows[0].w,20);
+      assert(!chats[0].approvals.pd && !chats[0].approvals.ra && !chats[0].approvals.rd,'approvals not cleared by a real edit');
+      equal(chats[0].messages.length,1);
+    }finally{ pdDone(); }
+  });
+  test('Chat formula edit: a no-op neither re-renders the chat nor creates rows', function(){
+    const r=pdJob(); chatPdSession(r);
+    const real=renderChat; let n=0; renderChat=function(){ n++; return real.apply(this,arguments); };
+    try{
+      chatIngEdit(r.id,0,'w','10');                                   // same value
+      equal(n,0,'no-op re-rendered the chat (drops an unsent draft)'); equal(saveQMine().length,0);
+      delete records[0].rows;
+      chatSaveFormula(r.id,function(){ return false; },'x');
+      equal(n,0); assert(records[0].rows===undefined,'rows were created by a no-op');
+    }finally{ renderChat=real; pdDone(); }
+  });
+  test('Chat formula edit in local-only mode: chat is gated, but chatSaveFormula itself confirms locally', async function(){
+    const r=pdJob(); chatPdSession(r); const oldUrl=SB_URL; SB_URL='';
+    const oldAlert=window.alert; window.alert=function(){};
+    try{
+      chatIngEdit(r.id,0,'w','20');
+      equal(records[0].rows[0].w,10,'chat edit went through without a server');
+      chatSaveFormula(r.id,function(x){ x.rows[0].w=20; return {log:'local edit'}; },'แก้สูตรในแชท');
+      await sleep(20);
+      equal(records[0].rows[0].w,20); equal(saveQMine()[0].state,'confirmed'); assert(saveQMine()[0].localOnly);
+    }finally{ SB_URL=oldUrl; window.alert=oldAlert; pdDone(); }
+  });
+
+  test('Locked chat view explains a pending or failed formula save', function(){
+    const r=pdJob(); chatPdSession(r);
+    saveQ.push({seq:901,jobId:r.id,user:currentUser,label:'<b>x</b>',state:'sending',pct:50});
+    let html=jobLockedHTML(r);
+    assert(html.includes('กำลังบันทึกสูตร') && html.includes('50%'),'pending note missing');
+    saveQ[saveQ.length-1].state='failed';
+    html=jobLockedHTML(r);
+    assert(html.includes('บันทึกสูตรไม่สำเร็จ') && html.includes('PD Modify'),'failed note missing');
+    saveQ.length=0;
+    assert(!jobLockedHTML(r).includes('job-lock-note'),'note shown with nothing pending');
+    pdDone();
   });
 
   async function run(){

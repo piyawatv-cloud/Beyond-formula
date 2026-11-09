@@ -1,0 +1,186 @@
+# Formula Studio runtime — สองสี + ตัวรับหน้า
+#
+# ต้องรันด้วย -p เสมอ:
+#     docker compose -p formularuntime     -f docker-compose.formula.yml --env-file runtime/stack.env      ...
+#
+# ลืมใส่ -p ครั้งเดียว เคยเกือบไปรีสตาร์ตคอนเทนเนอร์ของ production มาแล้ว
+# ทุกคอนเทนเนอร์ติดป้าย com.beyond.formula-runtime.* เพื่อให้สคริปต์เก็บกวาดของ OPC
+# (ซึ่งดูป้าย com.beyond.opc-workflow.*) แยกออกว่าอันไหนไม่ใช่ของมัน
+#
+# สีน้ำเงินกับสีเขียวใช้ runtime/auth เดียวกัน; backend และ standby ตั้งแยกรายสีได้
+# ค่าเริ่มต้นยังใช้ SB_* ชุดเดิมทั้งคู่; standby ไม่ใช่สีที่พร้อมรับ traffic
+# สิ่งที่ต่างกันตามสี:
+#   ชื่อคอนเทนเนอร์ · FORMULA_COLOR · พอร์ตฝั่งโฮสต์ · ชื่อ service ที่ edge ชี้หา
+# ถ้าเผลอให้ต่างกันมากกว่านี้ ด่าน verify-formula-parity.sh จะจับได้ — แต่ควรไม่ต้องให้มันจับ
+
+services:
+  runtime-blue:
+    image: node:22-alpine
+    container_name: ${FORMULA_PREFIX}-runtime-blue
+    command: ["node", "/proxy/formula-proxy.mjs"]
+    restart: unless-stopped
+    labels:
+      com.beyond.formula-runtime.managed: "true"
+      com.beyond.formula-runtime.role: "proxy"
+      com.beyond.formula-runtime.color: "blue"
+      com.beyond.formula-runtime.stack: "${FORMULA_PREFIX}"
+    environment:
+      PORT: "3000"
+      FORMULA_COLOR: "blue"
+      FORMULA_STACK: "${FORMULA_PREFIX}"
+      FORMULA_RELEASE_DIR: "/release"
+      FORMULA_ASSET_DIR: "/assets"
+      FORMULA_LOG_DIR: "/logs"
+      FORMULA_JOB_INTAKE_DIR: "/intake"
+      FORMULA_PUBLIC_ORIGIN: "${FORMULA_PUBLIC_ORIGIN}"
+      FORMULA_BACKEND: "${FORMULA_BLUE_BACKEND:-local}"
+      FORMULA_TRAFFIC_MODE: "${FORMULA_BLUE_TRAFFIC_MODE:-}"
+      SB_ORIGIN: "${FORMULA_BLUE_SB_ORIGIN:-${SB_ORIGIN}}"
+      SB_REST_BASE: "${FORMULA_BLUE_SB_REST_BASE:-${SB_REST_BASE}}"
+      SB_UPSTREAM_AUTH: "${FORMULA_BLUE_SB_UPSTREAM_AUTH:-${SB_UPSTREAM_AUTH}}"
+      SB_ANON_KEY: "${FORMULA_BLUE_SB_ANON_KEY-${SB_ANON_KEY}}"
+      SB_SERVICE_KEY: "${FORMULA_BLUE_SB_SERVICE_KEY-${SB_SERVICE_KEY}}"
+      FORMULA_SESSION_SECRET: "${FORMULA_SESSION_SECRET}"
+      FORMULA_PROBE_TOKEN: "${FORMULA_PROBE_TOKEN}"
+      # ล็อกอินส่งต่อไปให้ OPC Workflow ตัดสิน ผ่าน edge ของ OPC บนเครื่องเดียวกัน
+      # ไม่ออกอินเตอร์เน็ตแล้ววนกลับ และหัวข้อ Host ต้องตรงเพราะ OPC แยกงานตามโดเมน
+      OPC_LOGIN_ORIGIN: "${OPC_LOGIN_ORIGIN}"
+      OPC_LOGIN_HOST: "${OPC_LOGIN_HOST}"
+      IAM_CONSUMER_ORIGIN: "${IAM_CONSUMER_ORIGIN}"
+      IAM_CONSUMER_SHARED_SECRET: "${IAM_CONSUMER_SHARED_SECRET}"
+      IAM_CONSUMER_NAME: "${IAM_CONSUMER_NAME:-FORMULA_RUNTIME}"
+      IAM_ACCESS_CLIENT_ID: "${IAM_ACCESS_CLIENT_ID}"
+      IAM_ACCESS_CLIENT_SECRET: "${IAM_ACCESS_CLIENT_SECRET}"
+      FORMULA_ACCESS_SSO_ENABLED: "${FORMULA_ACCESS_SSO_ENABLED:-false}"
+      # ปิดการบังคับสิทธิ์ผ่าน IAM ชั่วคราว (ค่าปกติคือ true — บังคับ)
+      FORMULA_IAM_ENFORCE: "${FORMULA_IAM_ENFORCE:-true}"
+      # ประตูสร้างโปรไฟล์ของ OPC (1 ต.ค. 2569) · ค่าว่าง = ปิด · ค่าอยู่ใน runtime/formula.env ห้ามใส่ใน stack.test.env
+      FORMULA_PROVISIONING_SECRET: "${FORMULA_PROVISIONING_SECRET:-}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./runtime/formula-proxy.mjs:/proxy/formula-proxy.mjs:ro
+      - ./runtime/job-intake.mjs:/proxy/job-intake.mjs:ro
+      - ${FORMULA_STATE_ROOT}/job-intake/${FORMULA_PREFIX}:/intake
+      - ./runtime/assets:/assets:ro
+      - ./releases:/release:ro
+      - ${FORMULA_STATE_ROOT}/monitoring:/logs
+    networks:
+      - default
+      - data
+    ports:
+      - "127.0.0.1:${FORMULA_BLUE_PORT}:3000"
+    healthcheck:
+      # Liveness: valid standby is running without data access; do not restart it.
+      # Traffic readiness is stricter: edge/switch require ok + servingEligible.
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/__formula/health | grep -Eq '\"status\":\"(ok|standby)\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  runtime-green:
+    image: node:22-alpine
+    container_name: ${FORMULA_PREFIX}-runtime-green
+    command: ["node", "/proxy/formula-proxy.mjs"]
+    restart: unless-stopped
+    labels:
+      com.beyond.formula-runtime.managed: "true"
+      com.beyond.formula-runtime.role: "proxy"
+      com.beyond.formula-runtime.color: "green"
+      com.beyond.formula-runtime.stack: "${FORMULA_PREFIX}"
+    environment:
+      PORT: "3000"
+      FORMULA_COLOR: "green"
+      FORMULA_STACK: "${FORMULA_PREFIX}"
+      FORMULA_RELEASE_DIR: "/release"
+      FORMULA_ASSET_DIR: "/assets"
+      FORMULA_LOG_DIR: "/logs"
+      FORMULA_JOB_INTAKE_DIR: "/intake"
+      FORMULA_PUBLIC_ORIGIN: "${FORMULA_PUBLIC_ORIGIN}"
+      FORMULA_BACKEND: "${FORMULA_GREEN_BACKEND:-local}"
+      FORMULA_TRAFFIC_MODE: "${FORMULA_GREEN_TRAFFIC_MODE:-}"
+      SB_ORIGIN: "${FORMULA_GREEN_SB_ORIGIN:-${SB_ORIGIN}}"
+      SB_REST_BASE: "${FORMULA_GREEN_SB_REST_BASE:-${SB_REST_BASE}}"
+      SB_UPSTREAM_AUTH: "${FORMULA_GREEN_SB_UPSTREAM_AUTH:-${SB_UPSTREAM_AUTH}}"
+      SB_ANON_KEY: "${FORMULA_GREEN_SB_ANON_KEY-${SB_ANON_KEY}}"
+      SB_SERVICE_KEY: "${FORMULA_GREEN_SB_SERVICE_KEY-${SB_SERVICE_KEY}}"
+      FORMULA_SESSION_SECRET: "${FORMULA_SESSION_SECRET}"
+      FORMULA_PROBE_TOKEN: "${FORMULA_PROBE_TOKEN}"
+      # ล็อกอินส่งต่อไปให้ OPC Workflow ตัดสิน ผ่าน edge ของ OPC บนเครื่องเดียวกัน
+      # ไม่ออกอินเตอร์เน็ตแล้ววนกลับ และหัวข้อ Host ต้องตรงเพราะ OPC แยกงานตามโดเมน
+      OPC_LOGIN_ORIGIN: "${OPC_LOGIN_ORIGIN}"
+      OPC_LOGIN_HOST: "${OPC_LOGIN_HOST}"
+      IAM_CONSUMER_ORIGIN: "${IAM_CONSUMER_ORIGIN}"
+      IAM_CONSUMER_SHARED_SECRET: "${IAM_CONSUMER_SHARED_SECRET}"
+      IAM_CONSUMER_NAME: "${IAM_CONSUMER_NAME:-FORMULA_RUNTIME}"
+      IAM_ACCESS_CLIENT_ID: "${IAM_ACCESS_CLIENT_ID}"
+      IAM_ACCESS_CLIENT_SECRET: "${IAM_ACCESS_CLIENT_SECRET}"
+      FORMULA_ACCESS_SSO_ENABLED: "${FORMULA_ACCESS_SSO_ENABLED:-false}"
+      # ปิดการบังคับสิทธิ์ผ่าน IAM ชั่วคราว (ค่าปกติคือ true — บังคับ)
+      FORMULA_IAM_ENFORCE: "${FORMULA_IAM_ENFORCE:-true}"
+      # ประตูสร้างโปรไฟล์ของ OPC (1 ต.ค. 2569) · ค่าว่าง = ปิด · ค่าอยู่ใน runtime/formula.env ห้ามใส่ใน stack.test.env
+      FORMULA_PROVISIONING_SECRET: "${FORMULA_PROVISIONING_SECRET:-}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./runtime/formula-proxy.mjs:/proxy/formula-proxy.mjs:ro
+      - ./runtime/job-intake.mjs:/proxy/job-intake.mjs:ro
+      - ${FORMULA_STATE_ROOT}/job-intake/${FORMULA_PREFIX}:/intake
+      - ./runtime/assets:/assets:ro
+      - ./releases:/release:ro
+      - ${FORMULA_STATE_ROOT}/monitoring:/logs
+    networks:
+      - default
+      - data
+    ports:
+      - "127.0.0.1:${FORMULA_GREEN_PORT}:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/__formula/health | grep -Eq '\"status\":\"(ok|standby)\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  edge:
+    image: node:22-alpine
+    container_name: ${FORMULA_PREFIX}-runtime-edge
+    command: ["node", "/edge/formula-edge.mjs"]
+    restart: unless-stopped
+    labels:
+      com.beyond.formula-runtime.managed: "true"
+      com.beyond.formula-runtime.role: "edge"
+      com.beyond.formula-runtime.stack: "${FORMULA_PREFIX}"
+    environment:
+      PORT: "3025"
+      FORMULA_STATE_DIR: "/state"
+      FORMULA_LOG_DIR: "/logs"
+      FORMULA_BLUE_ORIGIN: "http://${FORMULA_PREFIX}-runtime-blue:3000"
+      FORMULA_GREEN_ORIGIN: "http://${FORMULA_PREFIX}-runtime-green:3000"
+      FORMULA_BLUE_TRAFFIC_MODE: "${FORMULA_BLUE_TRAFFIC_MODE:-}"
+      FORMULA_GREEN_TRAFFIC_MODE: "${FORMULA_GREEN_TRAFFIC_MODE:-}"
+      FORMULA_UNAVAILABLE_PAGE: "/edge/formula-unavailable.html"
+    volumes:
+      - ./runtime/formula-edge.mjs:/edge/formula-edge.mjs:ro
+      - ./runtime/formula-unavailable.html:/edge/formula-unavailable.html:ro
+      - ${FORMULA_STATE_ROOT}/runtime-state/${FORMULA_PREFIX}:/state
+      - ${FORMULA_STATE_ROOT}/monitoring:/logs
+    ports:
+      - "127.0.0.1:${FORMULA_EDGE_PORT}:3025"
+    depends_on:
+      - runtime-blue
+      - runtime-green
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3025/__formula_edge/health | grep -q '\"status\":\"ok\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+networks:
+  default:
+    name: ${FORMULA_PREFIX}-net
+  # ชั้นข้อมูลในเครื่อง ยกขึ้นแยกด้วย docker-compose.data.yml และใช้ร่วมกันทั้งสองสแตก
+  data:
+    name: formula-data
+    external: true
