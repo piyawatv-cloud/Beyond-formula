@@ -1,0 +1,18 @@
+<lint-module
+    format="1"
+    dir="/Users/user/Developer/Beyond-formula-mobile-pr/mobile-preview/native-app/app"
+    name=":app"
+    type="APP"
+    maven="formula-studio-native:app:unspecified"
+    agpVersion="8.7.3"
+    buildFolder="build"
+    bootClassPath="/Users/user/Library/Android/sdk/platforms/android-35/android.jar:/Users/user/Library/Android/sdk/build-tools/34.0.0/core-lambda-stubs.jar"
+    javaSourceLevel="17"
+    compileTarget="android-35">
+  <lintOptions
+      abortOnError="true"
+      absolutePaths="true"
+      checkReleaseBuilds="true"
+      explainIssues="true"/>
+  <variant name="release"/>
+</lint-module>

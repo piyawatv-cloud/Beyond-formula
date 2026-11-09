@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="th.co.beyondlab.formulastudio.domain.WorkflowRulesTest" tests="13" skipped="0" failures="0" errors="0" timestamp="2026-11-01T12:24:33" hostname="USERs-iMac-Pro-3.local" time="0.016">
+  <properties/>
+  <testcase name="rolesMatchWebBaseline" classname="th.co.beyondlab.formulastudio.domain.WorkflowRulesTest" time="0.0"/>
+  <testcase name="salesSeesOnlyOwnJobs" classname="th.co.beyondlab.formulastudio.domain.WorkflowRulesTest" time="0.003"/>
+  <testcase name="onlyPdMktAndAdminEditFormula_briefUntouched" classname="th.co.beyondlab.formulastudio.domain.WorkflowRulesTest" time="0.002"/>
+  <testcase name="badNumbersAreRejectedNotSilentlyZeroed" classname="th.co.beyondlab.formulastudio.domain.WorkflowRulesTest" time="0.001"/>
+  <testcase name="rowMathMatchesWeb" classname="th.co.beyondlab.formulastudio.domain.WorkflowRulesTest" time="0.0"/>
+  <testcase name="editBriefKeepsApprovalsChatAndOwner_andClosedBlocksEdits" classname="th.co.beyondlab.formulastudio.domain.WorkflowRulesTest" time="0.002"/>
+  <testcase name="messageIdMayBeReusedAfterDelete_butRoleChecked" classname="th.co.beyondlab.formulastudio.domain.WorkflowRulesTest" time="0.001"/>
+  <testcase name="deniedActionsAreBlockedInRepositoryNotJustUi" classname="th.co.beyondlab.formulastudio.domain.WorkflowRulesTest" time="0.001"/>
+  <testcase name="conceptStrMatchesWeb" classname="th.co.beyondlab.formulastudio.domain.WorkflowRulesTest" time="0.0"/>
+  <testcase name="mobileApprovesOnlySales_othersAreWebOnly_andRemoteApprovalNotifies" classname="th.co.beyondlab.formulastudio.domain.WorkflowRulesTest" time="0.002"/>
+  <testcase name="createNeedsBrandOrCustomer_likeWeb_andSalesOwnerIsSelf" classname="th.co.beyondlab.formulastudio.domain.WorkflowRulesTest" time="0.001"/>
+  <testcase name="jobNumberNeverReusedAfterDelete" classname="th.co.beyondlab.formulastudio.domain.WorkflowRulesTest" time="0.0"/>
+  <testcase name="overseaSeesOnlyOwnJobs_andMobileApprovesSalesPartOnly" classname="th.co.beyondlab.formulastudio.domain.WorkflowRulesTest" time="0.002"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

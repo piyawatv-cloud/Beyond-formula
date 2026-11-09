@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="th.co.beyondlab.formulastudio.domain.WebParityTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-11-01T12:24:32" hostname="USERs-iMac-Pro-3.local" time="0.562">
+  <properties/>
+  <testcase name="conceptDerivationMatchesWeb" classname="th.co.beyondlab.formulastudio.domain.WebParityTest" time="0.112"/>
+  <testcase name="jsNumberFormats" classname="th.co.beyondlab.formulastudio.domain.WebParityTest" time="0.077"/>
+  <testcase name="checkFdaMatchesWebForEveryRecordedCase" classname="th.co.beyondlab.formulastudio.domain.WebParityTest" time="0.312"/>
+  <testcase name="savedJobCarriesFdaAndDerivedFields" classname="th.co.beyondlab.formulastudio.domain.WebParityTest" time="0.03"/>
+  <testcase name="idbHasWebAutofillEntries" classname="th.co.beyondlab.formulastudio.domain.WebParityTest" time="0.029"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

@@ -1,0 +1,4 @@
+#Sun Nov 01 19:22:13 ICT 2026
+base.0=/Users/user/Developer/Beyond-formula-mobile-pr/mobile-preview/native-app/app/build/intermediates/dex/release/minifyReleaseWithR8/classes.dex
+renamed.0=classes.dex
+path.0=classes.dex

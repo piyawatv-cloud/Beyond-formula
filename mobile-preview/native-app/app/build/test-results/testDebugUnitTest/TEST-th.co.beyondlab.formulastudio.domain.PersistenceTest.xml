@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="th.co.beyondlab.formulastudio.domain.PersistenceTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-11-01T12:24:32" hostname="USERs-iMac-Pro-3.local" time="0.064">
+  <properties/>
+  <testcase name="oldRecordsWithMissingFieldsStillLoad" classname="th.co.beyondlab.formulastudio.domain.PersistenceTest" time="0.028"/>
+  <testcase name="deletingEverythingThenRestartDoesNotReseedOrResetCounter" classname="th.co.beyondlab.formulastudio.domain.PersistenceTest" time="0.017"/>
+  <testcase name="jsonRoundTripKeepsEveryField_andUsesLockedNames" classname="th.co.beyondlab.formulastudio.domain.PersistenceTest" time="0.007"/>
+  <testcase name="messageSequenceContinuesAfterRestart" classname="th.co.beyondlab.formulastudio.domain.PersistenceTest" time="0.01"/>
+  <testcase name="dataSurvivesRestartAndJobNumbersAreNeverReused" classname="th.co.beyondlab.formulastudio.domain.PersistenceTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

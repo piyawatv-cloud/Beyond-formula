@@ -1,0 +1,154 @@
+[
+    {
+        "merged": "th.co.beyondlab.formulastudio.app-release-49:/drawable-hdpi-v4_notification_bg_low_pressed.9.png.flat",
+        "source": "th.co.beyondlab.formulastudio.app-core-1.15.0-4:/drawable-hdpi-v4/notification_bg_low_pressed.9.png"
+    },
+    {
+        "merged": "th.co.beyondlab.formulastudio.app-release-49:/layout_notification_template_part_time.xml.flat",
+        "source": "th.co.beyondlab.formulastudio.app-core-1.15.0-4:/layout/notification_template_part_time.xml"
+    },
+    {
+        "merged": "th.co.beyondlab.formulastudio.app-release-49:/drawable-mdpi-v4_notification_bg_low_normal.9.png.flat",
+        "source": "th.co.beyondlab.formulastudio.app-core-1.15.0-4:/drawable-mdpi-v4/notification_bg_low_normal.9.png"
+    },
+    {
+        "merged": "th.co.beyondlab.formulastudio.app-release-49:/color_vector_tint_color.xml.flat",
+        "source": "th.co.beyondlab.formulastudio.app-ui-release-33:/color/vector_tint_color.xml"
+    },
+    {
+        "merged": "th.co.beyondlab.formulastudio.app-release-49:/drawable-mdpi-v4_notify_panel_notification_icon_bg.png.flat",
+        "source": "th.co.beyondlab.formulastudio.app-core-1.15.0-4:/drawable-mdpi-v4/notify_panel_notification_icon_bg.png"
+    },
+    {
+        "merged": "th.co.beyondlab.formulastudio.app-release-49:/color_vector_tint_theme_color.xml.flat",
+        "source": "th.co.beyondlab.formulastudio.app-ui-release-33:/color/vector_tint_theme_color.xml"
+    },
+    {
+        "merged": "th.co.beyondlab.formulastudio.app-release-49:/drawable-xhdpi-v4_notification_bg_low_normal.9.png.flat",
+        "source": "th.co.beyondlab.formulastudio.app-core-1.15.0-4:/drawable-xhdpi-v4/notification_bg_low_normal.9.png"
+    },
+    {
+        "merged": "th.co.beyondlab.formulastudio.app-release-49:/drawable-mdpi-v4_notification_bg_normal_pressed.9.png.flat",
+        "source": "th.co.beyondlab.formulastudio.app-core-1.15.0-4:/drawable-mdpi-v4/notification_bg_normal_pressed.9.png"
+    },
+    {
+        "merged": "th.co.beyondlab.formulastudio.app-release-49:/drawable-xhdpi-v4_notification_bg_normal_pressed.9.png.flat",
+        "source": "th.co.beyondlab.formulastudio.app-core-1.15.0-4:/drawable-xhdpi-v4/notification_bg_normal_pressed.9.png"
+    },
+    {
+        "merged": "th.co.beyondlab.formulastudio.app-release-49:/drawable-mdpi-v4_notification_bg_normal.9.png.flat",
+        "source": "th.co.beyondlab.formulastudio.app-core-1.15.0-4:/drawable-mdpi-v4/notification_bg_normal.9.png"
+    },
+    {
+        "merged": "th.co.beyondlab.formulastudio.app-release-49:/drawable_ic_call_decline_low.xml.flat",
+        "source": "th.co.beyondlab.formulastudio.app-core-1.15.0-4:/drawable/ic_call_decline_low.xml"
+    },
+    {
+        "merged": "th.co.beyondlab.formulastudio.app-release-49:/drawable-xhdpi-v4_notification_bg_normal.9.png.flat",
+        "source": "th.co.beyondlab.formulastudio.app-core-1.15.0-4:/drawable-xhdpi-v4/notification_bg_normal.9.png"
+    },
+    {
+        "merged": "th.co.beyondlab.formulastudio.app-release-49:/layout-v21_notification_action.xml.flat",
+        "source": "th.co.beyondlab.formulastudio.app-core-1.15.0-4:/layout-v21/notification_action.xml"
+    },
+    {
+        "merged": "th.co.beyondlab.formulastudio.app-release-49:/layout-v21_notification_template_custom_big.xml.flat",
+        "source": "th.co.beyondlab.formulastudio.app-core-1.15.0-4:/layout-v21/notification_template_custom_big.xml"
+    },
+    {
+        "merged": "th.co.beyondlab.formulastudio.app-release-49:/drawable_notification_bg_low.xml.flat",
+        "source": "th.co.beyondlab.formulastudio.app-core-1.15.0-4:/drawable/notification_bg_low.xml"
+    },
+    {
+        "merged": "th.co.beyondlab.formulastudio.app-release-49:/drawable_notification_tile_bg.xml.flat",
+        "source": "th.co.beyondlab.formulastudio.app-core-1.15.0-4:/drawable/notification_tile_bg.xml"
+    },
+    {
+        "merged": "th.co.beyondlab.formulastudio.app-release-49:/drawable-hdpi-v4_notification_oversize_large_icon_bg.png.flat",
+        "source": "th.co.beyondlab.formulastudio.app-core-1.15.0-4:/drawable-hdpi-v4/notification_oversize_large_icon_bg.png"
+    },
+    {
+        "merged": "th.co.beyondlab.formulastudio.app-release-49:/drawable-xhdpi-v4_notification_bg_low_pressed.9.png.flat",
+        "source": "th.co.beyondlab.formulastudio.app-core-1.15.0-4:/drawable-xhdpi-v4/notification_bg_low_pressed.9.png"
+    },
+    {
+        "merged": "th.co.beyondlab.formulastudio.app-release-49:/drawable_ic_call_decline.xml.flat",
+        "source": "th.co.beyondlab.formulastudio.app-core-1.15.0-4:/drawable/ic_call_decline.xml"
+    },
+    {
+        "merged": "th.co.beyondlab.formulastudio.app-release-49:/drawable_ic_call_answer_low.xml.flat",
+        "source": "th.co.beyondlab.formulastudio.app-core-1.15.0-4:/drawable/ic_call_answer_low.xml"
+    },
+    {
+        "merged": "th.co.beyondlab.formulastudio.app-release-49:/layout-v21_notification_action_tombstone.xml.flat",
+        "source": "th.co.beyondlab.formulastudio.app-core-1.15.0-4:/layout-v21/notification_action_tombstone.xml"
+    },
+    {
+        "merged": "th.co.beyondlab.formulastudio.app-release-49:/drawable-mdpi-v4_notification_bg_low_pressed.9.png.flat",
+        "source": "th.co.beyondlab.formulastudio.app-core-1.15.0-4:/drawable-mdpi-v4/notification_bg_low_pressed.9.png"
+    },
+    {
+        "merged": "th.co.beyondlab.formulastudio.app-release-49:/drawable_ic_call_answer_video_low.xml.flat",
+        "source": "th.co.beyondlab.formulastudio.app-core-1.15.0-4:/drawable/ic_call_answer_video_low.xml"
+    },
+    {
+        "merged": "th.co.beyondlab.formulastudio.app-release-49:/layout-v21_notification_template_icon_group.xml.flat",
+        "source": "th.co.beyondlab.formulastudio.app-core-1.15.0-4:/layout-v21/notification_template_icon_group.xml"
+    },
+    {
+        "merged": "th.co.beyondlab.formulastudio.app-release-49:/drawable_notification_icon_background.xml.flat",
+        "source": "th.co.beyondlab.formulastudio.app-core-1.15.0-4:/drawable/notification_icon_background.xml"
+    },
+    {
+        "merged": "th.co.beyondlab.formulastudio.app-release-49:/drawable_ic_call_answer_video.xml.flat",
+        "source": "th.co.beyondlab.formulastudio.app-core-1.15.0-4:/drawable/ic_call_answer_video.xml"
+    },
+    {
+        "merged": "th.co.beyondlab.formulastudio.app-release-49:/drawable_ic_call_answer.xml.flat",
+        "source": "th.co.beyondlab.formulastudio.app-core-1.15.0-4:/drawable/ic_call_answer.xml"
+    },
+    {
+        "merged": "th.co.beyondlab.formulastudio.app-release-49:/drawable-xhdpi-v4_notify_panel_notification_icon_bg.png.flat",
+        "source": "th.co.beyondlab.formulastudio.app-core-1.15.0-4:/drawable-xhdpi-v4/notify_panel_notification_icon_bg.png"
+    },
+    {
+        "merged": "th.co.beyondlab.formulastudio.app-release-49:/drawable-hdpi-v4_notify_panel_notification_icon_bg.png.flat",
+        "source": "th.co.beyondlab.formulastudio.app-core-1.15.0-4:/drawable-hdpi-v4/notify_panel_notification_icon_bg.png"
+    },
+    {
+        "merged": "th.co.beyondlab.formulastudio.app-release-49:/layout_custom_dialog.xml.flat",
+        "source": "th.co.beyondlab.formulastudio.app-core-1.15.0-4:/layout/custom_dialog.xml"
+    },
+    {
+        "merged": "th.co.beyondlab.formulastudio.app-release-49:/drawable-hdpi-v4_notification_bg_normal.9.png.flat",
+        "source": "th.co.beyondlab.formulastudio.app-core-1.15.0-4:/drawable-hdpi-v4/notification_bg_normal.9.png"
+    },
+    {
+        "merged": "th.co.beyondlab.formulastudio.app-release-49:/drawable-v21_notification_action_background.xml.flat",
+        "source": "th.co.beyondlab.formulastudio.app-core-1.15.0-4:/drawable-v21/notification_action_background.xml"
+    },
+    {
+        "merged": "th.co.beyondlab.formulastudio.app-release-49:/layout_ime_base_split_test_activity.xml.flat",
+        "source": "th.co.beyondlab.formulastudio.app-core-1.15.0-4:/layout/ime_base_split_test_activity.xml"
+    },
+    {
+        "merged": "th.co.beyondlab.formulastudio.app-release-49:/layout_notification_template_part_chronometer.xml.flat",
+        "source": "th.co.beyondlab.formulastudio.app-core-1.15.0-4:/layout/notification_template_part_chronometer.xml"
+    },
+    {
+        "merged": "th.co.beyondlab.formulastudio.app-release-49:/drawable_notification_bg.xml.flat",
+        "source": "th.co.beyondlab.formulastudio.app-core-1.15.0-4:/drawable/notification_bg.xml"
+    },
+    {
+        "merged": "th.co.beyondlab.formulastudio.app-release-49:/drawable-hdpi-v4_notification_bg_low_normal.9.png.flat",
+        "source": "th.co.beyondlab.formulastudio.app-core-1.15.0-4:/drawable-hdpi-v4/notification_bg_low_normal.9.png"
+    },
+    {
+        "merged": "th.co.beyondlab.formulastudio.app-release-49:/drawable-hdpi-v4_notification_bg_normal_pressed.9.png.flat",
+        "source": "th.co.beyondlab.formulastudio.app-core-1.15.0-4:/drawable-hdpi-v4/notification_bg_normal_pressed.9.png"
+    },
+    {
+        "merged": "th.co.beyondlab.formulastudio.app-release-49:/layout_ime_secondary_split_test_activity.xml.flat",
+        "source": "th.co.beyondlab.formulastudio.app-core-1.15.0-4:/layout/ime_secondary_split_test_activity.xml"
+    }
+]

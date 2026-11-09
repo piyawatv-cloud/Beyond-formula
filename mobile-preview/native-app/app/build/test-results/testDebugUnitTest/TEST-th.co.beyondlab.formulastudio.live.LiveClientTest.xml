@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="th.co.beyondlab.formulastudio.live.LiveClientTest" tests="10" skipped="0" failures="0" errors="0" timestamp="2026-11-01T12:24:33" hostname="USERs-iMac-Pro-3.local" time="0.037">
+  <properties/>
+  <testcase name="realHttpTransportOverLoopback_sendsCookieAndRange" classname="th.co.beyondlab.formulastudio.live.LiveClientTest" time="0.022"/>
+  <testcase name="unauthenticatedAndForbidden" classname="th.co.beyondlab.formulastudio.live.LiveClientTest" time="0.001"/>
+  <testcase name="oldRecordKeepsItsConceptStr" classname="th.co.beyondlab.formulastudio.live.LiveClientTest" time="0.001"/>
+  <testcase name="readsJobsApprovalsMessages_andIssuesNoWrites" classname="th.co.beyondlab.formulastudio.live.LiveClientTest" time="0.003"/>
+  <testcase name="rememberedSessionResumesWithCookieOnly_noPasswordKept" classname="th.co.beyondlab.formulastudio.live.LiveClientTest" time="0.0"/>
+  <testcase name="forbiddenApprovalsKeepJobListWorking_andIsFlaggedNotShownAsPending" classname="th.co.beyondlab.formulastudio.live.LiveClientTest" time="0.002"/>
+  <testcase name="viewAsRolePreview_filtersOwnOnlyRoles_andMatchesRuntimeRoleList" classname="th.co.beyondlab.formulastudio.live.LiveClientTest" time="0.002"/>
+  <testcase name="mapsBriefFieldsAndToleratesWebShapes_andCountsUnreadableRecords" classname="th.co.beyondlab.formulastudio.live.LiveClientTest" time="0.003"/>
+  <testcase name="allowListRefusesEveryWritePath" classname="th.co.beyondlab.formulastudio.live.LiveClientTest" time="0.001"/>
+  <testcase name="searchMatchesIdBrandCustomerOwner" classname="th.co.beyondlab.formulastudio.live.LiveClientTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>
